@@ -21,9 +21,6 @@ Required Railway variables:
 ASPNETCORE_ENVIRONMENT=Production
 PORT=8080
 ConnectionStrings__DefaultConnection=Host=...;Port=5432;Database=...;Username=...;Password=...;SSL Mode=Require;Trust Server Certificate=true
-Jwt__Issuer=DietTime.Meal.Api
-Jwt__Audience=DietTime.Flutter
-Jwt__Key=<at-least-32-byte-random-secret>
 Storage__ServiceUrl=<S3-compatible endpoint>
 Storage__PublicBaseUrl=<public bucket/CDN base URL>
 Storage__BucketName=<bucket>
@@ -32,6 +29,8 @@ Storage__SecretKey=<secret>
 Storage__Region=auto
 Cors__AllowedOrigins__0=https://your-flutter-web-origin.example
 ```
+
+JWT bearer validation is temporarily disabled in all environments. Requests are authenticated by the temporary development handler with the admin, dietitian, and content-manager roles. Do not treat the deployed API as access-controlled until JWT authentication is restored.
 
 Do not use the checked-in development placeholders as credentials. Secret values belong in Railway variables or .NET user secrets.
 

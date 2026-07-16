@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using Amazon.S3;
@@ -11,10 +10,8 @@ using DietTime.Persistence;
 using FluentValidation;
 using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Serilog;
 
@@ -33,19 +30,10 @@ builder.Services.AddIdentityCore<ApplicationUser>(o => { o.Password.RequiredLeng
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
-if (builder.Environment.IsDevelopment())
-{
-    builder.Services.AddAuthentication(DevelopmentAuthenticationHandler.SchemeName)
-        .AddScheme<AuthenticationSchemeOptions, DevelopmentAuthenticationHandler>(
-            DevelopmentAuthenticationHandler.SchemeName,
-            _ => { });
-}
-else
-{
-    var jwt = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new();
-    if (Encoding.UTF8.GetByteCount(jwt.Key) < 32) throw new InvalidOperationException("Jwt:Key must contain at least 32 UTF-8 bytes.");
-    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer(o => { o.TokenValidationParameters = new() { ValidateIssuer = true, ValidIssuer = jwt.Issuer, ValidateAudience = true, ValidAudience = jwt.Audience, ValidateLifetime = true, ValidateIssuerSigningKey = true, IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.Key)), ClockSkew = TimeSpan.FromSeconds(30) }; });
-}
+builder.Services.AddAuthentication(DevelopmentAuthenticationHandler.SchemeName)
+    .AddScheme<AuthenticationSchemeOptions, DevelopmentAuthenticationHandler>(
+        DevelopmentAuthenticationHandler.SchemeName,
+        _ => { });
 builder.Services.AddAuthorization();
 
 var storage = builder.Configuration.GetSection(StorageOptions.SectionName).Get<StorageOptions>() ?? new();
