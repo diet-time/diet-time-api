@@ -18,15 +18,15 @@ public sealed class MealSelectionService(DietTimeDbContext db) : IMealSelectionS
 
         var requestedOptionIds = request.Selections.Select(x => x.SlotOptionId).ToArray();
         var options = await db.MealPlanSlotOptions.AsNoTracking().Where(o => requestedOptionIds.Contains(o.Id))
-            .Select(o => new { o.Id, o.MealPlanTemplateSlotId, o.MealItemId, o.MealVariantId, o.AdditionalPrice, o.IsAvailable, o.AvailableFrom, o.AvailableUntil, MealStatus = o.MealItem.Status, MealAvailable = o.MealItem.IsAvailable, MealFrom = o.MealItem.AvailableFrom, MealUntil = o.MealItem.AvailableUntil, VariantPrice = o.MealVariant == null ? 0 : o.MealVariant.AdditionalPrice, VariantActive = o.MealVariant == null || o.MealVariant.IsActive }).ToListAsync(ct);
+            .Select(o => new { o.Id, o.MealPlanTemplateSlotId, o.MealItemId, o.AdditionalPrice, o.IsAvailable, o.AvailableFrom, o.AvailableUntil, MealStatus = o.MealItem.Status, MealAvailable = o.MealItem.IsAvailable, MealFrom = o.MealItem.AvailableFrom, MealUntil = o.MealItem.AvailableUntil }).ToListAsync(ct);
         var warnings = new List<string>(); decimal total = 0;
         foreach (var selection in request.Selections)
         {
             var slot = day.Slots.SingleOrDefault(s => s.Id == selection.SlotId); var option = options.SingleOrDefault(o => o.Id == selection.SlotOptionId);
-            if (slot is null || option is null || option.MealPlanTemplateSlotId != slot.Id || option.MealItemId != selection.MealItemId || option.MealVariantId != selection.MealVariantId) return Invalid("A selection does not belong to the requested plan slot.");
-            if (!option.IsAvailable || option.AvailableFrom > now || option.AvailableUntil <= now || !MealAvailability.IsAvailable(option.MealStatus, option.MealAvailable, option.MealFrom, option.MealUntil, now) || !option.VariantActive) return Invalid("A selected meal or variant is unavailable.");
+            if (slot is null || option is null || option.MealPlanTemplateSlotId != slot.Id || option.MealItemId != selection.MealItemId) return Invalid("A selection does not belong to the requested plan slot.");
+            if (!option.IsAvailable || option.AvailableFrom > now || option.AvailableUntil <= now || !MealAvailability.IsAvailable(option.MealStatus, option.MealAvailable, option.MealFrom, option.MealUntil, now)) return Invalid("A selected meal is unavailable.");
             if (slot.SelectionCutoffTime.HasValue && TimeOnly.FromDateTime(now.UtcDateTime) > slot.SelectionCutoffTime) return Invalid("The selection cutoff time has passed.");
-            total += SelectionRules.ResolveAdditionalPrice(option.AdditionalPrice, option.VariantPrice, slot.AllowsPaidUpgrade);
+            total += SelectionRules.ResolveAdditionalPrice(option.AdditionalPrice, slot.AllowsPaidUpgrade);
         }
         foreach (var slot in day.Slots) { var count = request.Selections.Count(s => s.SlotId == slot.Id); if (!SelectionRules.IsCountValid(count, slot.MinimumSelection, slot.MaximumSelection)) return Invalid($"Slot {slot.Id} requires between {slot.MinimumSelection} and {slot.MaximumSelection} selections."); }
         warnings.Add("Allergen-profile validation is not available because the current schema has no customer dietary-profile tables.");
@@ -35,4 +35,3 @@ public sealed class MealSelectionService(DietTimeDbContext db) : IMealSelectionS
 
     private static MealSelectionValidationResponse Invalid(string warning) => new(false, 0, "QAR", [warning]);
 }
-

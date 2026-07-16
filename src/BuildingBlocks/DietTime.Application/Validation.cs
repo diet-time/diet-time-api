@@ -67,7 +67,6 @@ public sealed class UpsertMealRequestValidator : AbstractValidator<UpsertMealReq
         RuleForEach(x => x.Translations).ChildRules(t => { t.RuleFor(x => x.LanguageCode).Must(v => v is "en" or "ar"); t.RuleFor(x => x.Name).NotEmpty().MaximumLength(200); });
         RuleForEach(x => x.Ingredients).ChildRules(i => { i.RuleFor(x => x.IngredientId).NotEmpty(); i.RuleFor(x => x.Quantity).GreaterThanOrEqualTo(0).When(x => x.Quantity.HasValue); i.RuleFor(x => x.DisplayOrder).GreaterThanOrEqualTo(0); });
         RuleForEach(x => x.Allergens).ChildRules(a => { a.RuleFor(x => x.AllergenId).NotEmpty(); a.RuleFor(x => x.Level).Must(v => v is "CONTAINS" or "MAY_CONTAIN" or "TRACES"); });
-        RuleForEach(x => x.Variants).ChildRules(v => { v.RuleFor(x => x.Code).NotEmpty().MaximumLength(50); v.RuleFor(x => x.AdditionalPrice).GreaterThanOrEqualTo(0); });
         RuleForEach(x => x.Prices).ChildRules(p => { p.RuleFor(x => x.Amount).GreaterThanOrEqualTo(0); p.RuleFor(x => x.CurrencyCode).Length(3); p.RuleFor(x => x).Must(v => v.EffectiveUntil is null || v.EffectiveUntil > v.EffectiveFrom); });
         RuleFor(x => x).Must(x => x.AvailableUntil is null || x.AvailableFrom is null || x.AvailableUntil > x.AvailableFrom).WithMessage("availableUntil must be after availableFrom.");
     }

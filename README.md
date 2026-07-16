@@ -111,7 +111,7 @@ PostgreSQL integration tests use Testcontainers and are opt-in because Docker is
 ## Known schema limitations
 
 - No customer subscription, delivery-date, preference, health-record, or allergen-profile tables were supplied. Validation is stateless and returns an allergen-profile warning; it does not persist a subscription.
-- A future subscription schema needs subscription header/status, customer/plan/price references, service dates, daily selections, selected variants, snapshotted prices/currency, cutoff/audit timestamps, and uniqueness/idempotency constraints.
+- A future subscription schema needs subscription header/status, customer/plan/price references, service dates, daily selections, snapshotted prices/currency, cutoff/audit timestamps, and uniqueness/idempotency constraints.
 - There is no plan-media table, so plan categories temporarily use a primary meal image.
 - Admin MFA is ready through Identity token providers and `two_factor_enabled`, but enrollment/challenge endpoints are not included.
 - Micronutrients beyond the nutrition columns in the supplied schema cannot be returned until a micronutrient table or JSON contract is added.

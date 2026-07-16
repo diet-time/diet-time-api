@@ -34,7 +34,7 @@ public static class TemplateCalendar
 public static class SelectionRules
 {
     public static bool IsCountValid(int count, int minimum, int maximum) => count >= minimum && count <= maximum;
-    public static decimal ResolveAdditionalPrice(decimal slotPrice, decimal variantPrice, bool allowsPaidUpgrade) => allowsPaidUpgrade ? slotPrice + variantPrice : 0;
+    public static decimal ResolveAdditionalPrice(decimal slotPrice, bool allowsPaidUpgrade) => allowsPaidUpgrade ? slotPrice : 0;
 }
 
 public sealed class LanguageResolver : ILanguageResolver
@@ -51,4 +51,3 @@ public sealed class LanguageResolver : ILanguageResolver
 }
 
 public sealed class UnsupportedLanguageException(string language) : Exception($"Unsupported language '{language}'. Supported values are 'en' and 'ar'.");
-

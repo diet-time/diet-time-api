@@ -26,15 +26,14 @@ public sealed record MediaResponse(Guid Id, string ImageUrl, string? ThumbnailUr
 public sealed record IngredientResponse(Guid Id, string Name, decimal? Quantity, string? Unit, bool IsOptional, bool CanBeRemoved);
 public sealed record AllergenResponse(Guid Id, string Code, string Name, string Level);
 public sealed record TagResponse(Guid Id, string Code, string Name);
-public sealed record VariantResponse(Guid Id, string Code, string Name, decimal AdditionalPrice, string CurrencyCode);
 public sealed record MoneyResponse(decimal Amount, string CurrencyCode);
-public sealed record MealDetailsResponse(Guid Id, string Sku, string Name, string? ShortDescription, string? FullDescription, CategoryResponse Category, string? PrimaryImageUrl, IReadOnlyList<MediaResponse> GalleryImages, NutritionResponse? Nutrition, IReadOnlyList<IngredientResponse> Ingredients, IReadOnlyList<AllergenResponse> Allergens, IReadOnlyList<TagResponse> Tags, IReadOnlyList<VariantResponse> Variants, MoneyResponse? IndividualPrice, int? PreparationTimeMinutes, bool IsVegetarian, bool IsVegan, bool IsGlutenFree, bool IsDairyFree, bool IsAvailable);
+public sealed record MealDetailsResponse(Guid Id, string Sku, string Name, string? ShortDescription, string? FullDescription, CategoryResponse Category, string? PrimaryImageUrl, IReadOnlyList<MediaResponse> GalleryImages, NutritionResponse? Nutrition, IReadOnlyList<IngredientResponse> Ingredients, IReadOnlyList<AllergenResponse> Allergens, IReadOnlyList<TagResponse> Tags, MoneyResponse? IndividualPrice, int? PreparationTimeMinutes, bool IsVegetarian, bool IsVegan, bool IsGlutenFree, bool IsDairyFree, bool IsAvailable);
 
 public sealed record MealListQuery(DateOnly? Date, Guid? TemplateDayId, string? MealType, Guid? CategoryId, string? Tag, string? Search, int Page = 1, int PageSize = 20);
 public sealed record MealSearchQuery(string? Search, Guid? CategoryId, string? MealType, string? Tag, bool? IsVegetarian, bool? IsVegan, bool? IsGlutenFree, decimal? MinimumProtein, decimal? MaximumCalories, int Page = 1, int PageSize = 20);
 
 public sealed record MealSelectionRequest(Guid PlanId, Guid TemplateDayId, IReadOnlyList<MealSelectionItemRequest> Selections);
-public sealed record MealSelectionItemRequest(Guid SlotId, Guid SlotOptionId, Guid MealItemId, Guid? MealVariantId);
+public sealed record MealSelectionItemRequest(Guid SlotId, Guid SlotOptionId, Guid MealItemId);
 public sealed record MealSelectionValidationResponse(bool IsValid, decimal TotalAdditionalPrice, string CurrencyCode, IReadOnlyList<string> Warnings);
 
 public sealed record UploadUrlRequest(string FileName, string ContentType, string EntityType, Guid EntityId);
@@ -106,14 +105,13 @@ public sealed record AdminTranslationRequest(
 public sealed record AdminNutritionRequest(decimal? ServingQuantity, string? ServingUnit, decimal? CaloriesKcal, decimal? ProteinGrams, decimal? CarbohydratesGrams, decimal? FatGrams, decimal? SaturatedFatGrams, decimal? TransFatGrams, decimal? FiberGrams, decimal? SugarGrams, decimal? SodiumMg, decimal? CholesterolMg);
 public sealed record AdminIngredientLinkRequest(Guid IngredientId, decimal? Quantity, string? Unit, bool IsOptional, bool CanBeRemoved, bool CanBeReplaced, bool IsPrimaryIngredient, int DisplayOrder);
 public sealed record AdminAllergenLinkRequest(Guid AllergenId, string Level);
-public sealed record AdminVariantRequest(string Code, decimal AdditionalPrice, decimal CaloriesDifference, decimal ProteinDifferenceGrams, decimal CarbohydratesDifferenceGrams, decimal FatDifferenceGrams, bool IsDefault, bool IsActive, int DisplayOrder, IReadOnlyList<AdminTranslationRequest> Translations);
 public sealed record AdminPriceRequest(string PriceType, string CurrencyCode, decimal Amount, DateTimeOffset EffectiveFrom, DateTimeOffset? EffectiveUntil, bool IsActive);
-public sealed record UpsertMealRequest(string Sku, Guid CategoryId, int? PreparationTimeMinutes, bool IsVegetarian, bool IsVegan, bool IsGlutenFree, bool IsDairyFree, bool IsAvailable, DateTimeOffset? AvailableFrom, DateTimeOffset? AvailableUntil, IReadOnlyList<AdminTranslationRequest> Translations, AdminNutritionRequest? Nutrition, IReadOnlyList<AdminIngredientLinkRequest>? Ingredients = null, IReadOnlyList<AdminAllergenLinkRequest>? Allergens = null, IReadOnlyList<Guid>? TagIds = null, IReadOnlyList<AdminVariantRequest>? Variants = null, IReadOnlyList<AdminPriceRequest>? Prices = null, string? Status = null, bool? IsSpicy = null, short? SpiceLevel = null);
+public sealed record UpsertMealRequest(string Sku, Guid CategoryId, int? PreparationTimeMinutes, bool IsVegetarian, bool IsVegan, bool IsGlutenFree, bool IsDairyFree, bool IsAvailable, DateTimeOffset? AvailableFrom, DateTimeOffset? AvailableUntil, IReadOnlyList<AdminTranslationRequest> Translations, AdminNutritionRequest? Nutrition, IReadOnlyList<AdminIngredientLinkRequest>? Ingredients = null, IReadOnlyList<AdminAllergenLinkRequest>? Allergens = null, IReadOnlyList<Guid>? TagIds = null, IReadOnlyList<AdminPriceRequest>? Prices = null, string? Status = null, bool? IsSpicy = null, short? SpiceLevel = null);
 public sealed record SaveMediaRequest(string ObjectKey, string? ThumbnailObjectKey, string? PublicUrl, string? ThumbnailUrl, string ContentType, bool IsPrimary, int DisplayOrder);
 public sealed record CreatePlanRequest(string Code, string PlanType, int DurationDays, bool IsCustomizable, DateOnly? ValidFrom, DateOnly? ValidUntil, IReadOnlyList<AdminTranslationRequest> Translations);
 public sealed record CreatePlanDayRequest(int DayNumber, short? DayOfWeek, string EnglishLabel, string? ArabicLabel);
 public sealed record CreatePlanSlotRequest(Guid MealTypeId, int DisplayOrder, int MinimumSelection, int MaximumSelection, bool IsRequired, TimeOnly? SelectionCutoffTime, bool AllowsPaidUpgrade);
-public sealed record CreateSlotOptionRequest(Guid MealItemId, Guid? MealVariantId, decimal AdditionalPrice, bool IsDefault, bool IsAvailable, int DisplayOrder);
+public sealed record CreateSlotOptionRequest(Guid MealItemId, decimal AdditionalPrice, bool IsDefault, bool IsAvailable, int DisplayOrder);
 public sealed record RegisterRequest(string Email, string Password);
 public sealed record LoginRequest(string Email, string Password);
 public sealed record RefreshRequest(string RefreshToken);
