@@ -485,7 +485,39 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock) :
     }
 
     public async Task<bool> SetMealStatusAsync(Guid mealId, string status, Guid? userId, CancellationToken ct) { if (status is not ("DRAFT" or "ACTIVE" or "INACTIVE" or "ARCHIVED")) throw new ArgumentException("Invalid meal status."); var meal = await db.MealItems.SingleOrDefaultAsync(x => x.Id == mealId, ct); if (meal is null) return false; meal.Status = status; meal.UpdatedBy = userId; meal.UpdatedAt = clock.GetUtcNow(); meal.RowVersion++; await db.SaveChangesAsync(ct); return true; }
-    public async Task<Guid?> AddMediaAsync(Guid mealId, SaveMediaRequest request, Guid? userId, CancellationToken ct) { if (!await db.MealItems.AnyAsync(x => x.Id == mealId, ct)) return null; if (request.IsPrimary) await db.MealMedia.Where(x => x.MealItemId == mealId && x.IsPrimary).ExecuteUpdateAsync(s => s.SetProperty(x => x.IsPrimary, false), ct); var now = clock.GetUtcNow(); var media = new MealMedia { MealItemId = mealId, ObjectKey = request.ObjectKey, ThumbnailObjectKey = request.ThumbnailObjectKey, PublicUrl = request.PublicUrl, ThumbnailUrl = request.ThumbnailUrl, MimeType = request.ContentType, IsPrimary = request.IsPrimary, DisplayOrder = request.DisplayOrder, Status = "ACTIVE", StorageProvider = "S3", CreatedAt = now, UpdatedAt = now, CreatedBy = userId }; db.Add(media); await db.SaveChangesAsync(ct); return media.Id; }
+    public async Task<AdminMediaResponse?> AddMediaAsync(Guid mealId, SaveMediaRequest request, Guid? userId, CancellationToken ct)
+    {
+        if (!await db.MealItems.AnyAsync(x => x.Id == mealId, ct)) return null;
+
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        if (request.IsPrimary)
+            await db.MealMedia.Where(x => x.MealItemId == mealId && x.IsPrimary)
+                .ExecuteUpdateAsync(s => s.SetProperty(x => x.IsPrimary, false), ct);
+
+        var now = clock.GetUtcNow();
+        var media = new MealMedia
+        {
+            MealItemId = mealId,
+            MediaType = request.MediaType,
+            ObjectKey = request.ObjectKey,
+            PublicUrl = request.PublicUrl,
+            MimeType = request.ContentType,
+            IsPrimary = request.IsPrimary,
+            DisplayOrder = request.DisplayOrder,
+            Status = "ACTIVE",
+            StorageProvider = "S3",
+            CreatedAt = now,
+            UpdatedAt = now,
+            CreatedBy = userId
+        };
+        if (!string.IsNullOrWhiteSpace(request.AltTextEn))
+            media.Translations.Add(new() { LanguageCode = "en", AltText = request.AltTextEn.Trim(), CreatedAt = now, UpdatedAt = now });
+
+        db.Add(media);
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return new(media.Id, mealId, media.MediaType, media.ObjectKey, media.PublicUrl, request.ContentType, media.IsPrimary, media.DisplayOrder, media.Status, request.AltTextEn?.Trim());
+    }
     public async Task<bool> DeleteMediaAsync(Guid mealId, Guid mediaId, CancellationToken ct) => await db.MealMedia.Where(x => x.Id == mediaId && x.MealItemId == mealId).ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, "DELETED").SetProperty(x => x.IsPrimary, false), ct) > 0;
 
     public async Task<Guid> CreatePlanAsync(CreatePlanRequest request, Guid? userId, CancellationToken ct) { var now = clock.GetUtcNow(); var p = new MealPlanTemplate { Code = request.Code, PlanType = request.PlanType, DurationDays = request.DurationDays, IsCustomizable = request.IsCustomizable, IsActive = true, IsPublished = false, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 }; foreach (var t in request.Translations) p.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now }); db.Add(p); await db.SaveChangesAsync(ct); return p.Id; }

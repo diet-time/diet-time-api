@@ -34,8 +34,6 @@ public sealed record MealSelectionRequest(Guid PlanId, Guid TemplateDayId, IRead
 public sealed record MealSelectionItemRequest(Guid SlotId, Guid SlotOptionId, Guid MealItemId);
 public sealed record MealSelectionValidationResponse(bool IsValid, decimal TotalAdditionalPrice, string CurrencyCode, IReadOnlyList<string> Warnings);
 
-public sealed record UploadUrlRequest(string FileName, string ContentType, string EntityType, Guid EntityId);
-public sealed record UploadUrlResponse(string UploadUrl, string ObjectKey, DateTimeOffset ExpiresAt);
 public sealed record ChangeMealStatusRequest(string Status);
 public sealed record AdminMealSummaryResponse(Guid Id, string Sku, string Status, bool IsAvailable, string Name, DateTimeOffset UpdatedAt);
 public sealed record AdminMealResponse(Guid Id, string Status, UpsertMealRequest Meal);
@@ -104,7 +102,8 @@ public sealed record AdminIngredientLinkRequest(Guid IngredientId, decimal? Quan
 public sealed record AdminAllergenLinkRequest(Guid AllergenId, string Level);
 public sealed record AdminPriceRequest(string PriceType, string CurrencyCode, decimal Amount, DateTimeOffset EffectiveFrom, DateTimeOffset? EffectiveUntil, bool IsActive);
 public sealed record UpsertMealRequest(string Sku, Guid CategoryId, int? PreparationTimeMinutes, bool IsVegetarian, bool IsVegan, bool IsGlutenFree, bool IsDairyFree, bool IsAvailable, DateTimeOffset? AvailableFrom, DateTimeOffset? AvailableUntil, IReadOnlyList<AdminTranslationRequest> Translations, AdminNutritionRequest? Nutrition, IReadOnlyList<AdminIngredientLinkRequest>? Ingredients = null, IReadOnlyList<AdminAllergenLinkRequest>? Allergens = null, IReadOnlyList<AdminPriceRequest>? Prices = null, string? Status = null, bool? IsSpicy = null, short? SpiceLevel = null);
-public sealed record SaveMediaRequest(string ObjectKey, string? ThumbnailObjectKey, string? PublicUrl, string? ThumbnailUrl, string ContentType, bool IsPrimary, int DisplayOrder);
+public sealed record SaveMediaRequest(string ObjectKey, string? PublicUrl, string ContentType, string MediaType, bool IsPrimary, int DisplayOrder, string? AltTextEn);
+public sealed record AdminMediaResponse(Guid Id, Guid MealItemId, string MediaType, string ObjectKey, string? PublicUrl, string ContentType, bool IsPrimary, int DisplayOrder, string Status, string? AltTextEn);
 public sealed record CreatePlanRequest(string Code, string PlanType, int DurationDays, bool IsCustomizable, DateOnly? ValidFrom, DateOnly? ValidUntil, IReadOnlyList<AdminTranslationRequest> Translations);
 public sealed record CreatePlanDayRequest(int DayNumber, short? DayOfWeek, string EnglishLabel, string? ArabicLabel);
 public sealed record CreatePlanSlotRequest(Guid MealTypeId, int DisplayOrder, int MinimumSelection, int MaximumSelection, bool IsRequired, TimeOnly? SelectionCutoffTime, bool AllowsPaidUpgrade);

@@ -10,7 +10,7 @@
 - `DietTime.Application`: use-case interfaces, validation, localization, availability, calendar, selection, and pricing rules.
 - `DietTime.Domain`: meal and plan entities matching the supplied schema.
 - `DietTime.Persistence`: one `DietTimeDbContext`, Fluent mappings, projected queries, transactional admin writes, development seed, and identity migration.
-- `DietTime.Infrastructure`: JWT/refresh-token issuance and S3-compatible URL/presigned-upload integration.
+- `DietTime.Infrastructure`: JWT/refresh-token issuance and server-side S3-compatible object storage integration.
 - `DietTime.Contracts`: request, response, envelope, pagination, and error contracts.
 
 ## Configuration
@@ -22,7 +22,7 @@ ASPNETCORE_ENVIRONMENT=Production
 PORT=8080
 ConnectionStrings__DefaultConnection=Host=...;Port=5432;Database=...;Username=...;Password=...;SSL Mode=Require;Trust Server Certificate=true
 Storage__PublicBaseUrl=<public bucket/CDN base URL>
-Storage__UploadExpiryMinutes=10
+Storage__MaxUploadSizeBytes=10485760
 AWS_ENDPOINT_URL=<S3-compatible endpoint>
 AWS_S3_BUCKET_NAME=<bucket>
 AWS_ACCESS_KEY_ID=<secret>
@@ -62,7 +62,7 @@ POST /api/v1/auth/login
 POST /api/v1/auth/refresh
 ```
 
-Admin endpoints from the brief are under `/api/v1/admin` and require `Admin`, `Dietitian`, or `ContentManager`. Media uses `POST /api/v1/admin/media/upload-url`, followed by metadata creation on the meal.
+Admin endpoints from the brief are under `/api/v1/admin` and require `Admin`, `Dietitian`, or `ContentManager`. Meal images are uploaded as multipart form data to `POST /api/v1/admin/meals/{mealId}/media/upload`; storage credentials and object URLs remain server-side.
 
 Swagger is available outside Production at `/swagger`; liveness/database health is `/health`.
 

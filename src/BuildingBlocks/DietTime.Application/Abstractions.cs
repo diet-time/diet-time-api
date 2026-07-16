@@ -37,7 +37,7 @@ public interface IAdminMealService
     Task<Guid> CreateMealAsync(UpsertMealRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<bool> UpdateMealAsync(Guid mealId, UpsertMealRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<bool> SetMealStatusAsync(Guid mealId, string status, Guid? userId, CancellationToken cancellationToken);
-    Task<Guid?> AddMediaAsync(Guid mealId, SaveMediaRequest request, Guid? userId, CancellationToken cancellationToken);
+    Task<AdminMediaResponse?> AddMediaAsync(Guid mealId, SaveMediaRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<bool> DeleteMediaAsync(Guid mealId, Guid mediaId, CancellationToken cancellationToken);
     Task<Guid> CreatePlanAsync(CreatePlanRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<bool> UpdatePlanAsync(Guid planId, CreatePlanRequest request, Guid? userId, CancellationToken cancellationToken);
@@ -50,9 +50,11 @@ public interface IAdminMealService
 
 public interface IStorageUrlService
 {
+    long MaxUploadSizeBytes { get; }
     string GetPublicUrl(string objectKey);
     string GetThumbnailUrl(string objectKey);
-    Task<UploadUrlResponse> CreateUploadUrlAsync(UploadUrlRequest request, CancellationToken cancellationToken);
+    Task UploadAsync(string objectKey, Stream content, string contentType, CancellationToken cancellationToken);
+    Task DeleteAsync(string objectKey, CancellationToken cancellationToken);
 }
 
 public interface ILanguageResolver { string Resolve(string? queryLanguage, string? acceptLanguage); }

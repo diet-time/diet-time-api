@@ -12,17 +12,6 @@ public sealed class MealSelectionRequestValidator : AbstractValidator<MealSelect
     }
 }
 
-public sealed class UploadUrlRequestValidator : AbstractValidator<UploadUrlRequest>
-{
-    private static readonly HashSet<string> MimeTypes = new(StringComparer.OrdinalIgnoreCase) { "image/jpeg", "image/png", "image/webp" };
-    public UploadUrlRequestValidator()
-    {
-        RuleFor(x => x.FileName).NotEmpty().MaximumLength(200).Matches("^[a-zA-Z0-9._-]+$");
-        RuleFor(x => x.ContentType).Must(MimeTypes.Contains).WithMessage("Only JPEG, PNG, and WebP images are accepted.");
-        RuleFor(x => x.EntityType).Equal("MEAL_ITEM"); RuleFor(x => x.EntityId).NotEmpty();
-    }
-}
-
 public sealed class UpsertAllergenRequestValidator : AbstractValidator<UpsertAllergenRequest>
 {
     public UpsertAllergenRequestValidator()
