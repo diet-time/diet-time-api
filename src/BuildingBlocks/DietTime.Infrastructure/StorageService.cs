@@ -32,7 +32,14 @@ public sealed class StorageUrlService(IOptions<StorageOptions> options, IAmazonS
             Key = objectKey,
             InputStream = content,
             ContentType = contentType,
-            AutoCloseStream = false
+            AutoCloseStream = false,
+            // Railway's S3-compatible storage does not accept the AWS SDK's
+            // streaming-signature Content-Encoding value ("aws-chunked").
+            // The multipart upload is already size-limited and uses HTTPS, so
+            // send it as a regular content-length request instead.
+            UseChunkEncoding = false,
+            DisablePayloadSigning = true,
+            DisableDefaultChecksumValidation = true
         }, ct);
     }
 
