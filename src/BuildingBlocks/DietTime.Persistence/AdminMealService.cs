@@ -52,14 +52,6 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock) :
                 db.MealItems.Count(m => m.CategoryId == x.Id && m.Status != "ARCHIVED")))
             .ToListAsync(ct);
 
-        var mealsByTag = await db.MealTags.AsNoTracking()
-            .Where(x => x.IsActive)
-            .OrderBy(x => x.Code)
-            .Select(x => new DashboardMetricResponse(
-                x.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? x.Code,
-                db.MealItemTags.Count(link => link.TagId == x.Id && link.MealItem.Status != "ARCHIVED")))
-            .ToListAsync(ct);
-
         return new AdminDashboardResponse(
             activeMeals,
             draftMeals,
@@ -71,8 +63,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock) :
             missingImages,
             missingArabic,
             missingNutrition,
-            mealsByCategory,
-            mealsByTag);
+            mealsByCategory);
     }
 
     public async Task<PagedResult<AdminAllergenResponse>> GetAllergensAsync(string? search, string? sort, int page, int pageSize, CancellationToken ct)
@@ -440,14 +431,14 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock) :
 
     public async Task<AdminMealResponse?> GetMealAsync(Guid mealId, CancellationToken ct)
     {
-        var x = await db.MealItems.AsNoTracking().AsSplitQuery().Include(m => m.Translations).Include(m => m.Nutrition).Include(m => m.Ingredients).Include(m => m.Allergens).Include(m => m.Tags).Include(m => m.Prices).SingleOrDefaultAsync(m => m.Id == mealId, ct);
+        var x = await db.MealItems.AsNoTracking().AsSplitQuery().Include(m => m.Translations).Include(m => m.Nutrition).Include(m => m.Ingredients).Include(m => m.Allergens).Include(m => m.Prices).SingleOrDefaultAsync(m => m.Id == mealId, ct);
         if (x is null) return null;
         var translations = x.Translations.Select(t => new AdminTranslationRequest(t.LanguageCode, t.Name, t.ShortDescription, t.FullDescription, t.PreparationInstructions, t.ServingNotes)).ToArray();
         var nutrition = x.Nutrition is null ? null : new AdminNutritionRequest(x.Nutrition.ServingQuantity, x.Nutrition.ServingUnit, x.Nutrition.CaloriesKcal, x.Nutrition.ProteinGrams, x.Nutrition.CarbohydratesGrams, x.Nutrition.FatGrams, x.Nutrition.SaturatedFatGrams,x.Nutrition.TransFatGrams, x.Nutrition.FiberGrams, x.Nutrition.SugarGrams, x.Nutrition.SodiumMg, x.Nutrition.CholesterolMg);
         var ingredients = x.Ingredients.OrderBy(i => i.DisplayOrder).Select(i => new AdminIngredientLinkRequest(i.IngredientId, i.Quantity, i.Unit, i.IsOptional, i.CanBeRemoved, i.CanBeReplaced, i.IsPrimaryIngredient, i.DisplayOrder)).ToArray();
         var allergens = x.Allergens.Select(a => new AdminAllergenLinkRequest(a.AllergenId, a.AllergenLevel)).ToArray();
         var prices = x.Prices.Select(p => new AdminPriceRequest(p.PriceType, p.CurrencyCode.Trim(), p.Amount, p.EffectiveFrom, p.EffectiveUntil, p.IsActive)).ToArray();
-        return new(x.Id, x.Status, new(x.Sku, x.CategoryId, x.PreparationTimeMinutes, x.IsVegetarian, x.IsVegan, x.IsGlutenFree, x.IsDairyFree, x.IsAvailable, x.AvailableFrom, x.AvailableUntil, translations, nutrition, ingredients, allergens, x.Tags.Select(t => t.TagId).ToArray(), prices, x.Status, x.IsSpicy, x.SpiceLevel));
+        return new(x.Id, x.Status, new(x.Sku, x.CategoryId, x.PreparationTimeMinutes, x.IsVegetarian, x.IsVegan, x.IsGlutenFree, x.IsDairyFree, x.IsAvailable, x.AvailableFrom, x.AvailableUntil, translations, nutrition, ingredients, allergens, prices, x.Status, x.IsSpicy, x.SpiceLevel));
     }
 
     public async Task<Guid> CreateMealAsync(UpsertMealRequest request, Guid? userId, CancellationToken ct)
@@ -460,7 +451,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock) :
     public async Task<bool> UpdateMealAsync(Guid mealId, UpsertMealRequest request, Guid? userId, CancellationToken ct)
     {
         await using var tx = await db.Database.BeginTransactionAsync(ct);
-        var meal = await db.MealItems.Include(x => x.Translations).Include(x => x.Nutrition).Include(x => x.Ingredients).Include(x => x.Allergens).Include(x => x.Tags).Include(x => x.Prices).SingleOrDefaultAsync(x => x.Id == mealId, ct); 
+        var meal = await db.MealItems.Include(x => x.Translations).Include(x => x.Nutrition).Include(x => x.Ingredients).Include(x => x.Allergens).Include(x => x.Prices).SingleOrDefaultAsync(x => x.Id == mealId, ct); 
         if (meal is null) 
             return false; 
         var now = clock.GetUtcNow();
@@ -488,10 +479,9 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock) :
         db.MealItemTranslations.RemoveRange(meal.Translations); 
         db.MealItemIngredients.RemoveRange(meal.Ingredients); 
         db.MealItemAllergens.RemoveRange(meal.Allergens); 
-        db.MealItemTags.RemoveRange(meal.Tags);
         db.MealPrices.RemoveRange(meal.Prices); 
         meal.Translations.Clear(); meal.Ingredients.Clear();
-        meal.Allergens.Clear(); meal.Tags.Clear(); meal.Prices.Clear(); ApplyTranslations(meal, request.Translations, now); ApplyNutrition(meal, request.Nutrition, now); ApplyAggregate(meal, request, now, userId); await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return true;
+        meal.Allergens.Clear(); meal.Prices.Clear(); ApplyTranslations(meal, request.Translations, now); ApplyNutrition(meal, request.Nutrition, now); ApplyAggregate(meal, request, now, userId); await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return true;
     }
 
     public async Task<bool> SetMealStatusAsync(Guid mealId, string status, Guid? userId, CancellationToken ct) { if (status is not ("DRAFT" or "ACTIVE" or "INACTIVE" or "ARCHIVED")) throw new ArgumentException("Invalid meal status."); var meal = await db.MealItems.SingleOrDefaultAsync(x => x.Id == mealId, ct); if (meal is null) return false; meal.Status = status; meal.UpdatedBy = userId; meal.UpdatedAt = clock.GetUtcNow(); meal.RowVersion++; await db.SaveChangesAsync(ct); return true; }
@@ -512,7 +502,6 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock) :
     {
         foreach (var x in request.Ingredients ?? []) meal.Ingredients.Add(new() { IngredientId = x.IngredientId, Quantity = x.Quantity, Unit = x.Unit, IsOptional = x.IsOptional, CanBeRemoved = x.CanBeRemoved, CanBeReplaced = x.CanBeReplaced, IsPrimaryIngredient = x.IsPrimaryIngredient, DisplayOrder = x.DisplayOrder, CreatedAt = now });
         foreach (var x in request.Allergens ?? []) meal.Allergens.Add(new() { AllergenId = x.AllergenId, AllergenLevel = x.Level, CreatedAt = now });
-        foreach (var id in request.TagIds ?? []) meal.Tags.Add(new() { TagId = id, CreatedAt = now });
         foreach (var x in request.Prices ?? []) meal.Prices.Add(new() { PriceType = x.PriceType, CurrencyCode = x.CurrencyCode, Amount = x.Amount, EffectiveFrom = x.EffectiveFrom, EffectiveUntil = x.EffectiveUntil, IsActive = x.IsActive, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId });
     }
 }

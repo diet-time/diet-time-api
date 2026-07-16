@@ -24,9 +24,6 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
     public DbSet<Allergen> Allergens => Set<Allergen>();
     public DbSet<AllergenTranslation> AllergenTranslations => Set<AllergenTranslation>();
     public DbSet<MealItemAllergen> MealItemAllergens => Set<MealItemAllergen>();
-    public DbSet<MealTag> MealTags => Set<MealTag>();
-    public DbSet<MealTagTranslation> MealTagTranslations => Set<MealTagTranslation>();
-    public DbSet<MealItemTag> MealItemTags => Set<MealItemTag>();
     public DbSet<MealPrice> MealPrices => Set<MealPrice>();
     public DbSet<MealType> MealTypes => Set<MealType>();
     public DbSet<MealTypeTranslation> MealTypeTranslations => Set<MealTypeTranslation>();
@@ -55,8 +52,6 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
         Translation<IngredientTranslation>(b, "ingredient_translations", 10); b.Entity<IngredientTranslation>(e => { e.Property(x => x.Name).HasMaxLength(150); e.HasIndex(x => new { x.IngredientId, x.LanguageCode }).IsUnique(); e.HasOne(x => x.Ingredient).WithMany(x => x.Translations).HasForeignKey(x => x.IngredientId).OnDelete(DeleteBehavior.Cascade); });
         b.Entity<Allergen>(e => { e.ToTable("allergens"); e.Property(x => x.Code).HasMaxLength(50); e.HasIndex(x => x.Code).IsUnique(); });
         Translation<AllergenTranslation>(b, "allergen_translations", 10); b.Entity<AllergenTranslation>(e => { e.Property(x => x.Name).HasMaxLength(100); e.HasIndex(x => new { x.AllergenId, x.LanguageCode }).IsUnique(); e.HasOne(x => x.Allergen).WithMany(x => x.Translations).HasForeignKey(x => x.AllergenId).OnDelete(DeleteBehavior.Cascade); });
-        b.Entity<MealTag>(e => { e.ToTable("meal_tags"); e.Property(x => x.Code).HasMaxLength(50); e.HasIndex(x => x.Code).IsUnique(); });
-        Translation<MealTagTranslation>(b, "meal_tag_translations", 10); b.Entity<MealTagTranslation>(e => { e.Property(x => x.Name).HasMaxLength(100); e.HasIndex(x => new { x.MealTagId, x.LanguageCode }).IsUnique(); e.HasOne(x => x.Tag).WithMany(x => x.Translations).HasForeignKey(x => x.MealTagId).OnDelete(DeleteBehavior.Cascade); });
         b.Entity<MealType>(e => { e.ToTable("meal_types"); e.Property(x => x.Code).HasMaxLength(50); e.HasIndex(x => x.Code).IsUnique(); });
         Translation<MealTypeTranslation>(b, "meal_type_translations", 10); b.Entity<MealTypeTranslation>(e => { e.Property(x => x.Name).HasMaxLength(100); e.HasIndex(x => new { x.MealTypeId, x.LanguageCode }).IsUnique(); e.HasOne(x => x.MealType).WithMany(x => x.Translations).HasForeignKey(x => x.MealTypeId).OnDelete(DeleteBehavior.Cascade); });
     }
@@ -70,7 +65,6 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
         Translation<MealMediaTranslation>(b, "meal_media_translations", 10); b.Entity<MealMediaTranslation>(e => { e.HasIndex(x => new { x.MealMediaId, x.LanguageCode }).IsUnique(); e.HasOne(x => x.Media).WithMany(x => x.Translations).HasForeignKey(x => x.MealMediaId).OnDelete(DeleteBehavior.Cascade); });
         b.Entity<MealItemIngredient>(e => { e.ToTable("meal_item_ingredients"); e.Property(x => x.Quantity).HasPrecision(10, 3); e.HasIndex(x => new { x.MealItemId, x.IngredientId }).IsUnique(); e.HasOne(x => x.MealItem).WithMany(x => x.Ingredients).HasForeignKey(x => x.MealItemId).OnDelete(DeleteBehavior.Cascade); e.HasOne(x => x.Ingredient).WithMany().HasForeignKey(x => x.IngredientId).OnDelete(DeleteBehavior.Restrict); });
         b.Entity<MealItemAllergen>(e => { e.ToTable("meal_item_allergens"); e.HasKey(x => new { x.MealItemId, x.AllergenId }); e.HasOne(x => x.MealItem).WithMany(x => x.Allergens).HasForeignKey(x => x.MealItemId).OnDelete(DeleteBehavior.Cascade); e.HasOne(x => x.Allergen).WithMany().HasForeignKey(x => x.AllergenId).OnDelete(DeleteBehavior.Restrict); });
-        b.Entity<MealItemTag>(e => { e.ToTable("meal_item_tags"); e.HasKey(x => new { x.MealItemId, x.TagId }); e.HasOne(x => x.MealItem).WithMany(x => x.Tags).HasForeignKey(x => x.MealItemId).OnDelete(DeleteBehavior.Cascade); e.HasOne(x => x.Tag).WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Restrict); });
         b.Entity<MealPrice>(e => { e.ToTable("meal_prices"); e.Property(x => x.Amount).HasPrecision(12, 2); e.Property(x => x.CurrencyCode).HasColumnType("char(3)"); e.HasOne(x => x.MealItem).WithMany(x => x.Prices).HasForeignKey(x => x.MealItemId).OnDelete(DeleteBehavior.Restrict); });
     }
 
