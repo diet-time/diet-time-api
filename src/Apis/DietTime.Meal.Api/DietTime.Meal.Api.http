@@ -1,0 +1,6 @@
+@DietTime.Meal.Api_HostAddress = http://localhost:5004
+
+GET {{DietTime.Meal.Api_HostAddress}}/health
+Accept: application/json
+
+###
