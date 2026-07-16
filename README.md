@@ -21,12 +21,14 @@ Required Railway variables:
 ASPNETCORE_ENVIRONMENT=Production
 PORT=8080
 ConnectionStrings__DefaultConnection=Host=...;Port=5432;Database=...;Username=...;Password=...;SSL Mode=Require;Trust Server Certificate=true
-Storage__ServiceUrl=<S3-compatible endpoint>
 Storage__PublicBaseUrl=<public bucket/CDN base URL>
-Storage__BucketName=<bucket>
-Storage__AccessKey=<secret>
-Storage__SecretKey=<secret>
-Storage__Region=auto
+Storage__UploadExpiryMinutes=10
+AWS_ENDPOINT_URL=<S3-compatible endpoint>
+AWS_S3_BUCKET_NAME=<bucket>
+AWS_ACCESS_KEY_ID=<secret>
+AWS_SECRET_ACCESS_KEY=<secret>
+AWS_DEFAULT_REGION=auto
+AWS_S3_URL_STYLE=virtual
 Cors__AllowedOrigins__0=https://your-flutter-web-origin.example
 ```
 

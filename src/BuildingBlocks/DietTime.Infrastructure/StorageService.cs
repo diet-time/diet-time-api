@@ -13,6 +13,7 @@ public sealed class StorageOptions
     public string PublicBaseUrl { get; set; } = ""; public string BucketName { get; set; } = ""; public string? AccessKey { get; set; }
     public string? SecretKey { get; set; }
     public string Region { get; set; } = "auto"; public int UploadExpiryMinutes { get; set; } = 10;
+    public bool ForcePathStyle { get; set; } = true;
 }
 
 public sealed class StorageUrlService(IOptions<StorageOptions> options, IAmazonS3 s3, TimeProvider clock) : IStorageUrlService
@@ -28,4 +29,3 @@ public sealed class StorageUrlService(IOptions<StorageOptions> options, IAmazonS
     }
     private string Build(string key) => $"{settings.PublicBaseUrl.TrimEnd('/')}/{string.Join('/', key.Split('/').Select(Uri.EscapeDataString))}";
 }
-

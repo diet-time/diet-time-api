@@ -12,6 +12,7 @@ using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.OpenApi.Models;
 using Serilog;
 
@@ -30,14 +31,36 @@ builder.Services.AddIdentityCore<ApplicationUser>(o => { o.Password.RequiredLeng
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
+builder.Services.PostConfigure<StorageOptions>(options =>
+{
+    options.ServiceUrl = builder.Configuration["AWS_ENDPOINT_URL"] ?? options.ServiceUrl;
+    options.BucketName = builder.Configuration["AWS_S3_BUCKET_NAME"] ?? options.BucketName;
+    options.AccessKey = builder.Configuration["AWS_ACCESS_KEY_ID"] ?? options.AccessKey;
+    options.SecretKey = builder.Configuration["AWS_SECRET_ACCESS_KEY"] ?? options.SecretKey;
+    options.Region = builder.Configuration["AWS_DEFAULT_REGION"] ?? options.Region;
+
+    var urlStyle = builder.Configuration["AWS_S3_URL_STYLE"];
+    if (!string.IsNullOrWhiteSpace(urlStyle))
+        options.ForcePathStyle = urlStyle.Equals("path", StringComparison.OrdinalIgnoreCase);
+    else if (!string.IsNullOrWhiteSpace(builder.Configuration["AWS_ENDPOINT_URL"]))
+        options.ForcePathStyle = false;
+});
 builder.Services.AddAuthentication(DevelopmentAuthenticationHandler.SchemeName)
     .AddScheme<AuthenticationSchemeOptions, DevelopmentAuthenticationHandler>(
         DevelopmentAuthenticationHandler.SchemeName,
         _ => { });
 builder.Services.AddAuthorization();
 
-var storage = builder.Configuration.GetSection(StorageOptions.SectionName).Get<StorageOptions>() ?? new();
-builder.Services.AddSingleton<IAmazonS3>(_ => new AmazonS3Client(storage.AccessKey, storage.SecretKey, new AmazonS3Config { ServiceURL = storage.ServiceUrl, ForcePathStyle = true, AuthenticationRegion = storage.Region }));
+builder.Services.AddSingleton<IAmazonS3>(services =>
+{
+    var storage = services.GetRequiredService<IOptions<StorageOptions>>().Value;
+    return new AmazonS3Client(storage.AccessKey, storage.SecretKey, new AmazonS3Config
+    {
+        ServiceURL = storage.ServiceUrl,
+        ForcePathStyle = storage.ForcePathStyle,
+        AuthenticationRegion = storage.Region
+    });
+});
 builder.Services.AddSingleton(TimeProvider.System); builder.Services.AddMemoryCache(); builder.Services.AddScoped<ILanguageResolver, LanguageResolver>(); builder.Services.AddScoped<IStorageUrlService, StorageUrlService>(); builder.Services.AddScoped<IMealQueryService, MealQueryService>(); builder.Services.AddScoped<IMealSelectionService, MealSelectionService>(); builder.Services.AddScoped<IAdminMealService, AdminMealService>(); builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddValidatorsFromAssemblyContaining<MealSelectionRequestValidator>(); builder.Services.AddFluentValidationAutoValidation();
 
