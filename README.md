@@ -88,7 +88,6 @@ If any template day has `day_of_week`, calendar lookup uses ISO weekdays (Monday
     "currencyCode": "QAR",
     "isDefault": true,
     "isAvailable": true,
-    "tags": [{ "code": "LOW_CARB", "name": "Low Carb" }],
     "allergenCodes": ["TREE_NUTS"]
   }],
   "meta": { "page": 1, "pageSize": 20, "totalCount": 1, "totalPages": 1 },
