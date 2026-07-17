@@ -32,6 +32,7 @@ public interface IAdminMealService
     Task<PagedResult<AdminMealCategoryResponse>> GetMealCategoriesAsync(string? search, string? sort, int page, int pageSize, CancellationToken cancellationToken);
     Task<Guid?> CreateMealCategoryAsync(UpsertMealCategoryRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<AdminWriteResult> UpdateMealCategoryAsync(Guid categoryId, UpsertMealCategoryRequest request, Guid? userId, CancellationToken cancellationToken);
+    Task<AdminWriteResult> UpdateMealTypeAsync(Guid mealTypeId, UpsertMealTypeRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<PagedResult<AdminMealSummaryResponse>> GetMealsAsync(string? search, int page, int pageSize, CancellationToken cancellationToken);
     Task<AdminMealResponse?> GetMealAsync(Guid mealId, CancellationToken cancellationToken);
     Task<Guid> CreateMealAsync(UpsertMealRequest request, Guid? userId, CancellationToken cancellationToken);

@@ -77,6 +77,7 @@ public sealed record UpsertMealCategoryRequest(
     string? DescriptionAr,
     int DisplayOrder,
     bool IsActive = true);
+public sealed record UpsertMealTypeRequest(string Code, string NameEn, int DisplayOrder, bool IsActive = true);
 public sealed record DashboardMetricResponse(string Name, int Value);
 public sealed record AdminDashboardResponse(
     int ActiveMeals,

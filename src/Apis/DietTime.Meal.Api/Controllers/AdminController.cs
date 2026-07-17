@@ -78,6 +78,15 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
             _ => Conflict(new ApiResponse<object> { Errors = [new("duplicate_code", "A meal category with this code already exists.", "code")] })
         };
     }
+    [HttpPut("meal-types/{mealTypeId:guid}")] public async Task<IActionResult> UpdateMealType(Guid mealTypeId, UpsertMealTypeRequest request, CancellationToken ct)
+    {
+        return await admin.UpdateMealTypeAsync(mealTypeId, request, UserId, ct) switch
+        {
+            AdminWriteResult.Success => NoContent(),
+            AdminWriteResult.NotFound => NotFound(),
+            _ => Conflict(new ApiResponse<object> { Errors = [new("duplicate_code", "A meal type with this code already exists.", "code")] })
+        };
+    }
     [HttpPost("meals")] public async Task<ActionResult<ApiResponse<object>>> CreateMeal(UpsertMealRequest request, CancellationToken ct) { var id = await admin.CreateMealAsync(request, UserId, ct); return CreatedAtAction(nameof(GetMeal), new { version = "1", mealId = id }, ApiResponse<object>.Ok(new { id })); }
     [HttpPut("meals/{mealId:guid}")] public async Task<IActionResult> UpdateMeal(Guid mealId, UpsertMealRequest request, CancellationToken ct) => await admin.UpdateMealAsync(mealId, request, UserId, ct) ? NoContent() : NotFound();
     [HttpGet("meals")] public async Task<ActionResult<ApiResponse<IReadOnlyList<AdminMealSummaryResponse>>>> GetMeals([FromQuery] string? search, [FromQuery] int page = 1, [FromQuery] int pageSize = 20, CancellationToken ct = default) { if (page < 1 || pageSize is < 1 or > 100) return BadRequest(); var rows = await admin.GetMealsAsync(search, page, pageSize, ct); return Ok(ApiResponse<IReadOnlyList<AdminMealSummaryResponse>>.Ok(rows.Items, rows.Meta)); }

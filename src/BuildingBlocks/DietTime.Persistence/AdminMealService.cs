@@ -2,10 +2,11 @@ using DietTime.Application;
 using DietTime.Contracts;
 using DietTime.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace DietTime.Persistence;
 
-public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock) : IAdminMealService
+public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, IMemoryCache cache) : IAdminMealService
 {
     private const int ExpiringMealHorizonDays = 7;
 
@@ -414,6 +415,44 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock) :
         foreach (var suffix in new[] { ":asc", ":desc", "_asc", "_desc", " asc", " desc" })
             if (value.EndsWith(suffix)) value = value[..^suffix.Length];
         return (value, descending);
+    }
+
+    public async Task<AdminWriteResult> UpdateMealTypeAsync(Guid mealTypeId, UpsertMealTypeRequest request, Guid? userId, CancellationToken ct)
+    {
+        var mealType = await db.MealTypes.Include(x => x.Translations).SingleOrDefaultAsync(x => x.Id == mealTypeId, ct);
+        if (mealType is null) return AdminWriteResult.NotFound;
+
+        var code = request.Code.Trim().ToUpperInvariant();
+        if (await db.MealTypes.AnyAsync(x => x.Id != mealTypeId && x.Code == code, ct)) return AdminWriteResult.Conflict;
+
+        var now = clock.GetUtcNow();
+        mealType.Code = code;
+        mealType.DisplayOrder = request.DisplayOrder;
+        mealType.IsActive = request.IsActive;
+        mealType.UpdatedAt = now;
+        mealType.UpdatedBy = userId;
+
+        var translation = mealType.Translations.SingleOrDefault(x => x.LanguageCode == "en");
+        if (translation is null)
+        {
+            mealType.Translations.Add(new MealTypeTranslation
+            {
+                LanguageCode = "en",
+                Name = request.NameEn.Trim(),
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+        }
+        else
+        {
+            translation.Name = request.NameEn.Trim();
+            translation.UpdatedAt = now;
+        }
+
+        await db.SaveChangesAsync(ct);
+        cache.Remove("meal-types:en");
+        cache.Remove("meal-types:ar");
+        return AdminWriteResult.Success;
     }
 
     public async Task<PagedResult<AdminMealSummaryResponse>> GetMealsAsync(string? search, int page, int pageSize, CancellationToken ct)
