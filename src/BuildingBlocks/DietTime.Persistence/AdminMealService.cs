@@ -604,9 +604,14 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
     }
     public async Task<bool> DeleteMediaAsync(Guid mealId, Guid mediaId, CancellationToken ct) => await db.MealMedia.Where(x => x.Id == mediaId && x.MealItemId == mealId).ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, "DELETED").SetProperty(x => x.IsPrimary, false), ct) > 0;
 
-    public async Task<PagedResult<AdminMealPlanSummaryResponse>> GetMealPlansAsync(int page, int pageSize, CancellationToken ct)
+    public async Task<PagedResult<AdminMealPlanSummaryResponse>> GetMealPlansAsync(string? search, int page, int pageSize, CancellationToken ct)
     {
         var query = db.MealPlanTemplates.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            query = query.Where(x => x.Translations.Any(t => t.Name.Contains(term)));
+        }
         var count = await query.CountAsync(ct);
         var rows = await query
             .OrderByDescending(x => x.UpdatedAt)
