@@ -44,6 +44,7 @@ public interface IAdminMealService
     Task<PagedResult<AdminMealPlanSummaryResponse>> GetMealPlansAsync(int page, int pageSize, CancellationToken cancellationToken);
     Task<Guid> CreatePlanAsync(CreatePlanRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<bool> UpdatePlanAsync(Guid planId, CreatePlanRequest request, Guid? userId, CancellationToken cancellationToken);
+    Task<bool> DeletePlanAsync(Guid planId, CancellationToken cancellationToken);
     Task<Guid?> AddPlanDayAsync(Guid planId, CreatePlanDayRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<Guid?> AddPlanSlotAsync(Guid dayId, CreatePlanSlotRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<Guid?> AddSlotOptionAsync(Guid slotId, CreateSlotOptionRequest request, Guid? userId, CancellationToken cancellationToken);
