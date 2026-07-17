@@ -520,6 +520,33 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock) :
     }
     public async Task<bool> DeleteMediaAsync(Guid mealId, Guid mediaId, CancellationToken ct) => await db.MealMedia.Where(x => x.Id == mediaId && x.MealItemId == mealId).ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, "DELETED").SetProperty(x => x.IsPrimary, false), ct) > 0;
 
+    public async Task<PagedResult<AdminMealPlanSummaryResponse>> GetMealPlansAsync(int page, int pageSize, CancellationToken ct)
+    {
+        var query = db.MealPlanTemplates.AsNoTracking();
+        var count = await query.CountAsync(ct);
+        var rows = await query
+            .OrderByDescending(x => x.UpdatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(x => new AdminMealPlanSummaryResponse(
+                x.Id,
+                x.Code,
+                x.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault()
+                    ?? x.Translations.Select(t => t.Name).FirstOrDefault()
+                    ?? x.Code,
+                x.PlanType,
+                x.DurationDays,
+                x.IsCustomizable,
+                x.IsPublished,
+                x.IsActive,
+                x.ValidFrom,
+                x.ValidUntil,
+                x.UpdatedAt))
+            .ToListAsync(ct);
+
+        return new(rows, new(page, pageSize, count, (int)Math.Ceiling(count / (double)pageSize)));
+    }
+
     public async Task<Guid> CreatePlanAsync(CreatePlanRequest request, Guid? userId, CancellationToken ct) { var now = clock.GetUtcNow(); var p = new MealPlanTemplate { Code = request.Code, PlanType = request.PlanType, DurationDays = request.DurationDays, IsCustomizable = request.IsCustomizable, IsActive = true, IsPublished = false, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 }; foreach (var t in request.Translations) p.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now }); db.Add(p); await db.SaveChangesAsync(ct); return p.Id; }
     public async Task<bool> UpdatePlanAsync(Guid planId, CreatePlanRequest request, Guid? userId, CancellationToken ct) { await using var tx = await db.Database.BeginTransactionAsync(ct); var p = await db.MealPlanTemplates.Include(x => x.Translations).SingleOrDefaultAsync(x => x.Id == planId, ct); if (p is null) return false; var now = clock.GetUtcNow(); p.Code = request.Code; p.PlanType = request.PlanType; p.DurationDays = request.DurationDays; p.IsCustomizable = request.IsCustomizable; p.ValidFrom = request.ValidFrom; p.ValidUntil = request.ValidUntil; p.UpdatedAt = now; p.UpdatedBy = userId; p.RowVersion++; db.MealPlanTemplateTranslations.RemoveRange(p.Translations); foreach (var t in request.Translations) p.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now }); await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return true; }
     public async Task<Guid?> AddPlanDayAsync(Guid planId, CreatePlanDayRequest request, Guid? userId, CancellationToken ct) { if (!await db.MealPlanTemplates.AnyAsync(x => x.Id == planId, ct)) return null; var now = clock.GetUtcNow(); var d = new MealPlanTemplateDay { MealPlanTemplateId = planId, DayNumber = request.DayNumber, DayOfWeek = request.DayOfWeek, IsActive = true, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId }; d.Translations.Add(new() { LanguageCode = "en", Label = request.EnglishLabel, CreatedAt = now, UpdatedAt = now }); if (!string.IsNullOrWhiteSpace(request.ArabicLabel)) d.Translations.Add(new() { LanguageCode = "ar", Label = request.ArabicLabel, CreatedAt = now, UpdatedAt = now }); db.Add(d); await db.SaveChangesAsync(ct); return d.Id; }
