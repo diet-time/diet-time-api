@@ -78,6 +78,12 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
             _ => Conflict(new ApiResponse<object> { Errors = [new("duplicate_code", "A meal category with this code already exists.", "code")] })
         };
     }
+    [HttpGet("meal-types")] public async Task<ActionResult<ApiResponse<IReadOnlyList<AdminMealTypeResponse>>>> GetMealTypes([FromQuery] string? search, [FromQuery] string? sort, [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default)
+    {
+        if (page < 1 || pageSize is < 1 or > 100) return BadRequest();
+        var result = await admin.GetMealTypesAsync(search, sort, page, pageSize, ct);
+        return Ok(ApiResponse<IReadOnlyList<AdminMealTypeResponse>>.Ok(result.Items, result.Meta));
+    }
     [HttpPut("meal-types/{mealTypeId:guid}")] public async Task<IActionResult> UpdateMealType(Guid mealTypeId, UpsertMealTypeRequest request, CancellationToken ct)
     {
         return await admin.UpdateMealTypeAsync(mealTypeId, request, UserId, ct) switch

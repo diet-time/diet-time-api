@@ -78,6 +78,15 @@ public sealed record UpsertMealCategoryRequest(
     int DisplayOrder,
     bool IsActive = true);
 public sealed record UpsertMealTypeRequest(string Code, string NameEn, int DisplayOrder, bool IsActive = true);
+public sealed record AdminMealTypeResponse(
+    Guid Id,
+    string Code,
+    string NameEn,
+    string NameAr,
+    int DisplayOrder,
+    bool IsActive,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
 public sealed record DashboardMetricResponse(string Name, int Value);
 public sealed record AdminDashboardResponse(
     int ActiveMeals,

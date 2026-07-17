@@ -417,6 +417,51 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         return (value, descending);
     }
 
+    public async Task<PagedResult<AdminMealTypeResponse>> GetMealTypesAsync(string? search, string? sort, int page, int pageSize, CancellationToken ct)
+    {
+        var query = db.MealTypes.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            query = query.Where(x => EF.Functions.ILike(x.Code, $"%{term}%")
+                || x.Translations.Any(t => EF.Functions.ILike(t.Name, $"%{term}%")));
+        }
+
+        var totalCount = await query.CountAsync(ct);
+        var (sortField, descending) = ParseSort(sort);
+        var ordered = (sortField, descending) switch
+        {
+            ("code", true) => query.OrderByDescending(x => x.Code),
+            ("nameen", false) => query.OrderBy(x => x.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault()),
+            ("nameen", true) => query.OrderByDescending(x => x.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault()),
+            ("displayorder", false) => query.OrderBy(x => x.DisplayOrder),
+            ("displayorder", true) => query.OrderByDescending(x => x.DisplayOrder),
+            ("isactive", false) => query.OrderBy(x => x.IsActive),
+            ("isactive", true) => query.OrderByDescending(x => x.IsActive),
+            ("createdat", false) => query.OrderBy(x => x.CreatedAt),
+            ("createdat", true) => query.OrderByDescending(x => x.CreatedAt),
+            ("updatedat", false) => query.OrderBy(x => x.UpdatedAt),
+            ("updatedat", true) => query.OrderByDescending(x => x.UpdatedAt),
+            _ => query.OrderBy(x => x.Code)
+        };
+
+        var items = await ordered.ThenBy(x => x.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(x => new AdminMealTypeResponse(
+                x.Id,
+                x.Code,
+                x.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? "",
+                x.Translations.Where(t => t.LanguageCode == "ar").Select(t => t.Name).FirstOrDefault() ?? "",
+                x.DisplayOrder,
+                x.IsActive,
+                x.CreatedAt,
+                x.UpdatedAt))
+            .ToListAsync(ct);
+
+        return new(items, new(page, pageSize, totalCount, (int)Math.Ceiling(totalCount / (double)pageSize)));
+    }
+
     public async Task<AdminWriteResult> UpdateMealTypeAsync(Guid mealTypeId, UpsertMealTypeRequest request, Guid? userId, CancellationToken ct)
     {
         var mealType = await db.MealTypes.Include(x => x.Translations).SingleOrDefaultAsync(x => x.Id == mealTypeId, ct);
