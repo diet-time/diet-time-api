@@ -68,7 +68,7 @@ Swagger is available outside Production at `/swagger`; liveness/database health 
 
 ## Calendar behavior
 
-If any template day has `day_of_week`, calendar lookup uses ISO weekdays (Monday 1 through Sunday 7). Otherwise it is rolling and maps by `day_number`; meal queries anchor rolling plans to `valid_from`, falling back to the requested date. The calendar display endpoint treats its `startDate` as the rolling cycle start.
+Meal-plan template days use stable uppercase weekday codes in `day_of_week` and are ordered by `display_order`. Menu lookup always selects the weekday matching the actual delivery date; numbered rolling-day progression is not supported.
 
 ## Response example
 
