@@ -636,6 +636,47 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         return new(rows, new(page, pageSize, count, (int)Math.Ceiling(count / (double)pageSize)));
     }
 
+    public async Task<AdminMealPlanDetailResponse?> GetMealPlanAsync(Guid planId, CancellationToken ct)
+    {
+        var plan = await db.MealPlanTemplates.AsNoTracking()
+            .Include(x => x.Translations)
+            .Include(x => x.Days).ThenInclude(x => x.Translations)
+            .Include(x => x.Days).ThenInclude(x => x.Slots).ThenInclude(x => x.MealType).ThenInclude(x => x.Translations)
+            .Include(x => x.Days).ThenInclude(x => x.Slots).ThenInclude(x => x.Options).ThenInclude(x => x.MealItem).ThenInclude(x => x.Translations)
+            .SingleOrDefaultAsync(x => x.Id == planId, ct);
+        if (plan is null) return null;
+
+        return new(
+            plan.Id,
+            plan.Code,
+            plan.PlanType,
+            plan.DurationDays,
+            plan.IsCustomizable,
+            plan.IsPublished,
+            plan.IsActive,
+            plan.ValidFrom,
+            plan.ValidUntil,
+            plan.Translations.Select(x => new AdminPlanTranslationResponse(x.LanguageCode, x.Name, x.ShortDescription, x.FullDescription)).ToArray(),
+            plan.Days.OrderBy(x => x.DayNumber).Select(day => new AdminPlanDayResponse(
+                day.Id,
+                day.DayNumber,
+                day.Translations.FirstOrDefault(x => x.LanguageCode == "en")?.Label ?? $"Day {day.DayNumber}",
+                day.Translations.FirstOrDefault(x => x.LanguageCode == "ar")?.Label,
+                day.Slots.OrderBy(x => x.DisplayOrder).Select(slot => new AdminPlanSlotResponse(
+                    slot.Id,
+                    slot.MealTypeId,
+                    slot.MealType.Translations.FirstOrDefault(x => x.LanguageCode == "en")?.Name ?? slot.MealType.Code,
+                    slot.DisplayOrder,
+                    slot.MinimumSelection,
+                    slot.MaximumSelection,
+                    slot.IsRequired,
+                    slot.Options.OrderBy(x => x.DisplayOrder).Select(option => new AdminPlanOptionResponse(
+                        option.Id,
+                        option.MealItemId,
+                        option.MealItem.Translations.FirstOrDefault(x => x.LanguageCode == "en")?.Name ?? option.MealItem.Sku,
+                        option.IsDefault)).ToArray())).ToArray())).ToArray());
+    }
+
     public async Task<Guid> CreatePlanAsync(CreatePlanRequest request, Guid? userId, CancellationToken ct) { var now = clock.GetUtcNow(); var p = new MealPlanTemplate { Code = request.Code, PlanType = request.PlanType, DurationDays = request.DurationDays, IsCustomizable = request.IsCustomizable, IsActive = true, IsPublished = false, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 }; foreach (var t in request.Translations) p.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now }); db.Add(p); await db.SaveChangesAsync(ct); return p.Id; }
     public async Task<bool> UpdatePlanAsync(Guid planId, CreatePlanRequest request, Guid? userId, CancellationToken ct) { await using var tx = await db.Database.BeginTransactionAsync(ct); var p = await db.MealPlanTemplates.Include(x => x.Translations).SingleOrDefaultAsync(x => x.Id == planId, ct); if (p is null) return false; var now = clock.GetUtcNow(); p.Code = request.Code; p.PlanType = request.PlanType; p.DurationDays = request.DurationDays; p.IsCustomizable = request.IsCustomizable; p.ValidFrom = request.ValidFrom; p.ValidUntil = request.ValidUntil; p.UpdatedAt = now; p.UpdatedBy = userId; p.RowVersion++; db.MealPlanTemplateTranslations.RemoveRange(p.Translations); foreach (var t in request.Translations) p.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now }); await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return true; }
     public async Task<bool> DeletePlanAsync(Guid planId, CancellationToken ct) { await using var tx = await db.Database.BeginTransactionAsync(ct); await db.MealPlanPrices.Where(x => x.MealPlanTemplateId == planId).ExecuteDeleteAsync(ct); var deleted = await db.MealPlanTemplates.Where(x => x.Id == planId).ExecuteDeleteAsync(ct) > 0; await tx.CommitAsync(ct); return deleted; }
