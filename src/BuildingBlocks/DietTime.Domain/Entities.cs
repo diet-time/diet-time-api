@@ -1,5 +1,33 @@
 namespace DietTime.Domain;
 
+public enum MenuWeekday
+{
+    Saturday,
+    Sunday,
+    Monday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+    Friday
+}
+
+public static class MenuWeekdayExtensions
+{
+    public static MenuWeekday FromDate(DateOnly date) => date.DayOfWeek switch
+    {
+        DayOfWeek.Saturday => MenuWeekday.Saturday,
+        DayOfWeek.Sunday => MenuWeekday.Sunday,
+        DayOfWeek.Monday => MenuWeekday.Monday,
+        DayOfWeek.Tuesday => MenuWeekday.Tuesday,
+        DayOfWeek.Wednesday => MenuWeekday.Wednesday,
+        DayOfWeek.Thursday => MenuWeekday.Thursday,
+        DayOfWeek.Friday => MenuWeekday.Friday,
+        _ => throw new ArgumentOutOfRangeException(nameof(date))
+    };
+
+    public static string Code(this MenuWeekday weekday) => weekday.ToString().ToUpperInvariant();
+}
+
 public abstract class Entity { public Guid Id { get; set; } }
 public abstract class Translation : Entity { public string LanguageCode { get; set; } = "en"; public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } }
 
@@ -51,8 +79,7 @@ public sealed class MealTypeTranslation : Translation { public Guid MealTypeId {
 
 public sealed class MealPlanTemplate : Entity { public string Code { get; set; } = ""; public string PlanType { get; set; } = "STANDARD"; public int DurationDays { get; set; } public Guid? CustomerId { get; set; } public bool IsCustomizable { get; set; } public bool IsPublished { get; set; } public bool IsActive { get; set; } public DateOnly? ValidFrom { get; set; } public DateOnly? ValidUntil { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } public long RowVersion { get; set; } public ICollection<MealPlanTemplateTranslation> Translations { get; set; } = []; public ICollection<MealPlanTemplateDay> Days { get; set; } = []; public ICollection<MealPlanPrice> Prices { get; set; } = []; }
 public sealed class MealPlanTemplateTranslation : Translation { public Guid MealPlanTemplateId { get; set; } public MealPlanTemplate Plan { get; set; } = null!; public string Name { get; set; } = ""; public string? ShortDescription { get; set; } public string? FullDescription { get; set; } }
-public sealed class MealPlanTemplateDay : Entity { public Guid MealPlanTemplateId { get; set; } public MealPlanTemplate Plan { get; set; } = null!; public int DayNumber { get; set; } public short? DayOfWeek { get; set; } public bool IsActive { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } public ICollection<MealPlanTemplateDayTranslation> Translations { get; set; } = []; public ICollection<MealPlanTemplateSlot> Slots { get; set; } = []; }
-public sealed class MealPlanTemplateDayTranslation : Translation { public Guid MealPlanTemplateDayId { get; set; } public MealPlanTemplateDay Day { get; set; } = null!; public string Label { get; set; } = ""; }
+public sealed class MealPlanTemplateDay : Entity { public Guid MealPlanTemplateId { get; set; } public MealPlanTemplate Plan { get; set; } = null!; public MenuWeekday MenuWeekday { get; set; } public int DisplayOrder { get; set; } public bool IsActive { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } public ICollection<MealPlanTemplateSlot> Slots { get; set; } = []; }
 public sealed class MealPlanTemplateSlot : Entity { public Guid MealPlanTemplateDayId { get; set; } public MealPlanTemplateDay Day { get; set; } = null!; public Guid MealTypeId { get; set; } public MealType MealType { get; set; } = null!; public int DisplayOrder { get; set; } public int MinimumSelection { get; set; } public int MaximumSelection { get; set; } public bool IsRequired { get; set; } public TimeOnly? SelectionCutoffTime { get; set; } public bool AllowsPaidUpgrade { get; set; } public bool IsActive { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } public long RowVersion { get; set; } public ICollection<MealPlanTemplateSlotTranslation> Translations { get; set; } = []; public ICollection<MealPlanSlotOption> Options { get; set; } = []; }
 public sealed class MealPlanTemplateSlotTranslation : Translation { public Guid MealPlanTemplateSlotId { get; set; } public MealPlanTemplateSlot Slot { get; set; } = null!; public string? Title { get; set; } public string? Instruction { get; set; } }
 public sealed class MealPlanSlotOption : Entity { public Guid MealPlanTemplateSlotId { get; set; } public MealPlanTemplateSlot Slot { get; set; } = null!; public Guid MealItemId { get; set; } public MealItem MealItem { get; set; } = null!; public decimal AdditionalPrice { get; set; } public bool IsDefault { get; set; } public bool IsAvailable { get; set; } public int DisplayOrder { get; set; } public DateTimeOffset? AvailableFrom { get; set; } public DateTimeOffset? AvailableUntil { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } }

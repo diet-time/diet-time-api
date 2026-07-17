@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 using Amazon.S3;
@@ -35,6 +36,7 @@ builder.Services.AddIdentityCore<ApplicationUser>(o => { o.Password.RequiredLeng
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
+builder.Services.Configure<DeliveryScheduleOptions>(builder.Configuration.GetSection(DeliveryScheduleOptions.SectionName));
 builder.Services.PostConfigure<StorageOptions>(options =>
 {
     options.ServiceUrl = builder.Configuration["AWS_ENDPOINT_URL"] ?? options.ServiceUrl;
@@ -65,10 +67,10 @@ builder.Services.AddSingleton<IAmazonS3>(services =>
         AuthenticationRegion = storage.Region
     });
 });
-builder.Services.AddSingleton(TimeProvider.System); builder.Services.AddMemoryCache(); builder.Services.AddScoped<ILanguageResolver, LanguageResolver>(); builder.Services.AddScoped<IStorageUrlService, StorageUrlService>(); builder.Services.AddScoped<IMealQueryService, MealQueryService>(); builder.Services.AddScoped<IMealSelectionService, MealSelectionService>(); builder.Services.AddScoped<IAdminMealService, AdminMealService>(); builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddSingleton(TimeProvider.System); builder.Services.AddMemoryCache(); builder.Services.AddScoped<ILanguageResolver, LanguageResolver>(); builder.Services.AddScoped<IStorageUrlService, StorageUrlService>(); builder.Services.AddScoped<IMealQueryService, MealQueryService>(); builder.Services.AddScoped<IMealSelectionService, MealSelectionService>(); builder.Services.AddScoped<IAdminMealService, AdminMealService>(); builder.Services.AddScoped<ITemplateMenuReader>(services => (AdminMealService)services.GetRequiredService<IAdminMealService>()); builder.Services.AddScoped<IOperationalCalendarService, DefaultOperationalCalendarService>(); builder.Services.AddScoped<IDeliverySchedulingService, DeliverySchedulingService>(); builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddValidatorsFromAssemblyContaining<MealSelectionRequestValidator>(); builder.Services.AddFluentValidationAutoValidation();
 
-builder.Services.AddControllers().AddJsonOptions(o => { o.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull; o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()); });
+builder.Services.AddControllers().AddJsonOptions(o => { o.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull; o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(new UpperCaseJsonNamingPolicy())); });
 builder.Services.AddApiVersioning(o => { o.DefaultApiVersion = new(1); o.AssumeDefaultVersionWhenUnspecified = true; o.ReportApiVersions = true; o.ApiVersionReader = new UrlSegmentApiVersionReader(); }).AddMvc().AddApiExplorer(o => { o.GroupNameFormat = "'v'VVV"; o.SubstituteApiVersionInUrl = true; });
 builder.Services.AddEndpointsApiExplorer(); builder.Services.AddSwaggerGen(o => { o.SwaggerDoc("v1", new() { Title = "Diet Time Meal API", Version = "v1", Description = "Localized meal catalogue, plan selection, and administration API." }); o.AddSecurityDefinition("Bearer", new() { Type = SecuritySchemeType.Http, Scheme = "bearer", BearerFormat = "JWT", Description = "JWT access token" }); o.AddSecurityRequirement(new() { [new OpenApiSecurityScheme { Reference = new() { Type = ReferenceType.SecurityScheme, Id = "Bearer" } }] = [] }); var xml = Path.Combine(AppContext.BaseDirectory, "DietTime.Meal.Api.xml"); if (File.Exists(xml)) o.IncludeXmlComments(xml); });
 builder.Services.AddProblemDetails(); builder.Services.AddHealthChecks().AddDbContextCheck<DietTimeDbContext>("postgresql");
@@ -83,3 +85,8 @@ app.UseCors("Flutter"); if (!app.Environment.IsDevelopment()) app.UseHttpsRedire
 app.Run();
 
 public partial class Program { }
+
+public sealed class UpperCaseJsonNamingPolicy : JsonNamingPolicy
+{
+    public override string ConvertName(string name) => name.ToUpperInvariant();
+}

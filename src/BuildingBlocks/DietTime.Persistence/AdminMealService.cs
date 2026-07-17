@@ -3,10 +3,11 @@ using DietTime.Contracts;
 using DietTime.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
 
 namespace DietTime.Persistence;
 
-public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, IMemoryCache cache) : IAdminMealService
+public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, IMemoryCache cache, IOptions<DeliveryScheduleOptions> deliverySchedule) : IAdminMealService, ITemplateMenuReader
 {
     private const int ExpiringMealHorizonDays = 7;
 
@@ -640,7 +641,6 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
     {
         var plan = await db.MealPlanTemplates.AsNoTracking()
             .Include(x => x.Translations)
-            .Include(x => x.Days).ThenInclude(x => x.Translations)
             .Include(x => x.Days).ThenInclude(x => x.Slots).ThenInclude(x => x.MealType).ThenInclude(x => x.Translations)
             .Include(x => x.Days).ThenInclude(x => x.Slots).ThenInclude(x => x.Options).ThenInclude(x => x.MealItem).ThenInclude(x => x.Translations)
             .SingleOrDefaultAsync(x => x.Id == planId, ct);
@@ -657,11 +657,13 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             plan.ValidFrom,
             plan.ValidUntil,
             plan.Translations.Select(x => new AdminPlanTranslationResponse(x.LanguageCode, x.Name, x.ShortDescription, x.FullDescription)).ToArray(),
-            plan.Days.OrderBy(x => x.DayNumber).Select(day => new AdminPlanDayResponse(
+            plan.Days.OrderBy(x => x.DisplayOrder).Select(day => new AdminPlanDayResponse(
                 day.Id,
-                day.DayNumber,
-                day.Translations.FirstOrDefault(x => x.LanguageCode == "en")?.Label ?? $"Day {day.DayNumber}",
-                day.Translations.FirstOrDefault(x => x.LanguageCode == "ar")?.Label,
+                plan.Id,
+                day.MenuWeekday,
+                day.DisplayOrder,
+                day.IsActive,
+                day.Slots.Count,
                 day.Slots.OrderBy(x => x.DisplayOrder).Select(slot => new AdminPlanSlotResponse(
                     slot.Id,
                     slot.MealTypeId,
@@ -677,10 +679,68 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
                         option.IsDefault)).ToArray())).ToArray())).ToArray());
     }
 
-    public async Task<Guid> CreatePlanAsync(CreatePlanRequest request, Guid? userId, CancellationToken ct) { var now = clock.GetUtcNow(); var p = new MealPlanTemplate { Code = request.Code, PlanType = request.PlanType, DurationDays = request.DurationDays, IsCustomizable = request.IsCustomizable, IsActive = true, IsPublished = false, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 }; foreach (var t in request.Translations) p.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now }); AddPlanStructure(p, request.Days ?? [], now, userId); db.Add(p); await db.SaveChangesAsync(ct); return p.Id; }
-    public async Task<bool> UpdatePlanAsync(Guid planId, CreatePlanRequest request, Guid? userId, CancellationToken ct) { await using var tx = await db.Database.BeginTransactionAsync(ct); var p = await db.MealPlanTemplates.Include(x => x.Translations).SingleOrDefaultAsync(x => x.Id == planId, ct); if (p is null) return false; var now = clock.GetUtcNow(); p.Code = request.Code; p.PlanType = request.PlanType; p.DurationDays = request.DurationDays; p.IsCustomizable = request.IsCustomizable; p.ValidFrom = request.ValidFrom; p.ValidUntil = request.ValidUntil; p.UpdatedAt = now; p.UpdatedBy = userId; p.RowVersion++; db.MealPlanTemplateTranslations.RemoveRange(p.Translations); foreach (var t in request.Translations) p.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now }); if (request.Days is not null) { await db.MealPlanTemplateDays.Where(x => x.MealPlanTemplateId == planId).ExecuteDeleteAsync(ct); AddPlanStructure(p, request.Days, now, userId); } await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return true; }
+    public async Task<Guid> CreatePlanAsync(CreatePlanRequest request, Guid? userId, CancellationToken ct) { var now = clock.GetUtcNow(); ValidatePlanDays(request.Days ?? []); var p = new MealPlanTemplate { Code = request.Code, PlanType = request.PlanType, DurationDays = request.DurationDays, IsCustomizable = request.IsCustomizable, IsActive = true, IsPublished = false, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 }; foreach (var t in request.Translations) p.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now }); AddPlanStructure(p, request.Days ?? [], now, userId); db.Add(p); await db.SaveChangesAsync(ct); return p.Id; }
+    public async Task<bool> UpdatePlanAsync(Guid planId, CreatePlanRequest request, Guid? userId, CancellationToken ct) { await using var tx = await db.Database.BeginTransactionAsync(ct); var p = await db.MealPlanTemplates.Include(x => x.Translations).SingleOrDefaultAsync(x => x.Id == planId, ct); if (p is null) return false; if (request.Days is not null) ValidatePlanDays(request.Days); var now = clock.GetUtcNow(); p.Code = request.Code; p.PlanType = request.PlanType; p.DurationDays = request.DurationDays; p.IsCustomizable = request.IsCustomizable; p.ValidFrom = request.ValidFrom; p.ValidUntil = request.ValidUntil; p.UpdatedAt = now; p.UpdatedBy = userId; p.RowVersion++; db.MealPlanTemplateTranslations.RemoveRange(p.Translations); foreach (var t in request.Translations) p.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now }); if (request.Days is not null) { await db.MealPlanTemplateDays.Where(x => x.MealPlanTemplateId == planId).ExecuteDeleteAsync(ct); AddPlanStructure(p, request.Days, now, userId); } await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return true; }
     public async Task<bool> DeletePlanAsync(Guid planId, CancellationToken ct) { await using var tx = await db.Database.BeginTransactionAsync(ct); await db.MealPlanPrices.Where(x => x.MealPlanTemplateId == planId).ExecuteDeleteAsync(ct); var deleted = await db.MealPlanTemplates.Where(x => x.Id == planId).ExecuteDeleteAsync(ct) > 0; await tx.CommitAsync(ct); return deleted; }
-    public async Task<Guid?> AddPlanDayAsync(Guid planId, CreatePlanDayRequest request, Guid? userId, CancellationToken ct) { if (!await db.MealPlanTemplates.AnyAsync(x => x.Id == planId, ct)) return null; var now = clock.GetUtcNow(); var d = new MealPlanTemplateDay { MealPlanTemplateId = planId, DayNumber = request.DayNumber, DayOfWeek = request.DayOfWeek, IsActive = true, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId }; d.Translations.Add(new() { LanguageCode = "en", Label = request.EnglishLabel, CreatedAt = now, UpdatedAt = now }); if (!string.IsNullOrWhiteSpace(request.ArabicLabel)) d.Translations.Add(new() { LanguageCode = "ar", Label = request.ArabicLabel, CreatedAt = now, UpdatedAt = now }); db.Add(d); await db.SaveChangesAsync(ct); return d.Id; }
+    public async Task<IReadOnlyList<MealPlanTemplateDayResponse>?> GetTemplateDaysAsync(Guid templateId, CancellationToken ct)
+    {
+        if (!await db.MealPlanTemplates.AnyAsync(x => x.Id == templateId, ct)) return null;
+        return await db.MealPlanTemplateDays.AsNoTracking()
+            .Where(x => x.MealPlanTemplateId == templateId)
+            .OrderBy(x => x.DisplayOrder)
+            .ThenBy(x => x.MenuWeekday)
+            .Select(x => new MealPlanTemplateDayResponse(x.Id, templateId, x.MenuWeekday, x.DisplayOrder, x.IsActive, x.Slots.Count))
+            .ToListAsync(ct);
+    }
+
+    public async Task<Guid?> CreateTemplateDayAsync(Guid templateId, UpsertMealPlanTemplateDayRequest request, Guid? userId, CancellationToken ct)
+    {
+        if (!await db.MealPlanTemplates.AnyAsync(x => x.Id == templateId, ct)) return null;
+        var weekday = RequireDeliveryWeekday(request.MenuWeekday);
+        if (await db.MealPlanTemplateDays.AnyAsync(x => x.MealPlanTemplateId == templateId && x.MenuWeekday == weekday, ct))
+            throw DuplicateWeekday(weekday);
+        var now = clock.GetUtcNow();
+        var day = new MealPlanTemplateDay { MealPlanTemplateId = templateId, MenuWeekday = weekday, DisplayOrder = request.DisplayOrder, IsActive = request.IsActive, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId };
+        db.Add(day);
+        await db.SaveChangesAsync(ct);
+        return day.Id;
+    }
+
+    public async Task<bool> UpdateTemplateDayAsync(Guid templateId, Guid dayId, UpsertMealPlanTemplateDayRequest request, Guid? userId, CancellationToken ct)
+    {
+        var day = await db.MealPlanTemplateDays.SingleOrDefaultAsync(x => x.Id == dayId && x.MealPlanTemplateId == templateId, ct);
+        if (day is null) return false;
+        var weekday = RequireDeliveryWeekday(request.MenuWeekday);
+        if (await db.MealPlanTemplateDays.AnyAsync(x => x.MealPlanTemplateId == templateId && x.Id != dayId && x.MenuWeekday == weekday, ct))
+            throw DuplicateWeekday(weekday);
+        day.MenuWeekday = weekday;
+        day.DisplayOrder = request.DisplayOrder;
+        day.IsActive = request.IsActive;
+        day.UpdatedAt = clock.GetUtcNow();
+        day.UpdatedBy = userId;
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public async Task<bool> DeactivateTemplateDayAsync(Guid templateId, Guid dayId, Guid? userId, CancellationToken ct)
+    {
+        var day = await db.MealPlanTemplateDays.SingleOrDefaultAsync(x => x.Id == dayId && x.MealPlanTemplateId == templateId, ct);
+        if (day is null) return false;
+        day.IsActive = false;
+        day.UpdatedAt = clock.GetUtcNow();
+        day.UpdatedBy = userId;
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public async Task<MealPlanTemplateDayDetailResponse?> GetTemplateDayByWeekdayAsync(Guid templateId, MenuWeekday weekday, CancellationToken ct)
+    {
+        var day = await db.MealPlanTemplateDays.AsNoTracking()
+            .Include(x => x.Slots).ThenInclude(x => x.MealType).ThenInclude(x => x.Translations)
+            .Include(x => x.Slots).ThenInclude(x => x.Options).ThenInclude(x => x.MealItem).ThenInclude(x => x.Translations)
+            .SingleOrDefaultAsync(x => x.MealPlanTemplateId == templateId && x.MenuWeekday == weekday && x.IsActive, ct);
+        return day is null ? null : ToTemplateDayDetail(day);
+    }
     public async Task<Guid?> AddPlanSlotAsync(Guid dayId, CreatePlanSlotRequest request, Guid? userId, CancellationToken ct) { if (!await db.MealPlanTemplateDays.AnyAsync(x => x.Id == dayId, ct)) return null; var now = clock.GetUtcNow(); var s = new MealPlanTemplateSlot { MealPlanTemplateDayId = dayId, MealTypeId = request.MealTypeId, DisplayOrder = request.DisplayOrder, MinimumSelection = request.MinimumSelection, MaximumSelection = request.MaximumSelection, IsRequired = request.IsRequired, SelectionCutoffTime = request.SelectionCutoffTime, AllowsPaidUpgrade = request.AllowsPaidUpgrade, IsActive = true, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 }; db.Add(s); await db.SaveChangesAsync(ct); return s.Id; }
     public async Task<Guid?> AddSlotOptionAsync(Guid slotId, CreateSlotOptionRequest request, Guid? userId, CancellationToken ct) { if (!await db.MealPlanTemplateSlots.AnyAsync(x => x.Id == slotId, ct)) return null; if (request.IsDefault) await db.MealPlanSlotOptions.Where(x => x.MealPlanTemplateSlotId == slotId && x.IsDefault).ExecuteUpdateAsync(s => s.SetProperty(x => x.IsDefault, false), ct); var now = clock.GetUtcNow(); var o = new MealPlanSlotOption { MealPlanTemplateSlotId = slotId, MealItemId = request.MealItemId, AdditionalPrice = request.AdditionalPrice, IsDefault = request.IsDefault, IsAvailable = request.IsAvailable, DisplayOrder = request.DisplayOrder, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId }; db.Add(o); await db.SaveChangesAsync(ct); return o.Id; }
     public async Task<bool> DeleteSlotOptionAsync(Guid slotId, Guid optionId, CancellationToken ct) => await db.MealPlanSlotOptions.Where(x => x.Id == optionId && x.MealPlanTemplateSlotId == slotId).ExecuteDeleteAsync(ct) > 0;
@@ -690,9 +750,8 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
     {
         foreach (var requestDay in days)
         {
-            var day = new MealPlanTemplateDay { DayNumber = requestDay.DayNumber, DayOfWeek = requestDay.DayOfWeek, IsActive = true, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId };
-            day.Translations.Add(new() { LanguageCode = "en", Label = requestDay.EnglishLabel, CreatedAt = now, UpdatedAt = now });
-            if (!string.IsNullOrWhiteSpace(requestDay.ArabicLabel)) day.Translations.Add(new() { LanguageCode = "ar", Label = requestDay.ArabicLabel, CreatedAt = now, UpdatedAt = now });
+            var weekday = ResolveWeekday(requestDay);
+            var day = new MealPlanTemplateDay { MenuWeekday = weekday, DisplayOrder = requestDay.DisplayOrder, IsActive = requestDay.IsActive, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId };
             foreach (var requestSlot in requestDay.Slots)
             {
                 var slot = new MealPlanTemplateSlot { MealTypeId = requestSlot.MealTypeId, DisplayOrder = requestSlot.DisplayOrder, MinimumSelection = requestSlot.MinimumSelection, MaximumSelection = requestSlot.MaximumSelection, IsRequired = requestSlot.IsRequired, SelectionCutoffTime = requestSlot.SelectionCutoffTime, AllowsPaidUpgrade = requestSlot.AllowsPaidUpgrade, IsActive = true, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 };
@@ -702,6 +761,61 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             plan.Days.Add(day);
         }
     }
+
+    private void ValidatePlanDays(IEnumerable<UpsertPlanDayRequest> days)
+    {
+        var requests = days.ToArray();
+        if (requests.Any(x => x.DisplayOrder <= 0))
+            throw new TemplateDayException("INVALID_DISPLAY_ORDER", "Display order must be greater than zero.", 400);
+        var resolved = requests.Select(ResolveWeekday).ToArray();
+        var duplicate = resolved.GroupBy(x => x).FirstOrDefault(x => x.Count() > 1);
+        if (duplicate is not null) throw DuplicateWeekday(duplicate.Key);
+        foreach (var weekday in resolved) RequireDeliveryWeekday(weekday);
+    }
+
+    private MenuWeekday RequireDeliveryWeekday(MenuWeekday? weekday)
+    {
+        if (weekday is null) throw new TemplateDayException("MENU_WEEKDAY_REQUIRED", "Menu weekday is required.", 400);
+        if (!deliverySchedule.Value.IsDeliveryDay(weekday.Value))
+            throw new TemplateDayException("NON_DELIVERY_WEEKDAY", $"{weekday.Value} is configured as a non-delivery day.", 422);
+        return weekday.Value;
+    }
+
+    private static TemplateDayException DuplicateWeekday(MenuWeekday weekday) => new(
+        "DUPLICATE_TEMPLATE_WEEKDAY",
+        $"{weekday} already exists in this template.",
+        409);
+
+    private static MenuWeekday ResolveWeekday(UpsertPlanDayRequest request) => request.MenuWeekday
+        ?? throw new TemplateDayException("MENU_WEEKDAY_REQUIRED", "Menu weekday is required.", 400);
+
+    private static MealPlanTemplateDayDetailResponse ToTemplateDayDetail(MealPlanTemplateDay day) => new(
+        day.Id,
+        day.MealPlanTemplateId,
+        day.MenuWeekday,
+        day.DisplayOrder,
+        day.IsActive,
+        day.Slots.Count,
+        day.Slots.OrderBy(x => x.DisplayOrder).Select(slot => new TemplateMenuSlotResponse(
+            slot.Id,
+            slot.MealTypeId,
+            slot.MealType.Code,
+            slot.MealType.Translations.FirstOrDefault(x => x.LanguageCode == "en")?.Name ?? slot.MealType.Code,
+            slot.DisplayOrder,
+            slot.MinimumSelection,
+            slot.MaximumSelection,
+            slot.IsRequired,
+            slot.SelectionCutoffTime,
+            slot.AllowsPaidUpgrade,
+            slot.IsActive,
+            slot.Options.OrderBy(x => x.DisplayOrder).Select(option => new TemplateMenuOptionResponse(
+                option.Id,
+                option.MealItemId,
+                option.MealItem.Translations.FirstOrDefault(x => x.LanguageCode == "en")?.Name ?? option.MealItem.Sku,
+                option.AdditionalPrice,
+                option.IsDefault,
+                option.IsAvailable,
+                option.DisplayOrder)).ToArray())).ToArray());
 
     private static void ApplyTranslations(MealItem meal, IEnumerable<AdminTranslationRequest> values, DateTimeOffset now) { foreach (var t in values) meal.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, PreparationInstructions = t.PreparationInstructions, ServingNotes = t.ServingNotes, CreatedAt = now, UpdatedAt = now }); }
     private static void ApplyNutrition(MealItem meal, AdminNutritionRequest? n, DateTimeOffset now) { if (n is null) { meal.Nutrition = null; return; } meal.Nutrition ??= new() { CreatedAt = now }; meal.Nutrition.ServingQuantity = n.ServingQuantity; meal.Nutrition.ServingUnit = n.ServingUnit; meal.Nutrition.CaloriesKcal = n.CaloriesKcal; meal.Nutrition.ProteinGrams = n.ProteinGrams; meal.Nutrition.CarbohydratesGrams = n.CarbohydratesGrams; meal.Nutrition.FatGrams = n.FatGrams; meal.Nutrition.SaturatedFatGrams = n.SaturatedFatGrams; meal.Nutrition.TransFatGrams = n.TransFatGrams; meal.Nutrition.FiberGrams = n.FiberGrams; meal.Nutrition.SugarGrams = n.SugarGrams; meal.Nutrition.SodiumMg = n.SodiumMg; meal.Nutrition.CholesterolMg = n.CholesterolMg; meal.Nutrition.UpdatedAt = now; }

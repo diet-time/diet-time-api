@@ -1,4 +1,5 @@
 using DietTime.Contracts;
+using DietTime.Domain;
 using FluentValidation;
 
 namespace DietTime.Application;
@@ -65,4 +66,13 @@ public sealed class CreatePlanRequestValidator : AbstractValidator<CreatePlanReq
 {
     private static readonly string[] PlanTypes = ["STANDARD", "WEIGHT_LOSS", "WEIGHT_GAIN", "KETO", "DIABETIC", "VEGETARIAN", "VEGAN", "HIGH_PROTEIN", "LOW_CARB", "BALANCED", "CUSTOM"];
     public CreatePlanRequestValidator() { RuleFor(x => x.Code).NotEmpty().MaximumLength(50); RuleFor(x => x.PlanType).Must(PlanTypes.Contains); RuleFor(x => x.DurationDays).InclusiveBetween(1, 365); RuleFor(x => x.Translations).NotEmpty(); }
+}
+
+public sealed class UpsertMealPlanTemplateDayRequestValidator : AbstractValidator<UpsertMealPlanTemplateDayRequest>
+{
+    public UpsertMealPlanTemplateDayRequestValidator()
+    {
+        RuleFor(x => x.MenuWeekday).NotNull().IsInEnum();
+        RuleFor(x => x.DisplayOrder).GreaterThan(0);
+    }
 }

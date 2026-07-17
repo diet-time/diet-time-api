@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using DietTime.Application;
+using DietTime.Contracts;
 using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -44,6 +45,14 @@ public sealed class ExceptionMiddleware(RequestDelegate next, ILogger<ExceptionM
         try { await next(context); }
         catch (Exception ex)
         {
+            if (ex is TemplateDayException templateDay)
+            {
+                logger.LogWarning(ex, "Template weekday request rejected");
+                context.Response.StatusCode = templateDay.StatusCode;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsJsonAsync(new TemplateDayErrorResponse(templateDay.Code, templateDay.Message));
+                return;
+            }
             var (status, title) = ex switch { ValidationException => (400, "Validation failed"), UnsupportedLanguageException => (400, "Unsupported language"), ArgumentException => (400, "Invalid request"), DbUpdateConcurrencyException => (409, "Concurrency conflict"), DbUpdateException => (409, "Database conflict"), InvalidOperationException => (422, "Request cannot be processed"), _ => (500, "An unexpected error occurred") };
             if (status >= 500) logger.LogError(ex, "Unhandled request failure"); else logger.LogWarning(ex, "Request rejected");
             var details = new ProblemDetails { Status = status, Title = title, Detail = status < 500 || environment.IsDevelopment() ? ex.Message : "The server could not complete the request.", Instance = context.Request.Path }; details.Extensions["correlationId"] = context.Response.Headers["X-Correlation-ID"].ToString();

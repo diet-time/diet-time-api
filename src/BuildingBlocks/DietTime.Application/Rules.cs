@@ -19,18 +19,6 @@ public static class MealAvailability
         status == "ACTIVE" && isAvailable && (from is null || from <= now) && (until is null || until > now);
 }
 
-public static class TemplateCalendar
-{
-    public static int ResolveDayNumber(DateOnly startDate, DateOnly date, int durationDays)
-    {
-        if (durationDays <= 0) throw new ArgumentOutOfRangeException(nameof(durationDays));
-        var offset = date.DayNumber - startDate.DayNumber;
-        return ((offset % durationDays) + durationDays) % durationDays + 1;
-    }
-
-    public static short IsoDayOfWeek(DateOnly date) => (short)(date.DayOfWeek == DayOfWeek.Sunday ? 7 : (int)date.DayOfWeek);
-}
-
 public static class SelectionRules
 {
     public static bool IsCountValid(int count, int minimum, int maximum) => count >= minimum && count <= maximum;

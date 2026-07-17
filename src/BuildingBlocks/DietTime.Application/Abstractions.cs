@@ -1,4 +1,5 @@
 using DietTime.Contracts;
+using DietTime.Domain;
 
 namespace DietTime.Application;
 
@@ -46,7 +47,11 @@ public interface IAdminMealService
     Task<Guid> CreatePlanAsync(CreatePlanRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<bool> UpdatePlanAsync(Guid planId, CreatePlanRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<bool> DeletePlanAsync(Guid planId, CancellationToken cancellationToken);
-    Task<Guid?> AddPlanDayAsync(Guid planId, CreatePlanDayRequest request, Guid? userId, CancellationToken cancellationToken);
+    Task<IReadOnlyList<MealPlanTemplateDayResponse>?> GetTemplateDaysAsync(Guid templateId, CancellationToken cancellationToken);
+    Task<Guid?> CreateTemplateDayAsync(Guid templateId, UpsertMealPlanTemplateDayRequest request, Guid? userId, CancellationToken cancellationToken);
+    Task<bool> UpdateTemplateDayAsync(Guid templateId, Guid dayId, UpsertMealPlanTemplateDayRequest request, Guid? userId, CancellationToken cancellationToken);
+    Task<bool> DeactivateTemplateDayAsync(Guid templateId, Guid dayId, Guid? userId, CancellationToken cancellationToken);
+    Task<MealPlanTemplateDayDetailResponse?> GetTemplateDayByWeekdayAsync(Guid templateId, MenuWeekday weekday, CancellationToken cancellationToken);
     Task<Guid?> AddPlanSlotAsync(Guid dayId, CreatePlanSlotRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<Guid?> AddSlotOptionAsync(Guid slotId, CreateSlotOptionRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<bool> DeleteSlotOptionAsync(Guid slotId, Guid optionId, CancellationToken cancellationToken);
@@ -63,6 +68,19 @@ public interface IStorageUrlService
 }
 
 public interface ILanguageResolver { string Resolve(string? queryLanguage, string? acceptLanguage); }
+public interface IOperationalCalendarService
+{
+    Task<bool> IsOperationalDateAsync(DateOnly date, CancellationToken cancellationToken);
+}
+public interface ITemplateMenuReader
+{
+    Task<MealPlanTemplateDayDetailResponse?> GetTemplateDayByWeekdayAsync(Guid templateId, MenuWeekday weekday, CancellationToken cancellationToken);
+}
+public interface IDeliverySchedulingService
+{
+    Task<DateOnly> GetNextDeliveryDateAsync(DateOnly joiningDate, IReadOnlyCollection<DayOfWeek> activeDeliveryDays, IReadOnlyCollection<DateOnly> holidays, CancellationToken cancellationToken);
+    Task<MealPlanTemplateDayDetailResponse> GetMenuForDeliveryDateAsync(Guid templateId, DateOnly deliveryDate, CancellationToken cancellationToken);
+}
 public interface IAuthService
 {
     Task<TokenResponse?> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken);

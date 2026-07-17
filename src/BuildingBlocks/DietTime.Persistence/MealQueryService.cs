@@ -1,6 +1,7 @@
 using System.Globalization;
 using DietTime.Application;
 using DietTime.Contracts;
+using DietTime.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 
@@ -45,17 +46,16 @@ public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService st
     public async Task<IReadOnlyList<CalendarDayResponse>?> GetCalendarAsync(Guid planId, DateOnly startDate, int numberOfDays, string language, CancellationToken ct)
     {
         var plan = await db.MealPlanTemplates.AsNoTracking().Where(p => p.Id == planId && p.IsActive && p.IsPublished)
-            .Select(p => new { p.DurationDays, Days = p.Days.Where(d => d.IsActive).Select(d => new { d.Id, d.DayNumber, d.DayOfWeek }).ToList() }).SingleOrDefaultAsync(ct);
+            .Select(p => new { Days = p.Days.Where(d => d.IsActive).Select(d => new { d.Id, d.MenuWeekday }).ToList() }).SingleOrDefaultAsync(ct);
         if (plan is null) return null;
-        var fixedWeekdays = plan.Days.Any(d => d.DayOfWeek.HasValue);
         var culture = CultureInfo.GetCultureInfo(language == "ar" ? "ar-QA" : "en-US");
         var result = new List<CalendarDayResponse>(numberOfDays);
         for (var i = 0; i < numberOfDays; i++)
         {
-            var date = startDate.AddDays(i); var iso = TemplateCalendar.IsoDayOfWeek(date);
-            var day = fixedWeekdays ? plan.Days.FirstOrDefault(d => d.DayOfWeek == iso) : plan.Days.FirstOrDefault(d => d.DayNumber == TemplateCalendar.ResolveDayNumber(startDate, date, plan.DurationDays));
+            var date = startDate.AddDays(i); var weekday = MenuWeekdayExtensions.FromDate(date);
+            var day = plan.Days.FirstOrDefault(d => d.MenuWeekday == weekday);
             if (day is null) continue;
-            result.Add(new CalendarDayResponse(day.Id, date, day.DayNumber, iso, culture.DateTimeFormat.GetAbbreviatedDayName(date.DayOfWeek), culture.DateTimeFormat.GetDayName(date.DayOfWeek), true));
+            result.Add(new CalendarDayResponse(day.Id, date, weekday, culture.DateTimeFormat.GetAbbreviatedDayName(date.DayOfWeek), culture.DateTimeFormat.GetDayName(date.DayOfWeek), true));
         }
         return result;
     }
@@ -66,11 +66,10 @@ public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService st
         if (dayId is null)
         {
             if (request.Date is null) return null;
-            var plan = await db.MealPlanTemplates.AsNoTracking().Where(p => p.Id == planId && p.IsActive && p.IsPublished).Select(p => new { p.DurationDays, p.ValidFrom, Days = p.Days.Where(d => d.IsActive).Select(d => new { d.Id, d.DayNumber, d.DayOfWeek }).ToList() }).SingleOrDefaultAsync(ct);
+            var plan = await db.MealPlanTemplates.AsNoTracking().Where(p => p.Id == planId && p.IsActive && p.IsPublished).Select(p => new { Days = p.Days.Where(d => d.IsActive).Select(d => new { d.Id, d.MenuWeekday }).ToList() }).SingleOrDefaultAsync(ct);
             if (plan is null) return null;
-            var iso = TemplateCalendar.IsoDayOfWeek(request.Date.Value);
-            var fixedDay = plan.Days.Any(d => d.DayOfWeek.HasValue);
-            dayId = fixedDay ? plan.Days.FirstOrDefault(d => d.DayOfWeek == iso)?.Id : plan.Days.FirstOrDefault(d => d.DayNumber == TemplateCalendar.ResolveDayNumber(plan.ValidFrom ?? request.Date.Value, request.Date.Value, plan.DurationDays))?.Id;
+            var weekday = MenuWeekdayExtensions.FromDate(request.Date.Value);
+            dayId = plan.Days.FirstOrDefault(d => d.MenuWeekday == weekday)?.Id;
         }
         if (dayId is null) return new PagedResult<MealCardResponse>([], new(request.Page, request.PageSize, 0, 0));
 
