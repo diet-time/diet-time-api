@@ -12,7 +12,7 @@ public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService st
     public async Task<IReadOnlyList<PlanCategoryResponse>> GetPlanCategoriesAsync(string language, DateOnly today, CancellationToken ct)
     {
         var rows = await db.MealPlanTemplates.AsNoTracking()
-            .Where(p => p.IsActive && p.IsPublished && (p.ValidFrom == null || p.ValidFrom <= today) && (p.ValidUntil == null || p.ValidUntil >= today))
+            .Where(p => p.IsActive && p.IsPublished && !db.MealPlanTemplates.Any(v => v.VersionGroupId == p.VersionGroupId && v.IsPublished && v.VersionNumber > p.VersionNumber) && (p.ValidFrom == null || p.ValidFrom <= today) && (p.ValidUntil == null || p.ValidUntil >= today))
             .OrderBy(p => p.PlanType).ThenBy(p => p.Code)
             .Select(p => new
             {
@@ -134,7 +134,7 @@ public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService st
 
     public async Task<PagedResult<MealSearchResponse>> SearchMealsAsync(MealSearchQuery request, string language, DateTimeOffset now, CancellationToken ct)
     {
-        var q = db.MealItems.AsNoTracking().Where(m => m.Status == "ACTIVE" && m.IsAvailable && (m.AvailableFrom == null || m.AvailableFrom <= now) && (m.AvailableUntil == null || m.AvailableUntil > now));
+        var q = db.MealItems.AsNoTracking().Where(m => m.Status == "ACTIVE" && !db.MealItems.Any(v => v.VersionGroupId == m.VersionGroupId && v.Status == "ACTIVE" && v.VersionNumber > m.VersionNumber) && !db.MealItems.Any(v => v.VersionGroupId == m.VersionGroupId && v.IsLatest && (v.Status == "INACTIVE" || v.Status == "ARCHIVED")) && m.IsAvailable && (m.AvailableFrom == null || m.AvailableFrom <= now) && (m.AvailableUntil == null || m.AvailableUntil > now));
         if (request.CategoryId.HasValue) q = q.Where(m => m.CategoryId == request.CategoryId); if (request.IsVegetarian.HasValue) q = q.Where(m => m.IsVegetarian == request.IsVegetarian); if (request.IsVegan.HasValue) q = q.Where(m => m.IsVegan == request.IsVegan); if (request.IsGlutenFree.HasValue) q = q.Where(m => m.IsGlutenFree == request.IsGlutenFree);
         if (request.MinimumProtein.HasValue) q = q.Where(m => m.Nutrition != null && m.Nutrition.ProteinGrams >= request.MinimumProtein); if (request.MaximumCalories.HasValue) q = q.Where(m => m.Nutrition != null && m.Nutrition.CaloriesKcal <= request.MaximumCalories);
         if (!string.IsNullOrWhiteSpace(request.MealType)) q = q.Where(m => db.MealPlanSlotOptions.Any(o => o.MealItemId == m.Id && o.Slot.MealType.Code == request.MealType.ToUpper()));

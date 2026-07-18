@@ -38,7 +38,8 @@ public sealed record MealSelectionValidationResponse(bool IsValid, decimal Total
 
 public sealed record ChangeMealStatusRequest(string Status);
 public sealed record AdminMealSummaryResponse(Guid Id, string Sku, string Status, bool IsAvailable, string Name, DateTimeOffset UpdatedAt);
-public sealed record AdminMealResponse(Guid Id, string Status, UpsertMealRequest Meal, IReadOnlyList<AdminMediaResponse> Media);
+public sealed record AdminMealResponse(Guid Id, string Status, UpsertMealRequest Meal, IReadOnlyList<AdminMediaResponse> Media, Guid VersionGroupId, int VersionNumber, bool IsLatest);
+public sealed record VersionedUpdateResponse(Guid Id, bool CreatedDraft);
 public sealed record AdminAllergenResponse(
     Guid Id,
     string Code,
@@ -129,12 +130,14 @@ public sealed record AdminMealPlanSummaryResponse(
     bool IsActive,
     DateOnly? ValidFrom,
     DateOnly? ValidUntil,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    Guid VersionGroupId,
+    int VersionNumber);
 public sealed record AdminPlanTranslationResponse(string LanguageCode, string Name, string? ShortDescription, string? FullDescription);
 public sealed record AdminPlanOptionResponse(Guid Id, Guid MealItemId, string MealName, bool IsDefault);
 public sealed record AdminPlanSlotResponse(Guid Id, Guid MealTypeId, string MealTypeName, int DisplayOrder, int MinimumSelection, int MaximumSelection, bool IsRequired, IReadOnlyList<AdminPlanOptionResponse> Options);
 public sealed record AdminPlanDayResponse(Guid Id, Guid TemplateId, MenuWeekday MenuWeekday, int DisplayOrder, bool IsActive, int SlotCount, IReadOnlyList<AdminPlanSlotResponse> Slots);
-public sealed record AdminMealPlanDetailResponse(Guid Id, string Code, string PlanType, int DurationDays, bool IsCustomizable, bool IsPublished, bool IsActive, DateOnly? ValidFrom, DateOnly? ValidUntil, IReadOnlyList<AdminPlanTranslationResponse> Translations, IReadOnlyList<AdminPlanDayResponse> Days);
+public sealed record AdminMealPlanDetailResponse(Guid Id, string Code, string PlanType, int DurationDays, bool IsCustomizable, bool IsPublished, bool IsActive, DateOnly? ValidFrom, DateOnly? ValidUntil, IReadOnlyList<AdminPlanTranslationResponse> Translations, IReadOnlyList<AdminPlanDayResponse> Days, Guid VersionGroupId, int VersionNumber, bool IsLatest);
 public sealed record UpsertPlanOptionRequest(Guid MealItemId, decimal AdditionalPrice, bool IsDefault, bool IsAvailable, int DisplayOrder);
 public sealed record UpsertPlanSlotRequest(Guid MealTypeId, int DisplayOrder, int MinimumSelection, int MaximumSelection, bool IsRequired, TimeOnly? SelectionCutoffTime, bool AllowsPaidUpgrade, IReadOnlyList<UpsertPlanOptionRequest> Options);
 public sealed record UpsertPlanDayRequest(MenuWeekday? MenuWeekday, int DisplayOrder, bool IsActive, IReadOnlyList<UpsertPlanSlotRequest> Slots);

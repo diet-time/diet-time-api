@@ -38,7 +38,7 @@ public interface IAdminMealService
     Task<PagedResult<AdminMealSummaryResponse>> GetMealsAsync(string? search, int page, int pageSize, CancellationToken cancellationToken);
     Task<AdminMealResponse?> GetMealAsync(Guid mealId, CancellationToken cancellationToken);
     Task<Guid> CreateMealAsync(UpsertMealRequest request, Guid? userId, CancellationToken cancellationToken);
-    Task<bool> UpdateMealAsync(Guid mealId, UpsertMealRequest request, Guid? userId, CancellationToken cancellationToken);
+    Task<VersionedUpdateResponse?> UpdateMealAsync(Guid mealId, UpsertMealRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<bool> SetMealStatusAsync(Guid mealId, string status, Guid? userId, CancellationToken cancellationToken);
     Task<AdminMediaResponse?> AddMediaAsync(Guid mealId, SaveMediaRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<AdminThumbnailUpdateResponse?> SetThumbnailAsync(Guid mealId, SaveThumbnailRequest request, CancellationToken cancellationToken);
@@ -46,7 +46,7 @@ public interface IAdminMealService
     Task<PagedResult<AdminMealPlanSummaryResponse>> GetMealPlansAsync(string? search, int page, int pageSize, CancellationToken cancellationToken);
     Task<AdminMealPlanDetailResponse?> GetMealPlanAsync(Guid planId, CancellationToken cancellationToken);
     Task<Guid> CreatePlanAsync(CreatePlanRequest request, Guid? userId, CancellationToken cancellationToken);
-    Task<bool> UpdatePlanAsync(Guid planId, CreatePlanRequest request, Guid? userId, CancellationToken cancellationToken);
+    Task<VersionedUpdateResponse?> UpdatePlanAsync(Guid planId, CreatePlanRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<bool> DeletePlanAsync(Guid planId, CancellationToken cancellationToken);
     Task<IReadOnlyList<MealPlanTemplateDayResponse>?> GetTemplateDaysAsync(Guid templateId, CancellationToken cancellationToken);
     Task<Guid?> CreateTemplateDayAsync(Guid templateId, UpsertMealPlanTemplateDayRequest request, Guid? userId, CancellationToken cancellationToken);

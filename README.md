@@ -39,13 +39,13 @@ Do not use the checked-in development placeholders as credentials. Secret values
 
 ## Database assumptions
 
-The supplied meal tables, indexes, `pgcrypto`/`gen_random_uuid()`, and `set_updated_at()` trigger function already exist. Entity mappings preserve their names and constraints. The included migration creates ASP.NET Core Identity and hashed refresh-token storage:
+The supplied meal tables, indexes, `pgcrypto`/`gen_random_uuid()`, and `set_updated_at()` trigger function already exist. Entity mappings preserve their names and constraints. Included migrations create ASP.NET Core Identity and hashed refresh-token storage, then add immutable version lineage for published meals and meal-plan templates:
 
 ```powershell
 dotnet ef database update --project src/BuildingBlocks/DietTime.Persistence --startup-project src/Apis/DietTime.Meal.Api
 ```
 
-Run that migration after the supplied meal schema has been installed. It deliberately does not create or alter meal tables. Development seeding is opt-in with `DevelopmentSeed__Enabled=true`, exits when lookup data exists, and must never be enabled in production.
+Run the migrations after the supplied meal schema has been installed. The versioning migration adds `version_group_id`, `version_number`, `is_latest`, and `supersedes_id`, and replaces global SKU/code uniqueness with uniqueness on the latest logical record. Development seeding is opt-in with `DevelopmentSeed__Enabled=true`, exits when lookup data exists, and must never be enabled in production.
 
 ## Public and customer endpoints
 
