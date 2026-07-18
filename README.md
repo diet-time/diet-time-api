@@ -39,7 +39,7 @@ Do not use the checked-in development placeholders as credentials. Secret values
 
 ## Database assumptions
 
-The supplied meal tables, indexes, `pgcrypto`/`gen_random_uuid()`, and `set_updated_at()` trigger function already exist. Entity mappings preserve their names and constraints. The only included migration creates ASP.NET Core Identity and hashed refresh-token storage:
+The supplied meal tables, indexes, `pgcrypto`/`gen_random_uuid()`, and `set_updated_at()` trigger function already exist. Entity mappings preserve their names and constraints. The included migration creates ASP.NET Core Identity and hashed refresh-token storage:
 
 ```powershell
 dotnet ef database update --project src/BuildingBlocks/DietTime.Persistence --startup-project src/Apis/DietTime.Meal.Api

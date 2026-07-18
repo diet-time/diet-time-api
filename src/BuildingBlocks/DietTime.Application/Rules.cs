@@ -22,7 +22,7 @@ public static class MealAvailability
 public static class MealStatuses
 {
     public static bool IsValid(string? status) => status?.Trim().ToUpperInvariant() is
-        "DRAFT" or "PUBLISHED" or "ACTIVE" or "INACTIVE" or "ARCHIVED";
+        "DRAFT" or "ACTIVE" or "INACTIVE" or "ARCHIVED";
 
     public static string Normalize(string status) => status.Trim().ToUpperInvariant();
 }
