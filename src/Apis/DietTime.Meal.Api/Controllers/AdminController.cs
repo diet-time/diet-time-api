@@ -118,20 +118,37 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
             return BadRequest(new ProblemDetails { Title = "Invalid alt text", Detail = "altTextEn cannot exceed 500 characters." });
 
         var normalizedMediaType = mediaType?.Trim().ToUpperInvariant() ?? "IMAGE";
-        if (normalizedMediaType != "IMAGE")
-            return BadRequest(new ProblemDetails { Title = "Invalid media type", Detail = "Only IMAGE media is supported by this endpoint." });
+        if (normalizedMediaType is not ("IMAGE" or "THUMBNAIL"))
+            return BadRequest(new ProblemDetails { Title = "Invalid media type", Detail = "Only IMAGE and THUMBNAIL media are supported by this endpoint." });
 
         await using var content = file.OpenReadStream();
         var detected = await DetectImageTypeAsync(content, ct);
         if (detected is null || !detected.Value.ContentType.Equals(file.ContentType, StringComparison.OrdinalIgnoreCase))
             return BadRequest(new ProblemDetails { Title = "Invalid image", Detail = "Only valid JPEG, PNG, and WebP files are accepted, and the file content must match its Content-Type." });
 
-        var objectKey = $"meals/{mealId:D}/{Guid.NewGuid():N}{detected.Value.Extension}";
+        var objectFolder = normalizedMediaType == "THUMBNAIL" ? "thumbnails" : "images";
+        var objectKey = $"meals/{mealId:D}/{objectFolder}/{Guid.NewGuid():N}{detected.Value.Extension}";
         var uploaded = false;
         try
         {
             await storage.UploadAsync(objectKey, content, detected.Value.ContentType, ct);
             uploaded = true;
+
+            if (normalizedMediaType == "THUMBNAIL")
+            {
+                var thumbnail = await admin.SetThumbnailAsync(mealId, new(objectKey, GetApiMediaUrl(objectKey)), ct);
+                if (thumbnail is null)
+                {
+                    await TryDeleteObjectAsync(objectKey);
+                    uploaded = false;
+                    return Conflict(new ProblemDetails { Title = "Original image required", Detail = "Upload an original meal image before uploading its thumbnail." });
+                }
+
+                uploaded = false;
+                if (!string.IsNullOrWhiteSpace(thumbnail.PreviousObjectKey) && thumbnail.PreviousObjectKey != objectKey)
+                    await TryDeleteObjectAsync(thumbnail.PreviousObjectKey);
+                return Ok(ApiResponse<AdminMediaResponse>.Ok(thumbnail.Media));
+            }
 
             var media = await admin.AddMediaAsync(mealId, new(
                 objectKey,

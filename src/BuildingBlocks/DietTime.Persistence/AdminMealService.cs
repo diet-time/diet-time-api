@@ -537,7 +537,9 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
                 m.IsPrimary,
                 m.DisplayOrder,
                 m.Status,
-                m.Translations.Where(t => t.LanguageCode == "en").Select(t => t.AltText).FirstOrDefault()))
+                m.Translations.Where(t => t.LanguageCode == "en").Select(t => t.AltText).FirstOrDefault(),
+                m.ThumbnailObjectKey,
+                m.ThumbnailUrl))
             .ToArray();
         return new(x.Id, x.Status, new(x.Sku, x.CategoryId, x.PreparationTimeMinutes, x.IsVegetarian, x.IsVegan, x.IsGlutenFree, x.IsDairyFree, x.IsAvailable, x.AvailableFrom, x.AvailableUntil, translations, nutrition, ingredients, allergens, prices, x.Status, x.IsSpicy, x.SpiceLevel), media);
     }
@@ -617,7 +619,31 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         db.Add(media);
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
-        return new(media.Id, mealId, media.MediaType, media.ObjectKey, media.PublicUrl, request.ContentType, media.IsPrimary, media.DisplayOrder, media.Status, request.AltTextEn?.Trim());
+        return new(media.Id, mealId, media.MediaType, media.ObjectKey, media.PublicUrl, request.ContentType, media.IsPrimary, media.DisplayOrder, media.Status, request.AltTextEn?.Trim(), media.ThumbnailObjectKey, media.ThumbnailUrl);
+    }
+
+    public async Task<AdminThumbnailUpdateResponse?> SetThumbnailAsync(Guid mealId, SaveThumbnailRequest request, CancellationToken ct)
+    {
+        var media = await db.MealMedia
+            .Include(m => m.Translations)
+            .Where(m => m.MealItemId == mealId && m.Status == "ACTIVE" && m.MediaType == "IMAGE")
+            .OrderByDescending(m => m.IsPrimary)
+            .ThenBy(m => m.DisplayOrder)
+            .FirstOrDefaultAsync(ct);
+        if (media is null) return null;
+
+        var previousObjectKey = media.ThumbnailObjectKey;
+        media.ThumbnailObjectKey = request.ObjectKey;
+        media.ThumbnailUrl = request.PublicUrl;
+        media.UpdatedAt = clock.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+
+        var altTextEn = media.Translations
+            .Where(t => t.LanguageCode == "en")
+            .Select(t => t.AltText)
+            .FirstOrDefault();
+        var response = new AdminMediaResponse(media.Id, mealId, media.MediaType, media.ObjectKey, media.PublicUrl, media.MimeType ?? "application/octet-stream", media.IsPrimary, media.DisplayOrder, media.Status, altTextEn, media.ThumbnailObjectKey, media.ThumbnailUrl);
+        return new(response, previousObjectKey);
     }
     public async Task<bool> DeleteMediaAsync(Guid mealId, Guid mediaId, CancellationToken ct) => await db.MealMedia.Where(x => x.Id == mediaId && x.MealItemId == mealId).ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, "DELETED").SetProperty(x => x.IsPrimary, false), ct) > 0;
 
