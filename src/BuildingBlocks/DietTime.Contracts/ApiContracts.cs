@@ -38,7 +38,7 @@ public sealed record MealSelectionValidationResponse(bool IsValid, decimal Total
 
 public sealed record ChangeMealStatusRequest(string Status);
 public sealed record AdminMealSummaryResponse(Guid Id, string Sku, string Status, bool IsAvailable, string Name, DateTimeOffset UpdatedAt);
-public sealed record AdminMealResponse(Guid Id, string Status, UpsertMealRequest Meal);
+public sealed record AdminMealResponse(Guid Id, string Status, UpsertMealRequest Meal, IReadOnlyList<AdminMediaResponse> Media);
 public sealed record AdminAllergenResponse(
     Guid Id,
     string Code,
