@@ -49,8 +49,8 @@ public sealed class UpsertMealRequestValidator : AbstractValidator<UpsertMealReq
     public UpsertMealRequestValidator()
     {
         RuleFor(x => x.Sku).NotEmpty().MaximumLength(50).Matches("^[A-Z0-9_-]+$"); RuleFor(x => x.CategoryId).NotEmpty();
-        RuleFor(x => x.Status).Must(status => status is null || status.Trim().ToUpperInvariant() is "DRAFT" or "ACTIVE" or "INACTIVE" or "ARCHIVED")
-            .WithMessage("Status must be DRAFT, ACTIVE, INACTIVE, or ARCHIVED.");
+        RuleFor(x => x.Status).Must(status => status is null || MealStatuses.IsValid(status))
+            .WithMessage("Status must be DRAFT, PUBLISHED, ACTIVE, INACTIVE, or ARCHIVED.");
         RuleFor(x => x.SpiceLevel).InclusiveBetween((short)0, (short)5).When(x => x.SpiceLevel.HasValue);
         RuleFor(x => x.PreparationTimeMinutes).GreaterThanOrEqualTo(0).When(x => x.PreparationTimeMinutes.HasValue);
         RuleFor(x => x.Translations).NotEmpty().Must(x => x.Any(t => t.LanguageCode.Equals("en", StringComparison.OrdinalIgnoreCase))).WithMessage("An English translation is required.");

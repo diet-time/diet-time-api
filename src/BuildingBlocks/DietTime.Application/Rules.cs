@@ -19,6 +19,14 @@ public static class MealAvailability
         status == "ACTIVE" && isAvailable && (from is null || from <= now) && (until is null || until > now);
 }
 
+public static class MealStatuses
+{
+    public static bool IsValid(string? status) => status?.Trim().ToUpperInvariant() is
+        "DRAFT" or "PUBLISHED" or "ACTIVE" or "INACTIVE" or "ARCHIVED";
+
+    public static string Normalize(string status) => status.Trim().ToUpperInvariant();
+}
+
 public static class SelectionRules
 {
     public static bool IsCountValid(int count, int minimum, int maximum) => count >= minimum && count <= maximum;
