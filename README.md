@@ -23,6 +23,7 @@ PORT=8080
 ConnectionStrings__DefaultConnection=Host=...;Port=5432;Database=...;Username=...;Password=...;SSL Mode=Require;Trust Server Certificate=true
 Storage__PublicBaseUrl=<public bucket/CDN base URL>
 Storage__MaxUploadSizeBytes=10485760
+Api__PublicBaseUrl=https://your-api-domain
 AWS_ENDPOINT_URL=<S3-compatible endpoint>
 AWS_S3_BUCKET_NAME=<bucket>
 AWS_ACCESS_KEY_ID=<secret>
@@ -62,7 +63,7 @@ POST /api/v1/auth/login
 POST /api/v1/auth/refresh
 ```
 
-Admin endpoints from the brief are under `/api/v1/admin` and require `Admin`, `Dietitian`, or `ContentManager`. Meal images are uploaded as multipart form data to `POST /api/v1/admin/meals/{mealId}/media/upload`; storage credentials and object URLs remain server-side.
+Admin endpoints from the brief are under `/api/v1/admin` and require `Admin`, `Dietitian`, or `ContentManager`. Meal images are uploaded as multipart form data to `POST /api/v1/admin/meals/{mealId}/media/upload`. The persisted `public_url` points to the public API media route (`GET /api/v1/media/{objectKey}`), while storage credentials and object URLs remain server-side. Set `Api__PublicBaseUrl` to the externally reachable API origin in deployed environments.
 
 Swagger is available outside Production at `/swagger`; liveness/database health is `/health`.
 

@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace DietTime.Meal.Api.Controllers;
 
 [ApiController, ApiVersion(1), Authorize(Roles = "Admin,Dietitian,ContentManager"), Route("api/v{version:apiVersion}/admin")]
-public sealed class AdminController(IAdminMealService admin, IStorageUrlService storage, ILogger<AdminController> logger) : ControllerBase
+public sealed class AdminController(IAdminMealService admin, IStorageUrlService storage, IConfiguration configuration, ILogger<AdminController> logger) : ControllerBase
 {
     private Guid? UserId => Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
     [HttpGet("dashboard")] public async Task<ActionResult<AdminDashboardResponse>> Dashboard(CancellationToken ct) => Ok(await admin.GetDashboardAsync(ct));
@@ -135,7 +135,7 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
 
             var media = await admin.AddMediaAsync(mealId, new(
                 objectKey,
-                storage.GetPublicUrl(objectKey),
+                GetApiMediaUrl(objectKey),
                 detected.Value.ContentType,
                 normalizedMediaType,
                 isPrimary,
@@ -172,6 +172,16 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
     {
         try { await storage.DeleteAsync(objectKey, CancellationToken.None); }
         catch (Exception ex) { logger.LogError(ex, "Failed to delete orphaned storage object {ObjectKey}", objectKey); }
+    }
+
+    private string GetApiMediaUrl(string objectKey)
+    {
+        var configuredBaseUrl = configuration["Api:PublicBaseUrl"];
+        var apiBaseUrl = string.IsNullOrWhiteSpace(configuredBaseUrl)
+            ? $"{Request.Scheme}://{Request.Host}{Request.PathBase}"
+            : configuredBaseUrl.TrimEnd('/');
+        var encodedKey = string.Join('/', objectKey.Split('/').Select(Uri.EscapeDataString));
+        return $"{apiBaseUrl}/api/v1/media/{encodedKey}";
     }
 
     private static async Task<(string ContentType, string Extension)?> DetectImageTypeAsync(Stream content, CancellationToken ct)

@@ -64,8 +64,11 @@ public interface IStorageUrlService
     string GetPublicUrl(string objectKey);
     string GetThumbnailUrl(string objectKey);
     Task UploadAsync(string objectKey, Stream content, string contentType, CancellationToken cancellationToken);
+    Task<StoredObject?> DownloadAsync(string objectKey, CancellationToken cancellationToken);
     Task DeleteAsync(string objectKey, CancellationToken cancellationToken);
 }
+
+public sealed record StoredObject(Stream Content, string ContentType, long? Length);
 
 public interface ILanguageResolver { string Resolve(string? queryLanguage, string? acceptLanguage); }
 public interface IOperationalCalendarService

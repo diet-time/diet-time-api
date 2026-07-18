@@ -3,6 +3,7 @@ using Amazon.S3.Model;
 using DietTime.Application;
 using DietTime.Contracts;
 using Microsoft.Extensions.Options;
+using System.Net;
 
 namespace DietTime.Infrastructure;
 
@@ -41,6 +42,27 @@ public sealed class StorageUrlService(IOptions<StorageOptions> options, IAmazonS
             DisablePayloadSigning = true,
             DisableDefaultChecksumValidation = true
         }, ct);
+    }
+
+    public async Task<StoredObject?> DownloadAsync(string objectKey, CancellationToken ct)
+    {
+        try
+        {
+            var response = await s3.GetObjectAsync(new GetObjectRequest
+            {
+                BucketName = settings.BucketName,
+                Key = objectKey
+            }, ct);
+
+            return new StoredObject(
+                response.ResponseStream,
+                string.IsNullOrWhiteSpace(response.Headers.ContentType) ? "application/octet-stream" : response.Headers.ContentType,
+                response.Headers.ContentLength);
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
     }
 
     public Task DeleteAsync(string objectKey, CancellationToken ct) =>
