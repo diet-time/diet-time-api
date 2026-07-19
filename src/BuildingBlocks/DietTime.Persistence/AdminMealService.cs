@@ -510,7 +510,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             query = query.Where(x => EF.Functions.ILike(x.Sku, $"%{term}%") || x.Translations.Any(t => EF.Functions.ILike(t.Name, $"%{term}%")));
         }
         var count = await query.CountAsync(ct);
-        var rows = await query.OrderByDescending(x => x.UpdatedAt).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new AdminMealSummaryResponse(x.Id, x.Sku, x.Status, x.IsAvailable, x.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? x.Translations.Select(t => t.Name).FirstOrDefault() ?? x.Sku, x.UpdatedAt)).ToListAsync(ct);
+        var rows = await query.OrderByDescending(x => x.UpdatedAt).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new AdminMealSummaryResponse(x.Id, x.Sku, x.Status, x.IsAvailable, x.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? x.Translations.Select(t => t.Name).FirstOrDefault() ?? x.Sku, x.UpdatedAt, x.VersionNumber)).ToListAsync(ct);
         return new(rows, new(page, pageSize, count, (int)Math.Ceiling(count / (double)pageSize)));
     }
 

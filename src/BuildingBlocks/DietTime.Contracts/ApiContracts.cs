@@ -37,7 +37,7 @@ public sealed record MealSelectionItemRequest(Guid SlotId, Guid SlotOptionId, Gu
 public sealed record MealSelectionValidationResponse(bool IsValid, decimal TotalAdditionalPrice, string CurrencyCode, IReadOnlyList<string> Warnings);
 
 public sealed record ChangeMealStatusRequest(string Status);
-public sealed record AdminMealSummaryResponse(Guid Id, string Sku, string Status, bool IsAvailable, string Name, DateTimeOffset UpdatedAt);
+public sealed record AdminMealSummaryResponse(Guid Id, string Sku, string Status, bool IsAvailable, string Name, DateTimeOffset UpdatedAt, int VersionNumber);
 public sealed record AdminMealResponse(Guid Id, string Status, UpsertMealRequest Meal, IReadOnlyList<AdminMediaResponse> Media, Guid VersionGroupId, int VersionNumber, bool IsLatest);
 public sealed record VersionedUpdateResponse(Guid Id, bool CreatedDraft);
 public sealed record AdminAllergenResponse(
