@@ -598,7 +598,39 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         meal.Allergens.Clear(); meal.Prices.Clear(); ApplyTranslations(meal, request.Translations, now); ApplyNutrition(meal, request.Nutrition, now); ApplyAggregate(meal, request, now, userId); await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return new(meal.Id, false);
     }
 
-    public async Task<bool> SetMealStatusAsync(Guid mealId, string status, Guid? userId, CancellationToken ct) { if (!MealStatuses.IsValid(status)) throw new ArgumentException("Invalid meal status."); var groupId = await db.MealItems.Where(x => x.Id == mealId).Select(x => (Guid?)x.VersionGroupId).SingleOrDefaultAsync(ct); if (groupId is null) return false; var meal = await db.MealItems.SingleAsync(x => x.VersionGroupId == groupId && x.IsLatest, ct); meal.Status = MealStatuses.Normalize(status); meal.UpdatedBy = userId; meal.UpdatedAt = clock.GetUtcNow(); meal.RowVersion++; await db.SaveChangesAsync(ct); return true; }
+    public async Task<bool> SetMealStatusAsync(Guid mealId, string status, Guid? userId, CancellationToken ct)
+    {
+        if (!MealStatuses.IsValid(status)) throw new ArgumentException("Invalid meal status.");
+        var groupId = await db.MealItems.Where(x => x.Id == mealId).Select(x => (Guid?)x.VersionGroupId).SingleOrDefaultAsync(ct);
+        if (groupId is null) return false;
+
+        var meal = await db.MealItems
+            .Include(x => x.Translations)
+            .Include(x => x.Nutrition)
+            .Include(x => x.Ingredients)
+            .Include(x => x.Media)
+            .SingleAsync(x => x.VersionGroupId == groupId && x.IsLatest, ct);
+        var normalizedStatus = MealStatuses.Normalize(status);
+
+        if (normalizedStatus == "ACTIVE")
+        {
+            var missingRequirements = new List<string>();
+            if (!meal.Translations.Any(x => x.LanguageCode == "en" && !string.IsNullOrWhiteSpace(x.Name))) missingRequirements.Add("English name");
+            if (!meal.Translations.Any(x => x.LanguageCode == "ar" && !string.IsNullOrWhiteSpace(x.Name))) missingRequirements.Add("Arabic name");
+            if (meal.Nutrition is null || meal.Nutrition.CaloriesKcal <= 0) missingRequirements.Add("nutrition");
+            if (meal.Ingredients.Count == 0) missingRequirements.Add("ingredients");
+            if (!meal.Media.Any(x => x.Status == "ACTIVE" && x.MediaType == "IMAGE")) missingRequirements.Add("meal image");
+            if (missingRequirements.Count > 0)
+                throw new InvalidOperationException($"A meal requires {string.Join(", ", missingRequirements)} before publication.");
+        }
+
+        meal.Status = normalizedStatus;
+        meal.UpdatedBy = userId;
+        meal.UpdatedAt = clock.GetUtcNow();
+        meal.RowVersion++;
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
     public async Task<AdminMediaResponse?> AddMediaAsync(Guid mealId, SaveMediaRequest request, Guid? userId, CancellationToken ct)
     {
         var groupId = await db.MealItems.Where(x => x.Id == mealId).Select(x => (Guid?)x.VersionGroupId).SingleOrDefaultAsync(ct);
