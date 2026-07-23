@@ -503,6 +503,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
 
     public async Task<PagedResult<AdminMealSummaryResponse>> GetMealsAsync(string? search, int page, int pageSize, CancellationToken ct)
     {
+        var now = clock.GetUtcNow();
         var query = db.MealItems.AsNoTracking().Where(x => x.IsLatest);
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -510,7 +511,50 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             query = query.Where(x => EF.Functions.ILike(x.Sku, $"%{term}%") || x.Translations.Any(t => EF.Functions.ILike(t.Name, $"%{term}%")));
         }
         var count = await query.CountAsync(ct);
-        var rows = await query.OrderByDescending(x => x.UpdatedAt).Skip((page - 1) * pageSize).Take(pageSize).Select(x => new AdminMealSummaryResponse(x.Id, x.Sku, x.Status, x.IsAvailable, x.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? x.Translations.Select(t => t.Name).FirstOrDefault() ?? x.Sku, x.UpdatedAt, x.VersionNumber)).ToListAsync(ct);
+        var rows = await query
+            .OrderByDescending(x => x.UpdatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(x => new AdminMealSummaryResponse(
+                x.Id,
+                x.Sku,
+                x.Status,
+                x.IsAvailable,
+                x.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault()
+                    ?? x.Translations.Select(t => t.Name).FirstOrDefault()
+                    ?? x.Sku,
+                new CategoryResponse(
+                    x.Category.Id,
+                    x.Category.Code,
+                    x.Category.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault()
+                        ?? x.Category.Translations.Select(t => t.Name).FirstOrDefault()
+                        ?? x.Category.Code),
+                x.Nutrition == null
+                    ? null
+                    : new NutritionResponse(
+                        x.Nutrition.ServingQuantity,
+                        x.Nutrition.ServingUnit,
+                        x.Nutrition.CaloriesKcal,
+                        x.Nutrition.ProteinGrams,
+                        x.Nutrition.CarbohydratesGrams,
+                        x.Nutrition.FatGrams,
+                        x.Nutrition.SaturatedFatGrams,
+                        x.Nutrition.TransFatGrams,
+                        x.Nutrition.FiberGrams,
+                        x.Nutrition.SugarGrams,
+                        x.Nutrition.SodiumMg,
+                        x.Nutrition.CholesterolMg),
+                x.Prices
+                    .Where(p => p.IsActive
+                        && p.PriceType == "INDIVIDUAL"
+                        && p.EffectiveFrom <= now
+                        && (p.EffectiveUntil == null || p.EffectiveUntil > now))
+                    .OrderByDescending(p => p.EffectiveFrom)
+                    .Select(p => new MoneyResponse(p.Amount, p.CurrencyCode.Trim()))
+                    .FirstOrDefault(),
+                x.UpdatedAt,
+                x.VersionNumber))
+            .ToListAsync(ct);
         return new(rows, new(page, pageSize, count, (int)Math.Ceiling(count / (double)pageSize)));
     }
 
