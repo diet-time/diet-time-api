@@ -56,26 +56,49 @@ public sealed class GuestHomeService(
                     .Select(d => (int?)d.DisplayOrder)
                     .Min() ?? int.MaxValue,
                 db.MealMedia
-                    .Where(m => m.EntityId == p.Id && m.Status == "ACTIVE" && m.MediaType == MealMediaTypes.MealPlan)
-                    .OrderByDescending(m => m.IsPrimary)
+                    .Where(m =>
+                        m.Status == "ACTIVE" &&
+                        m.MediaType == MealMediaTypes.MealPlan &&
+                        db.MealPlanTemplates.Any(mediaPlan =>
+                            mediaPlan.Id == m.EntityId &&
+                            mediaPlan.VersionGroupId == p.VersionGroupId))
+                    .OrderByDescending(m => m.EntityId == p.Id)
+                    .ThenByDescending(m => m.IsPrimary)
+                    .ThenByDescending(m => m.UpdatedAt)
                     .ThenBy(m => m.DisplayOrder)
                     .Select(m => m.PublicUrl)
                     .FirstOrDefault(),
                 db.MealMedia
-                    .Where(m => m.EntityId == p.Id && m.Status == "ACTIVE" && m.MediaType == MealMediaTypes.MealPlan)
-                    .OrderByDescending(m => m.IsPrimary)
+                    .Where(m =>
+                        m.Status == "ACTIVE" &&
+                        m.MediaType == MealMediaTypes.MealPlan &&
+                        db.MealPlanTemplates.Any(mediaPlan =>
+                            mediaPlan.Id == m.EntityId &&
+                            mediaPlan.VersionGroupId == p.VersionGroupId))
+                    .OrderByDescending(m => m.EntityId == p.Id)
+                    .ThenByDescending(m => m.IsPrimary)
+                    .ThenByDescending(m => m.UpdatedAt)
                     .ThenBy(m => m.DisplayOrder)
                     .Select(m => m.ObjectKey)
                     .FirstOrDefault(),
                 p.ValidFrom,
                 p.ValidUntil,
-                p.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault()
-                    ?? p.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault()
+                p.Translations.Where(t => t.LanguageCode.ToLower() == language && t.Name != "").Select(t => t.Name).FirstOrDefault()
+                    ?? p.Translations.Where(t => t.LanguageCode.ToLower() == "en" && t.Name != "").Select(t => t.Name).FirstOrDefault()
                     ?? p.Translations.Select(t => t.Name).FirstOrDefault()
                     ?? p.Code,
-                p.Translations.Where(t => t.LanguageCode == language).Select(t => t.ShortDescription).FirstOrDefault()
-                    ?? p.Translations.Where(t => t.LanguageCode == "en").Select(t => t.ShortDescription).FirstOrDefault()
-                    ?? p.Translations.Select(t => t.ShortDescription).FirstOrDefault()
+                p.Translations
+                    .Where(t => t.LanguageCode.ToLower() == language && t.ShortDescription != null && t.ShortDescription != "")
+                    .Select(t => t.ShortDescription)
+                    .FirstOrDefault()
+                    ?? p.Translations
+                        .Where(t => t.LanguageCode.ToLower() == "en" && t.ShortDescription != null && t.ShortDescription != "")
+                        .Select(t => t.ShortDescription)
+                        .FirstOrDefault()
+                    ?? p.Translations
+                        .Where(t => t.ShortDescription != null && t.ShortDescription != "")
+                        .Select(t => t.ShortDescription)
+                        .FirstOrDefault()
                     ?? string.Empty))
             .ToListAsync(ct);
 
