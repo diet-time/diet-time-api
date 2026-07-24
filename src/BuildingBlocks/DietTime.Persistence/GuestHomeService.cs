@@ -28,7 +28,7 @@ public sealed class GuestHomeService(
         var businessDate = DateOnly.FromDateTime(now.UtcDateTime);
         var requestedDate = request.Date ?? businessDate;
         var cacheKey =
-            $"guest-home:{cacheVersion.Current}:{language}:{requestedDate:yyyy-MM-dd}:{planCode ?? "-"}:{mealTimeCode}:{request.Page}:{request.PageSize}";
+            $"guest-home:{cacheVersion.Current}:{language}:{requestedDate:yyyy-MM-dd}:{planCode ?? "-"}:{mealTimeCode}:{request.Page}:{request.PageSize}:{request.IncludeAll}";
 
         if (cache.TryGetValue(cacheKey, out GuestHomeResponse? cached))
             return cached;
@@ -153,7 +153,8 @@ public sealed class GuestHomeService(
 
         var mealTypes = await db.MealTypes.AsNoTracking()
             .Where(t => t.IsActive &&
-                (t.Code == "BREAKFAST" || t.Code == "LUNCH" || t.Code == "DINNER" || t.Code == "SNACK"))
+                (t.Code == "BREAKFAST" || t.Code == "LUNCH" || t.Code == "DINNER" ||
+                    t.Code == "SNACK" || t.Code == "SNACK_DESSERT"))
             .OrderBy(t => t.DisplayOrder)
             .Select(t => new GuestMealTimeResponse(
                 t.Id,
@@ -174,123 +175,57 @@ public sealed class GuestHomeService(
             0,
             mealTimeCode == "ALL"));
 
-        var mealQuery = db.MealPlanSlotOptions.AsNoTracking()
-            .Where(o =>
-                o.MealPlanTemplateSlotId != Guid.Empty &&
-                o.Slot.MealPlanTemplateDayId == selectedDay.Id &&
-                o.Slot.IsActive &&
-                o.Slot.MealType.IsActive &&
-                o.IsAvailable &&
-                (o.AvailableFrom == null || o.AvailableFrom <= now) &&
-                (o.AvailableUntil == null || o.AvailableUntil > now) &&
-                o.MealItem.Status == "ACTIVE" &&
-                o.MealItem.IsAvailable &&
-                (o.MealItem.AvailableFrom == null || o.MealItem.AvailableFrom <= now) &&
-                (o.MealItem.AvailableUntil == null || o.MealItem.AvailableUntil > now));
+        var mealQuery = AvailableMealOptions([selectedDay.Id], now);
 
         if (mealTimeCode != "ALL")
-            mealQuery = mealQuery.Where(o => o.Slot.MealType.Code == mealTimeCode);
+            mealQuery = mealQuery.Where(o =>
+                o.Slot.MealType.Code == mealTimeCode ||
+                (mealTimeCode == "SNACK" && o.Slot.MealType.Code == "SNACK_DESSERT"));
 
         var totalRecords = await mealQuery.CountAsync(ct);
         var totalPages = (int)Math.Ceiling(totalRecords / (double)request.PageSize);
-        var mealRows = await mealQuery
-            .OrderBy(o => o.Slot.DisplayOrder)
-            .ThenBy(o => o.DisplayOrder)
+        var mealRows = await ProjectMealRows(mealQuery, language)
+            .OrderBy(row => row.SlotDisplayOrder)
+            .ThenBy(row => row.DisplayOrder)
             .Skip((request.Page - 1) * request.PageSize)
             .Take(request.PageSize)
-            .Select(o => new MealRow(
-                o.MealItemId,
-                o.MealPlanTemplateSlotId,
-                o.Slot.DisplayOrder,
-                o.Slot.MinimumSelection,
-                o.Slot.MaximumSelection,
-                o.Slot.IsRequired,
-                o.Slot.MealType.Id,
-                o.Slot.MealType.DisplayOrder,
-                o.MealItem.Sku,
-                o.MealItem.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault()
-                    ?? o.MealItem.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault()
-                    ?? o.MealItem.Translations.Select(t => t.Name).FirstOrDefault()
-                    ?? o.MealItem.Sku,
-                o.MealItem.Translations.Where(t => t.LanguageCode == language).Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault()
-                    ?? o.MealItem.Translations.Where(t => t.LanguageCode == "en").Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault()
-                    ?? o.MealItem.Translations.Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault()
-                    ?? o.MealItem.Sku,
-                db.MealMedia
-                    .Where(m => m.EntityId == o.MealItemId && m.Status == "ACTIVE" &&
-                        m.MediaType == MealMediaTypes.MealItem)
-                    .OrderByDescending(m => m.IsPrimary)
-                    .ThenBy(m => m.DisplayOrder)
-                    .Select(m => m.PublicUrl)
-                    .FirstOrDefault(),
-                db.MealMedia
-                    .Where(m => m.EntityId == o.MealItemId && m.Status == "ACTIVE" &&
-                        m.MediaType == MealMediaTypes.MealItem)
-                    .OrderByDescending(m => m.IsPrimary)
-                    .ThenBy(m => m.DisplayOrder)
-                    .Select(m => m.ThumbnailUrl ?? m.PublicUrl)
-                    .FirstOrDefault(),
-                o.Slot.MealType.Code,
-                o.Slot.MealType.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault()
-                    ?? o.Slot.MealType.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault()
-                    ?? o.Slot.MealType.Translations.Select(t => t.Name).FirstOrDefault()
-                    ?? o.Slot.MealType.Code,
-                o.MealItem.Nutrition == null ? null : o.MealItem.Nutrition.CaloriesKcal,
-                o.MealItem.Nutrition == null ? null : o.MealItem.Nutrition.ProteinGrams,
-                o.MealItem.Nutrition == null ? null : o.MealItem.Nutrition.CarbohydratesGrams,
-                o.MealItem.Nutrition == null ? null : o.MealItem.Nutrition.FatGrams,
-                o.MealItem.Nutrition == null ? null : o.MealItem.Nutrition.FiberGrams,
-                o.DisplayOrder,
-                o.MealItem.Allergens
-                    .Where(a => a.Allergen.IsActive)
-                    .OrderBy(a => a.Allergen.Code)
-                    .Select(a => new GuestCodeNameResponse(
-                        a.Allergen.Code,
-                        a.Allergen.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault()
-                            ?? a.Allergen.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault()
-                            ?? a.Allergen.Translations.Select(t => t.Name).FirstOrDefault()
-                            ?? a.Allergen.Code))
-                    .ToList()))
             .ToListAsync(ct);
 
-        var slots = mealRows
-            .GroupBy(m => new
-            {
-                m.SlotId,
-                m.SlotDisplayOrder,
-                m.MinimumSelection,
-                m.MaximumSelection,
-                m.IsRequired,
-                m.MealTimeId,
-                m.MealTimeCode,
-                m.MealTimeName,
-                m.MealTimeDisplayOrder
-            })
-            .OrderBy(group => group.Key.SlotDisplayOrder)
-            .Select(group => new GuestMealSlotResponse(
-                group.Key.SlotId,
-                new GuestSlotMealTimeResponse(
-                    group.Key.MealTimeId,
-                    group.Key.MealTimeCode,
-                    group.Key.MealTimeName,
-                    group.Key.MealTimeDisplayOrder),
-                group.Key.SlotDisplayOrder,
-                group.Key.MinimumSelection,
-                group.Key.MaximumSelection,
-                group.Key.IsRequired,
-                group.OrderBy(m => m.DisplayOrder).Select(m => new GuestMealResponse(
-                    m.Id,
-                    m.Code,
-                    m.Name,
-                    m.Description,
-                    m.ImageUrl,
-                    m.ThumbnailUrl,
-                    new GuestNutritionResponse(m.Calories, m.Protein, m.Carbs, m.Fat, m.Fiber),
-                    [],
-                    m.Allergens,
-                    true,
-                    m.DisplayOrder)).ToArray()))
-            .ToArray();
+        var slots = BuildSlots(mealRows);
+
+        IReadOnlyList<GuestMenuDayResponse>? menus = null;
+        if (request.IncludeAll)
+        {
+            var planIds = plans.Select(p => p.Id).ToArray();
+            var allPlanDays = await db.MealPlanTemplateDays.AsNoTracking()
+                .Where(day => planIds.Contains(day.MealPlanTemplateId) && day.IsActive)
+                .Select(day => new { day.Id, day.MealPlanTemplateId, day.MenuWeekday })
+                .ToListAsync(ct);
+            var menuTargets = (
+                from plan in plans
+                from calendarDay in weeklyCalendar
+                where (plan.ValidFrom is null || calendarDay.Date >= plan.ValidFrom)
+                    && (plan.ValidUntil is null || calendarDay.Date <= plan.ValidUntil)
+                let templateDay = allPlanDays.FirstOrDefault(day =>
+                    day.MealPlanTemplateId == plan.Id &&
+                    day.MenuWeekday == MenuWeekdayExtensions.FromDate(calendarDay.Date))
+                where templateDay is not null
+                select new MenuTarget(plan.Code, calendarDay.Date, templateDay.Id))
+                .ToArray();
+            var allDayIds = menuTargets.Select(target => target.DayId).Distinct().ToArray();
+            var allRows = allDayIds.Length == 0
+                ? new List<MealRow>()
+                : await ProjectMealRows(AvailableMealOptions(allDayIds, now), language)
+                    .OrderBy(row => row.SlotDisplayOrder)
+                    .ThenBy(row => row.DisplayOrder)
+                    .ToListAsync(ct);
+            menus = menuTargets
+                .Select(target => new GuestMenuDayResponse(
+                    target.PlanCode,
+                    target.Date,
+                    BuildSlots(allRows.Where(row => row.TemplateDayId == target.DayId))))
+                .ToArray();
+        }
 
         var response = new GuestHomeResponse(
             plans.Select(p => new GuestPlanResponse(
@@ -311,11 +246,127 @@ public sealed class GuestHomeService(
                 totalRecords,
                 totalPages,
                 request.Page < totalPages,
-                request.Page > 1));
+                request.Page > 1),
+            menus);
 
         cache.Set(cacheKey, response, CacheDuration);
         return response;
     }
+
+    private IQueryable<MealPlanSlotOption> AvailableMealOptions(
+        IReadOnlyCollection<Guid> templateDayIds,
+        DateTimeOffset now) =>
+        db.MealPlanSlotOptions.AsNoTracking()
+            .Where(option =>
+                templateDayIds.Contains(option.Slot.MealPlanTemplateDayId) &&
+                option.Slot.IsActive &&
+                option.Slot.MealType.IsActive &&
+                option.IsAvailable &&
+                (option.AvailableFrom == null || option.AvailableFrom <= now) &&
+                (option.AvailableUntil == null || option.AvailableUntil > now) &&
+                option.MealItem.Status == "ACTIVE" &&
+                option.MealItem.IsAvailable &&
+                (option.MealItem.AvailableFrom == null || option.MealItem.AvailableFrom <= now) &&
+                (option.MealItem.AvailableUntil == null || option.MealItem.AvailableUntil > now));
+
+    private IQueryable<MealRow> ProjectMealRows(
+        IQueryable<MealPlanSlotOption> query,
+        string language) =>
+        query.Select(option => new MealRow(
+            option.MealItemId,
+            option.Slot.MealPlanTemplateDayId,
+            option.MealPlanTemplateSlotId,
+            option.Slot.DisplayOrder,
+            option.Slot.MinimumSelection,
+            option.Slot.MaximumSelection,
+            option.Slot.IsRequired,
+            option.Slot.MealType.Id,
+            option.Slot.MealType.DisplayOrder,
+            option.MealItem.Sku,
+            option.MealItem.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault()
+                ?? option.MealItem.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault()
+                ?? option.MealItem.Translations.Select(t => t.Name).FirstOrDefault()
+                ?? option.MealItem.Sku,
+            option.MealItem.Translations.Where(t => t.LanguageCode == language).Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault()
+                ?? option.MealItem.Translations.Where(t => t.LanguageCode == "en").Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault()
+                ?? option.MealItem.Translations.Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault()
+                ?? option.MealItem.Sku,
+            db.MealMedia
+                .Where(media => media.EntityId == option.MealItemId && media.Status == "ACTIVE" &&
+                    media.MediaType == MealMediaTypes.MealItem)
+                .OrderByDescending(media => media.IsPrimary)
+                .ThenBy(media => media.DisplayOrder)
+                .Select(media => media.PublicUrl)
+                .FirstOrDefault(),
+            db.MealMedia
+                .Where(media => media.EntityId == option.MealItemId && media.Status == "ACTIVE" &&
+                    media.MediaType == MealMediaTypes.MealItem)
+                .OrderByDescending(media => media.IsPrimary)
+                .ThenBy(media => media.DisplayOrder)
+                .Select(media => media.ThumbnailUrl ?? media.PublicUrl)
+                .FirstOrDefault(),
+            option.Slot.MealType.Code,
+            option.Slot.MealType.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault()
+                ?? option.Slot.MealType.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault()
+                ?? option.Slot.MealType.Translations.Select(t => t.Name).FirstOrDefault()
+                ?? option.Slot.MealType.Code,
+            option.MealItem.Nutrition == null ? null : option.MealItem.Nutrition.CaloriesKcal,
+            option.MealItem.Nutrition == null ? null : option.MealItem.Nutrition.ProteinGrams,
+            option.MealItem.Nutrition == null ? null : option.MealItem.Nutrition.CarbohydratesGrams,
+            option.MealItem.Nutrition == null ? null : option.MealItem.Nutrition.FatGrams,
+            option.MealItem.Nutrition == null ? null : option.MealItem.Nutrition.FiberGrams,
+            option.DisplayOrder,
+            option.MealItem.Allergens
+                .Where(allergen => allergen.Allergen.IsActive)
+                .OrderBy(allergen => allergen.Allergen.Code)
+                .Select(allergen => new GuestCodeNameResponse(
+                    allergen.Allergen.Code,
+                    allergen.Allergen.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault()
+                        ?? allergen.Allergen.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault()
+                        ?? allergen.Allergen.Translations.Select(t => t.Name).FirstOrDefault()
+                        ?? allergen.Allergen.Code))
+                .ToList()));
+
+    private static IReadOnlyList<GuestMealSlotResponse> BuildSlots(
+        IEnumerable<MealRow> mealRows) =>
+        mealRows
+            .GroupBy(row => new
+            {
+                row.SlotId,
+                row.SlotDisplayOrder,
+                row.MinimumSelection,
+                row.MaximumSelection,
+                row.IsRequired,
+                row.MealTimeId,
+                row.MealTimeCode,
+                row.MealTimeName,
+                row.MealTimeDisplayOrder
+            })
+            .OrderBy(group => group.Key.SlotDisplayOrder)
+            .Select(group => new GuestMealSlotResponse(
+                group.Key.SlotId,
+                new GuestSlotMealTimeResponse(
+                    group.Key.MealTimeId,
+                    group.Key.MealTimeCode,
+                    group.Key.MealTimeName,
+                    group.Key.MealTimeDisplayOrder),
+                group.Key.SlotDisplayOrder,
+                group.Key.MinimumSelection,
+                group.Key.MaximumSelection,
+                group.Key.IsRequired,
+                group.OrderBy(row => row.DisplayOrder).Select(row => new GuestMealResponse(
+                    row.Id,
+                    row.Code,
+                    row.Name,
+                    row.Description,
+                    row.ImageUrl,
+                    row.ThumbnailUrl,
+                    new GuestNutritionResponse(row.Calories, row.Protein, row.Carbs, row.Fat, row.Fiber),
+                    [],
+                    row.Allergens,
+                    true,
+                    row.DisplayOrder)).ToArray()))
+            .ToArray();
 
     private string? ResolveImage(string? publicUrl, string? objectKey) =>
         !string.IsNullOrWhiteSpace(publicUrl)
@@ -337,6 +388,7 @@ public sealed class GuestHomeService(
 
     private sealed record MealRow(
         Guid Id,
+        Guid TemplateDayId,
         Guid SlotId,
         int SlotDisplayOrder,
         int MinimumSelection,
@@ -358,4 +410,6 @@ public sealed class GuestHomeService(
         decimal? Fiber,
         int DisplayOrder,
         IReadOnlyList<GuestCodeNameResponse> Allergens);
+
+    private sealed record MenuTarget(string PlanCode, DateOnly Date, Guid DayId);
 }

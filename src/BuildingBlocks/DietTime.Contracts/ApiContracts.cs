@@ -27,7 +27,8 @@ public sealed record GuestHomeQuery(
     string? PlanCode = null,
     string MealTimeCode = "ALL",
     int Page = 1,
-    int PageSize = 20);
+    int PageSize = 20,
+    bool IncludeAll = false);
 public sealed record GuestPlanResponse(Guid Id, string Code, string Name, string Description, string? ImageUrl, string? IconUrl, int DisplayOrder, bool IsSelected, IReadOnlyList<GuestMealSlotResponse> Slots);
 public sealed record GuestCalendarDayResponse(DateOnly Date, int DayNumber, string DayName, string ShortDayName, bool IsToday, bool IsSelected, bool IsAvailable);
 public sealed record GuestMealTimeResponse(Guid? Id, string Code, string Name, string? IconUrl, int DisplayOrder, bool IsSelected);
@@ -61,11 +62,16 @@ public sealed record GuestPaginationResponse(
     int TotalPages,
     bool HasNextPage,
     bool HasPreviousPage);
+public sealed record GuestMenuDayResponse(
+    string PlanCode,
+    DateOnly Date,
+    IReadOnlyList<GuestMealSlotResponse> Slots);
 public sealed record GuestHomeResponse(
     IReadOnlyList<GuestPlanResponse> MealPlans,
     IReadOnlyList<GuestCalendarDayResponse> WeeklyCalendar,
     IReadOnlyList<GuestMealTimeResponse> MealTimeFilters,
-    GuestPaginationResponse Pagination);
+    GuestPaginationResponse Pagination,
+    IReadOnlyList<GuestMenuDayResponse>? Menus = null);
 
 public sealed record CategoryResponse(Guid Id, string Code, string Name);
 public sealed record NutritionResponse(decimal? ServingQuantity, string? ServingUnit, decimal? CaloriesKcal, decimal? ProteinGrams, decimal? CarbohydratesGrams, decimal? FatGrams, decimal? SaturatedFatGrams, decimal? TransFatGrams, decimal? FiberGrams, decimal? SugarGrams, decimal? SodiumMg, decimal? CholesterolMg);

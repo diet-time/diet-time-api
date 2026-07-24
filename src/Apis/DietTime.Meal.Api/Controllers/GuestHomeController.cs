@@ -19,7 +19,9 @@ public sealed class GuestHomeController(
     /// Returns localized active plans with the selected plan's slots and meals nested beneath it,
     /// plus the seven-day menu calendar, meal-time filters, and pagination.
     ///
-    /// Example: `GET /api/v1/guest/home?language=en&amp;date=2026-07-24&amp;planCode=CLASSIC&amp;mealTimeCode=ALL&amp;page=1&amp;pageSize=20`
+    /// Set `includeAll=true` to include plan/date menu groups for one-request client-side filtering.
+    ///
+    /// Example: `GET /api/v1/guest/home?language=en&amp;includeAll=true`
     /// </remarks>
     /// <response code="200">The complete guest home payload.</response>
     /// <response code="400">A query parameter is invalid or the requested plan is not active.</response>
