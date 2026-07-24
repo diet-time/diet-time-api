@@ -184,11 +184,12 @@ public sealed class GuestHomeService(
 
         var totalRecords = await mealQuery.CountAsync(ct);
         var totalPages = (int)Math.Ceiling(totalRecords / (double)request.PageSize);
-        var mealRows = await ProjectMealRows(mealQuery, language)
-            .OrderBy(row => row.SlotDisplayOrder)
-            .ThenBy(row => row.DisplayOrder)
+        var pagedMealQuery = mealQuery
+            .OrderBy(option => option.Slot.DisplayOrder)
+            .ThenBy(option => option.DisplayOrder)
             .Skip((request.Page - 1) * request.PageSize)
-            .Take(request.PageSize)
+            .Take(request.PageSize);
+        var mealRows = await ProjectMealRows(pagedMealQuery, language)
             .ToListAsync(ct);
 
         var slots = BuildSlots(mealRows);
@@ -215,9 +216,11 @@ public sealed class GuestHomeService(
             var allDayIds = menuTargets.Select(target => target.DayId).Distinct().ToArray();
             var allRows = allDayIds.Length == 0
                 ? new List<MealRow>()
-                : await ProjectMealRows(AvailableMealOptions(allDayIds, now), language)
-                    .OrderBy(row => row.SlotDisplayOrder)
-                    .ThenBy(row => row.DisplayOrder)
+                : await ProjectMealRows(
+                        AvailableMealOptions(allDayIds, now)
+                            .OrderBy(option => option.Slot.DisplayOrder)
+                            .ThenBy(option => option.DisplayOrder),
+                        language)
                     .ToListAsync(ct);
             menus = menuTargets
                 .Select(target => new GuestMenuDayResponse(
