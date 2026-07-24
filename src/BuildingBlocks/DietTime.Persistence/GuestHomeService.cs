@@ -200,6 +200,13 @@ public sealed class GuestHomeService(
             .Take(request.PageSize)
             .Select(o => new MealRow(
                 o.MealItemId,
+                o.MealPlanTemplateSlotId,
+                o.Slot.DisplayOrder,
+                o.Slot.MinimumSelection,
+                o.Slot.MaximumSelection,
+                o.Slot.IsRequired,
+                o.Slot.MealType.Id,
+                o.Slot.MealType.DisplayOrder,
                 o.MealItem.Sku,
                 o.MealItem.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault()
                     ?? o.MealItem.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault()
@@ -246,19 +253,44 @@ public sealed class GuestHomeService(
                     .ToList()))
             .ToListAsync(ct);
 
-        var meals = mealRows.Select(m => new GuestMealResponse(
-            m.Id,
-            m.Code,
-            m.Name,
-            m.Description,
-            m.ImageUrl,
-            m.ThumbnailUrl,
-            new GuestMealTimeSummary(m.MealTimeCode, m.MealTimeName),
-            new GuestNutritionResponse(m.Calories, m.Protein, m.Carbs, m.Fat, m.Fiber),
-            [],
-            m.Allergens,
-            true,
-            m.DisplayOrder)).ToArray();
+        var slots = mealRows
+            .GroupBy(m => new
+            {
+                m.SlotId,
+                m.SlotDisplayOrder,
+                m.MinimumSelection,
+                m.MaximumSelection,
+                m.IsRequired,
+                m.MealTimeId,
+                m.MealTimeCode,
+                m.MealTimeName,
+                m.MealTimeDisplayOrder
+            })
+            .OrderBy(group => group.Key.SlotDisplayOrder)
+            .Select(group => new GuestMealSlotResponse(
+                group.Key.SlotId,
+                new GuestSlotMealTimeResponse(
+                    group.Key.MealTimeId,
+                    group.Key.MealTimeCode,
+                    group.Key.MealTimeName,
+                    group.Key.MealTimeDisplayOrder),
+                group.Key.SlotDisplayOrder,
+                group.Key.MinimumSelection,
+                group.Key.MaximumSelection,
+                group.Key.IsRequired,
+                group.OrderBy(m => m.DisplayOrder).Select(m => new GuestMealResponse(
+                    m.Id,
+                    m.Code,
+                    m.Name,
+                    m.Description,
+                    m.ImageUrl,
+                    m.ThumbnailUrl,
+                    new GuestNutritionResponse(m.Calories, m.Protein, m.Carbs, m.Fat, m.Fiber),
+                    [],
+                    m.Allergens,
+                    true,
+                    m.DisplayOrder)).ToArray()))
+            .ToArray();
 
         var response = new GuestHomeResponse(
             plans.Select(p => new GuestPlanResponse(
@@ -269,10 +301,10 @@ public sealed class GuestHomeService(
                 ResolveImage(p.ImageUrl, p.ImageObjectKey),
                 null,
                 p.DisplayOrder,
-                p.Id == selectedPlan.Id)).ToArray(),
+                p.Id == selectedPlan.Id,
+                p.Id == selectedPlan.Id ? slots : [])).ToArray(),
             weeklyCalendar,
             mealTypes,
-            meals,
             new GuestPaginationResponse(
                 request.Page,
                 request.PageSize,
@@ -305,6 +337,13 @@ public sealed class GuestHomeService(
 
     private sealed record MealRow(
         Guid Id,
+        Guid SlotId,
+        int SlotDisplayOrder,
+        int MinimumSelection,
+        int MaximumSelection,
+        bool IsRequired,
+        Guid MealTimeId,
+        int MealTimeDisplayOrder,
         string Code,
         string Name,
         string Description,

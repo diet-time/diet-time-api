@@ -44,6 +44,28 @@ public sealed class MealPlanContractTests
     }
 
     [Fact]
+    public void Meal_plan_summary_exposes_the_short_description()
+    {
+        var response = new AdminMealPlanSummaryResponse(
+            Guid.NewGuid(),
+            "PLN_CLASSIC",
+            "Classic",
+            "Balanced meals for every day.",
+            "STANDARD",
+            20,
+            true,
+            false,
+            true,
+            null,
+            null,
+            DateTimeOffset.UtcNow,
+            Guid.NewGuid(),
+            1);
+
+        Assert.Equal("Balanced meals for every day.", response.ShortDescription);
+    }
+
+    [Fact]
     public void Meal_plan_image_type_is_stored_on_meal_media_not_plan_template()
     {
         Assert.Null(typeof(MealPlanTemplate).GetProperty("ImageType"));

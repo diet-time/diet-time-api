@@ -28,12 +28,20 @@ public sealed record GuestHomeQuery(
     string MealTimeCode = "ALL",
     int Page = 1,
     int PageSize = 20);
-public sealed record GuestPlanResponse(Guid Id, string Code, string Name, string Description, string? ImageUrl, string? IconUrl, int DisplayOrder, bool IsSelected);
+public sealed record GuestPlanResponse(Guid Id, string Code, string Name, string Description, string? ImageUrl, string? IconUrl, int DisplayOrder, bool IsSelected, IReadOnlyList<GuestMealSlotResponse> Slots);
 public sealed record GuestCalendarDayResponse(DateOnly Date, int DayNumber, string DayName, string ShortDayName, bool IsToday, bool IsSelected, bool IsAvailable);
 public sealed record GuestMealTimeResponse(Guid? Id, string Code, string Name, string? IconUrl, int DisplayOrder, bool IsSelected);
-public sealed record GuestMealTimeSummary(string Code, string Name);
+public sealed record GuestSlotMealTimeResponse(Guid Id, string Code, string Name, int DisplayOrder);
 public sealed record GuestNutritionResponse(decimal? Calories, decimal? Protein, decimal? Carbs, decimal? Fat, decimal? Fiber);
 public sealed record GuestCodeNameResponse(string Code, string Name);
+public sealed record GuestMealSlotResponse(
+    Guid Id,
+    GuestSlotMealTimeResponse MealTime,
+    int DisplayOrder,
+    int MinimumSelection,
+    int MaximumSelection,
+    bool IsRequired,
+    IReadOnlyList<GuestMealResponse> Meals);
 public sealed record GuestMealResponse(
     Guid Id,
     string Code,
@@ -41,7 +49,6 @@ public sealed record GuestMealResponse(
     string Description,
     string? ImageUrl,
     string? ThumbnailUrl,
-    GuestMealTimeSummary MealTime,
     GuestNutritionResponse Nutrition,
     IReadOnlyList<GuestCodeNameResponse> Tags,
     IReadOnlyList<GuestCodeNameResponse> Allergens,
@@ -58,7 +65,6 @@ public sealed record GuestHomeResponse(
     IReadOnlyList<GuestPlanResponse> MealPlans,
     IReadOnlyList<GuestCalendarDayResponse> WeeklyCalendar,
     IReadOnlyList<GuestMealTimeResponse> MealTimeFilters,
-    IReadOnlyList<GuestMealResponse> Meals,
     GuestPaginationResponse Pagination);
 
 public sealed record CategoryResponse(Guid Id, string Code, string Name);
@@ -173,6 +179,7 @@ public sealed record AdminMealPlanSummaryResponse(
     Guid Id,
     string Code,
     string Name,
+    string? ShortDescription,
     string PlanType,
     int DurationDays,
     bool IsCustomizable,

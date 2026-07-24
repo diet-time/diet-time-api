@@ -772,6 +772,14 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
                 x.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault()
                     ?? x.Translations.Select(t => t.Name).FirstOrDefault()
                     ?? x.Code,
+                x.Translations
+                    .Where(t => t.LanguageCode == "en" && t.ShortDescription != null && t.ShortDescription != "")
+                    .Select(t => t.ShortDescription)
+                    .FirstOrDefault()
+                    ?? x.Translations
+                        .Where(t => t.ShortDescription != null && t.ShortDescription != "")
+                        .Select(t => t.ShortDescription)
+                        .FirstOrDefault(),
                 x.PlanType,
                 x.DurationDays,
                 x.IsCustomizable,

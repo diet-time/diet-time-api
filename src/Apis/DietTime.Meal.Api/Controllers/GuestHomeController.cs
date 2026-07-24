@@ -16,8 +16,8 @@ public sealed class GuestHomeController(
 {
     /// <summary>Gets the complete guest home screen.</summary>
     /// <remarks>
-    /// Returns localized active plans, the seven-day menu calendar, meal-time filters,
-    /// selected plan meals, and pagination in one public request.
+    /// Returns localized active plans with the selected plan's slots and meals nested beneath it,
+    /// plus the seven-day menu calendar, meal-time filters, and pagination.
     ///
     /// Example: `GET /api/v1/guest/home?language=en&amp;date=2026-07-24&amp;planCode=CLASSIC&amp;mealTimeCode=ALL&amp;page=1&amp;pageSize=20`
     /// </remarks>
