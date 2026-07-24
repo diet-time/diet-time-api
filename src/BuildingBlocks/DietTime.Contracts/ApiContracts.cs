@@ -21,6 +21,48 @@ public sealed record MealTypeResponse(Guid? Id, string Code, string Name, int Di
 public sealed record MealCardResponse(Guid SlotOptionId, Guid SlotId, Guid MealItemId, MealTypeResponse MealType, string Name, string? ShortDescription, string? ThumbnailUrl, decimal? CaloriesKcal, decimal? ProteinGrams, decimal? CarbohydratesGrams, decimal? FatGrams, decimal AdditionalPrice, string CurrencyCode, bool IsDefault, bool IsAvailable, IReadOnlyList<string> AllergenCodes);
 public sealed record MealSearchResponse(Guid MealItemId, string Sku, string Name, string? ShortDescription, string? ThumbnailUrl, decimal? CaloriesKcal, decimal? ProteinGrams, decimal? CarbohydratesGrams, decimal? FatGrams, decimal? Price, string? CurrencyCode, bool IsAvailable);
 
+public sealed record GuestHomeQuery(
+    string Language = "en",
+    DateOnly? Date = null,
+    string? PlanCode = null,
+    string MealTimeCode = "ALL",
+    int Page = 1,
+    int PageSize = 20);
+public sealed record GuestHeroResponse(string Title, string Subtitle, string? BannerImageUrl);
+public sealed record GuestPlanResponse(Guid Id, string Code, string Name, string Description, string? ImageUrl, string? IconUrl, int DisplayOrder, bool IsSelected);
+public sealed record GuestCalendarDayResponse(DateOnly Date, int DayNumber, string DayName, string ShortDayName, bool IsToday, bool IsSelected, bool IsAvailable);
+public sealed record GuestMealTimeResponse(Guid? Id, string Code, string Name, string? IconUrl, int DisplayOrder, bool IsSelected);
+public sealed record GuestMealTimeSummary(string Code, string Name);
+public sealed record GuestNutritionResponse(decimal? Calories, decimal? Protein, decimal? Carbs, decimal? Fat, decimal? Fiber);
+public sealed record GuestCodeNameResponse(string Code, string Name);
+public sealed record GuestMealResponse(
+    Guid Id,
+    string Code,
+    string Name,
+    string Description,
+    string? ImageUrl,
+    string? ThumbnailUrl,
+    GuestMealTimeSummary MealTime,
+    GuestNutritionResponse Nutrition,
+    IReadOnlyList<GuestCodeNameResponse> Tags,
+    IReadOnlyList<GuestCodeNameResponse> Allergens,
+    bool IsAvailable,
+    int DisplayOrder);
+public sealed record GuestPaginationResponse(
+    int Page,
+    int PageSize,
+    int TotalRecords,
+    int TotalPages,
+    bool HasNextPage,
+    bool HasPreviousPage);
+public sealed record GuestHomeResponse(
+    GuestHeroResponse Hero,
+    IReadOnlyList<GuestPlanResponse> MealPlans,
+    IReadOnlyList<GuestCalendarDayResponse> WeeklyCalendar,
+    IReadOnlyList<GuestMealTimeResponse> MealTimeFilters,
+    IReadOnlyList<GuestMealResponse> Meals,
+    GuestPaginationResponse Pagination);
+
 public sealed record CategoryResponse(Guid Id, string Code, string Name);
 public sealed record NutritionResponse(decimal? ServingQuantity, string? ServingUnit, decimal? CaloriesKcal, decimal? ProteinGrams, decimal? CarbohydratesGrams, decimal? FatGrams, decimal? SaturatedFatGrams, decimal? TransFatGrams, decimal? FiberGrams, decimal? SugarGrams, decimal? SodiumMg, decimal? CholesterolMg);
 public sealed record MediaResponse(Guid Id, string ImageUrl, string? ThumbnailUrl, string? AltText);

@@ -30,7 +30,12 @@ if (!string.IsNullOrWhiteSpace(port))
 builder.Host.UseSerilog((context, config) => config.ReadFrom.Configuration(context.Configuration).Enrich.FromLogContext().WriteTo.Console());
 
 var connection = builder.Configuration.GetConnectionString("DefaultConnection") ?? throw new InvalidOperationException("ConnectionStrings:DefaultConnection is required.");
-builder.Services.AddDbContext<DietTimeDbContext>(o => o.UseNpgsql(connection).UseSnakeCaseNamingConvention());
+builder.Services.AddSingleton<GuestHomeCacheVersion>();
+builder.Services.AddSingleton<GuestHomeCacheInvalidationInterceptor>();
+builder.Services.AddDbContext<DietTimeDbContext>((services, options) => options
+    .UseNpgsql(connection)
+    .UseSnakeCaseNamingConvention()
+    .AddInterceptors(services.GetRequiredService<GuestHomeCacheInvalidationInterceptor>()));
 builder.Services.AddIdentityCore<ApplicationUser>(o => { o.Password.RequiredLength = 10; o.Password.RequireDigit = true; o.Password.RequireUppercase = true; o.Lockout.MaxFailedAccessAttempts = 5; o.SignIn.RequireConfirmedEmail = false; })
     .AddRoles<IdentityRole<Guid>>().AddEntityFrameworkStores<DietTimeDbContext>().AddDefaultTokenProviders();
 
@@ -67,7 +72,7 @@ builder.Services.AddSingleton<IAmazonS3>(services =>
         AuthenticationRegion = storage.Region
     });
 });
-builder.Services.AddSingleton(TimeProvider.System); builder.Services.AddMemoryCache(); builder.Services.AddScoped<ILanguageResolver, LanguageResolver>(); builder.Services.AddScoped<IStorageUrlService, StorageUrlService>(); builder.Services.AddScoped<IMealQueryService, MealQueryService>(); builder.Services.AddScoped<IMealSelectionService, MealSelectionService>(); builder.Services.AddScoped<IAdminMealService, AdminMealService>(); builder.Services.AddScoped<ITemplateMenuReader>(services => (AdminMealService)services.GetRequiredService<IAdminMealService>()); builder.Services.AddScoped<IOperationalCalendarService, DefaultOperationalCalendarService>(); builder.Services.AddScoped<IDeliverySchedulingService, DeliverySchedulingService>(); builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddSingleton(TimeProvider.System); builder.Services.AddMemoryCache(); builder.Services.AddScoped<ILanguageResolver, LanguageResolver>(); builder.Services.AddScoped<IStorageUrlService, StorageUrlService>(); builder.Services.AddScoped<IMealQueryService, MealQueryService>(); builder.Services.AddScoped<IGuestHomeService, GuestHomeService>(); builder.Services.AddScoped<IMealSelectionService, MealSelectionService>(); builder.Services.AddScoped<IAdminMealService, AdminMealService>(); builder.Services.AddScoped<ITemplateMenuReader>(services => (AdminMealService)services.GetRequiredService<IAdminMealService>()); builder.Services.AddScoped<IOperationalCalendarService, DefaultOperationalCalendarService>(); builder.Services.AddScoped<IDeliverySchedulingService, DeliverySchedulingService>(); builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddValidatorsFromAssemblyContaining<MealSelectionRequestValidator>(); builder.Services.AddFluentValidationAutoValidation();
 
 builder.Services.AddControllers().AddJsonOptions(o => { o.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull; o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(new UpperCaseJsonNamingPolicy())); });

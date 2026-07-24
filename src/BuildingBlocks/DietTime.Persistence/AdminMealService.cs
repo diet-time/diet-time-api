@@ -833,7 +833,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         {
             p.IsLatest = false;
             await db.SaveChangesAsync(ct);
-            var draft = new MealPlanTemplate { Id = Guid.NewGuid(), VersionGroupId = p.VersionGroupId, VersionNumber = p.VersionNumber + 1, IsLatest = true, SupersedesId = p.Id, Code = p.Code, PlanType = request.PlanType, DurationDays = request.DurationDays, IsCustomizable = request.IsCustomizable, IsActive = true, IsPublished = false, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 };
+            var draft = new MealPlanTemplate { Id = Guid.NewGuid(), VersionGroupId = p.VersionGroupId, VersionNumber = p.VersionNumber + 1, IsLatest = true, SupersedesId = p.Id, Code = p.Code, PlanType = request.PlanType, DurationDays = request.DurationDays, IsCustomizable = request.IsCustomizable, IsActive = true, IsPublished = false, DisplayOrder = p.DisplayOrder, ImageUrl = p.ImageUrl, IconUrl = p.IconUrl, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 };
             foreach (var t in request.Translations) draft.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now });
             if (request.Days is not null) AddPlanStructure(draft, request.Days, now, userId); else ClonePlanStructure(draft, p.Days, now, userId);
             db.Add(draft); await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return new(draft.Id, true);

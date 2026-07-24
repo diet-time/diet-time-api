@@ -16,6 +16,11 @@ public interface IMealQueryService
     Task<PagedResult<MealSearchResponse>> SearchMealsAsync(MealSearchQuery query, string language, DateTimeOffset now, CancellationToken cancellationToken);
 }
 
+public interface IGuestHomeService
+{
+    Task<GuestHomeResponse?> GetAsync(GuestHomeQuery query, DateTimeOffset now, CancellationToken cancellationToken);
+}
+
 public interface IMealSelectionService
 {
     Task<MealSelectionValidationResponse> ValidateAsync(MealSelectionRequest request, DateTimeOffset now, CancellationToken cancellationToken);
