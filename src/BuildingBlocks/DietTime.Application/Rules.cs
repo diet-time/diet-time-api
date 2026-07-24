@@ -33,6 +33,30 @@ public static class SelectionRules
     public static decimal ResolveAdditionalPrice(decimal slotPrice, bool allowsPaidUpgrade) => allowsPaidUpgrade ? slotPrice : 0;
 }
 
+public static class MediaObjectKeyRules
+{
+    public static bool IsAllowed(string? objectKey)
+    {
+        if (string.IsNullOrWhiteSpace(objectKey))
+            return false;
+
+        var segments = objectKey.Split('/');
+        if (segments.Length != 4 ||
+            segments.Any(segment => segment.Length == 0 || segment is "." or "..") ||
+            !Guid.TryParse(segments[1], out _))
+        {
+            return false;
+        }
+
+        return segments[0] switch
+        {
+            "meals" => segments[2] is "images" or "thumbnails",
+            "meal-plans" => segments[2] == "images",
+            _ => false
+        };
+    }
+}
+
 public sealed class LanguageResolver : ILanguageResolver
 {
     private static readonly HashSet<string> Supported = new(StringComparer.OrdinalIgnoreCase) { "en", "ar" };

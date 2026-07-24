@@ -18,4 +18,6 @@ public sealed class DomainRuleTests
     [Fact] public void Meal_media_defaults_to_meal_item_type() { Assert.Equal("MEALITEM", new MealMedia().MediaType); }
     [Fact] public void Meal_plan_media_uses_distinct_type() { Assert.Equal("MEALPLAN", MealMediaTypes.MealPlan); }
     [Fact] public void Meal_plan_model_does_not_map_columns_missing_from_database() { Assert.Null(typeof(MealPlanTemplate).GetProperty("DisplayOrder")); Assert.Null(typeof(MealPlanTemplate).GetProperty("ImageUrl")); Assert.Null(typeof(MealPlanTemplate).GetProperty("IconUrl")); }
+    [Fact] public void Media_keys_allow_meal_and_meal_plan_images() { var id = Guid.NewGuid(); Assert.True(MediaObjectKeyRules.IsAllowed($"meals/{id:D}/images/meal.png")); Assert.True(MediaObjectKeyRules.IsAllowed($"meals/{id:D}/thumbnails/meal.webp")); Assert.True(MediaObjectKeyRules.IsAllowed($"meal-plans/{id:D}/images/plan.jpg")); }
+    [Theory] [InlineData("plans/id/images/file.png")] [InlineData("meal-plans/not-a-guid/images/file.png")] [InlineData("meal-plans/00000000-0000-0000-0000-000000000000/../file.png")] public void Media_keys_reject_unknown_or_unsafe_paths(string key) { Assert.False(MediaObjectKeyRules.IsAllowed(key)); }
 }
