@@ -1,5 +1,6 @@
 using Amazon.S3;
 using DietTime.Application;
+using DietTime.Domain;
 using DietTime.Infrastructure;
 using Microsoft.Extensions.Options;
 
@@ -14,4 +15,6 @@ public sealed class DomainRuleTests
     [Fact] public void Duplicate_selection_ids_are_detectable() { var values = new[] { Guid.NewGuid(), Guid.NewGuid() }; var duplicate = values.Append(values[0]).GroupBy(x => x).Any(x => x.Count() > 1); Assert.True(duplicate); }
     [Fact] public void Price_resolution_honors_paid_upgrade_setting() { Assert.Equal(7m, SelectionRules.ResolveAdditionalPrice(7m, true)); Assert.Equal(0m, SelectionRules.ResolveAdditionalPrice(7m, false)); }
     [Fact] public void Image_url_resolution_escapes_each_object_key_segment() { var options = Options.Create(new StorageOptions { PublicBaseUrl = "https://cdn.example.test/", BucketName = "meals" }); using var s3 = new AmazonS3Client("test", "test", new AmazonS3Config { ServiceURL = "http://localhost:9000", ForcePathStyle = true }); var service = new StorageUrlService(options, s3); Assert.Equal("https://cdn.example.test/meals/item%201.webp", service.GetPublicUrl("meals/item 1.webp")); }
+    [Fact] public void Meal_media_defaults_to_meal_item_type() { Assert.Equal("MEALITEM", new MealMedia().MediaType); }
+    [Fact] public void Meal_plan_media_uses_distinct_type() { Assert.Equal("MEALPLAN", MealMediaTypes.MealPlan); }
 }

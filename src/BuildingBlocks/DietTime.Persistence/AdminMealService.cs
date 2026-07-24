@@ -25,7 +25,8 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             ct);
         var missingImages = await meals.CountAsync(
             x => x.Status != "ARCHIVED"
-                && !db.MealMedia.Any(m => m.MealItemId == x.Id && m.Status == "ACTIVE" && m.MediaType == "IMAGE"),
+                && !db.MealMedia.Any(m => m.EntityId == x.Id && m.Status == "ACTIVE"
+                    && m.MediaType == MealMediaTypes.MealItem),
             ct);
         var missingArabic = await meals.CountAsync(
             x => x.Status != "ARCHIVED"
@@ -562,14 +563,19 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
     {
         var groupId = await db.MealItems.AsNoTracking().Where(m => m.Id == mealId).Select(m => (Guid?)m.VersionGroupId).SingleOrDefaultAsync(ct);
         if (groupId is null) return null;
-        var x = await db.MealItems.AsNoTracking().AsSplitQuery().Include(m => m.Translations).Include(m => m.Nutrition).Include(m => m.Ingredients).Include(m => m.Allergens).Include(m => m.Prices).Include(m => m.Media).ThenInclude(m => m.Translations).SingleOrDefaultAsync(m => m.VersionGroupId == groupId && m.IsLatest, ct);
+        var x = await db.MealItems.AsNoTracking().AsSplitQuery().Include(m => m.Translations).Include(m => m.Nutrition).Include(m => m.Ingredients).Include(m => m.Allergens).Include(m => m.Prices).SingleOrDefaultAsync(m => m.VersionGroupId == groupId && m.IsLatest, ct);
         if (x is null) return null;
+        var mealMedia = await db.MealMedia.AsNoTracking()
+            .Include(m => m.Translations)
+            .Where(m => m.EntityId == x.Id &&
+                (m.MediaType == MealMediaTypes.MealItem || m.MediaType == MealMediaTypes.Thumbnail))
+            .ToListAsync(ct);
         var translations = x.Translations.Select(t => new AdminTranslationRequest(t.LanguageCode, t.Name, t.ShortDescription, t.FullDescription, t.PreparationInstructions, t.ServingNotes)).ToArray();
         var nutrition = x.Nutrition is null ? null : new AdminNutritionRequest(x.Nutrition.ServingQuantity, x.Nutrition.ServingUnit, x.Nutrition.CaloriesKcal, x.Nutrition.ProteinGrams, x.Nutrition.CarbohydratesGrams, x.Nutrition.FatGrams, x.Nutrition.SaturatedFatGrams,x.Nutrition.TransFatGrams, x.Nutrition.FiberGrams, x.Nutrition.SugarGrams, x.Nutrition.SodiumMg, x.Nutrition.CholesterolMg);
         var ingredients = x.Ingredients.OrderBy(i => i.DisplayOrder).Select(i => new AdminIngredientLinkRequest(i.IngredientId, i.Quantity, i.Unit, i.IsOptional, i.CanBeRemoved, i.CanBeReplaced, i.IsPrimaryIngredient, i.DisplayOrder)).ToArray();
         var allergens = x.Allergens.Select(a => new AdminAllergenLinkRequest(a.AllergenId, a.AllergenLevel)).ToArray();
         var prices = x.Prices.Select(p => new AdminPriceRequest(p.PriceType, p.CurrencyCode.Trim(), p.Amount, p.EffectiveFrom, p.EffectiveUntil, p.IsActive)).ToArray();
-        var media = x.Media
+        var media = mealMedia
             .Where(m => m.Status == "ACTIVE")
             .OrderByDescending(m => m.IsPrimary)
             .ThenBy(m => m.DisplayOrder)
@@ -603,7 +609,11 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         var requested = await db.MealItems.AsNoTracking().Where(x => x.Id == mealId).Select(x => new { x.VersionGroupId }).SingleOrDefaultAsync(ct);
         if (requested is null) return null;
-        var meal = await db.MealItems.Include(x => x.Translations).Include(x => x.Nutrition).Include(x => x.Ingredients).Include(x => x.Allergens).Include(x => x.Prices).Include(x => x.Media).ThenInclude(x => x.Translations).SingleAsync(x => x.VersionGroupId == requested.VersionGroupId && x.IsLatest, ct);
+        var meal = await db.MealItems.Include(x => x.Translations).Include(x => x.Nutrition).Include(x => x.Ingredients).Include(x => x.Allergens).Include(x => x.Prices).SingleAsync(x => x.VersionGroupId == requested.VersionGroupId && x.IsLatest, ct);
+        var sourceMedia = await db.MealMedia.Include(x => x.Translations)
+            .Where(x => x.EntityId == meal.Id &&
+                (x.MediaType == MealMediaTypes.MealItem || x.MediaType == MealMediaTypes.Thumbnail))
+            .ToListAsync(ct);
         var now = clock.GetUtcNow();
 
         if (meal.Status == "ACTIVE")
@@ -618,11 +628,11 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             };
             ApplyMealValues(draft, request);
             ApplyTranslations(draft, request.Translations, now); ApplyNutrition(draft, request.Nutrition, now); ApplyAggregate(draft, request, now, userId);
-            foreach (var source in meal.Media.Where(x => x.Status == "ACTIVE"))
+            foreach (var source in sourceMedia.Where(x => x.Status == "ACTIVE"))
             {
-                var copy = new MealMedia { MediaType = source.MediaType, StorageProvider = source.StorageProvider, BucketName = source.BucketName, ObjectKey = source.ObjectKey, PublicUrl = source.PublicUrl, ThumbnailObjectKey = source.ThumbnailObjectKey, ThumbnailUrl = source.ThumbnailUrl, MimeType = source.MimeType, FileSizeBytes = source.FileSizeBytes, WidthPixels = source.WidthPixels, HeightPixels = source.HeightPixels, IsPrimary = source.IsPrimary, DisplayOrder = source.DisplayOrder, Status = source.Status, CreatedAt = now, UpdatedAt = now, CreatedBy = userId };
+                var copy = new MealMedia { EntityId = draft.Id, MediaType = source.MediaType, StorageProvider = source.StorageProvider, BucketName = source.BucketName, ObjectKey = source.ObjectKey, PublicUrl = source.PublicUrl, ThumbnailObjectKey = source.ThumbnailObjectKey, ThumbnailUrl = source.ThumbnailUrl, MimeType = source.MimeType, FileSizeBytes = source.FileSizeBytes, WidthPixels = source.WidthPixels, HeightPixels = source.HeightPixels, IsPrimary = source.IsPrimary, DisplayOrder = source.DisplayOrder, Status = source.Status, CreatedAt = now, UpdatedAt = now, CreatedBy = userId };
                 foreach (var t in source.Translations) copy.Translations.Add(new() { LanguageCode = t.LanguageCode, AltText = t.AltText, Caption = t.Caption, CreatedAt = now, UpdatedAt = now });
-                draft.Media.Add(copy);
+                db.MealMedia.Add(copy);
             }
             db.MealItems.Add(draft);
             await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
@@ -652,7 +662,6 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             .Include(x => x.Translations)
             .Include(x => x.Nutrition)
             .Include(x => x.Ingredients)
-            .Include(x => x.Media)
             .SingleAsync(x => x.VersionGroupId == groupId && x.IsLatest, ct);
         var normalizedStatus = MealStatuses.Normalize(status);
 
@@ -663,7 +672,8 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             if (!meal.Translations.Any(x => x.LanguageCode == "ar" && !string.IsNullOrWhiteSpace(x.Name))) missingRequirements.Add("Arabic name");
             if (meal.Nutrition is null || meal.Nutrition.CaloriesKcal <= 0) missingRequirements.Add("nutrition");
             if (meal.Ingredients.Count == 0) missingRequirements.Add("ingredients");
-            if (!meal.Media.Any(x => x.Status == "ACTIVE" && x.MediaType == "IMAGE")) missingRequirements.Add("meal image");
+            if (!await db.MealMedia.AnyAsync(x => x.EntityId == meal.Id && x.Status == "ACTIVE" &&
+                x.MediaType == MealMediaTypes.MealItem, ct)) missingRequirements.Add("meal image");
             if (missingRequirements.Count > 0)
                 throw new InvalidOperationException($"A meal requires {string.Join(", ", missingRequirements)} before publication.");
         }
@@ -677,19 +687,22 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
     }
     public async Task<AdminMediaResponse?> AddMediaAsync(Guid mealId, SaveMediaRequest request, Guid? userId, CancellationToken ct)
     {
+        if (request.MediaType is not (MealMediaTypes.MealItem or MealMediaTypes.Thumbnail))
+            throw new ArgumentException("Meal media must use the MEALITEM or THUMBNAIL media type.", nameof(request));
         var groupId = await db.MealItems.Where(x => x.Id == mealId).Select(x => (Guid?)x.VersionGroupId).SingleOrDefaultAsync(ct);
         if (groupId is null) return null;
         mealId = await db.MealItems.Where(x => x.VersionGroupId == groupId && x.IsLatest).Select(x => x.Id).SingleAsync(ct);
 
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         if (request.IsPrimary)
-            await db.MealMedia.Where(x => x.MealItemId == mealId && x.IsPrimary)
+            await db.MealMedia.Where(x => x.EntityId == mealId &&
+                (x.MediaType == MealMediaTypes.MealItem || x.MediaType == MealMediaTypes.Thumbnail) && x.IsPrimary)
                 .ExecuteUpdateAsync(s => s.SetProperty(x => x.IsPrimary, false), ct);
 
         var now = clock.GetUtcNow();
         var media = new MealMedia
         {
-            MealItemId = mealId,
+            EntityId = mealId,
             MediaType = request.MediaType,
             ObjectKey = request.ObjectKey,
             PublicUrl = request.PublicUrl,
@@ -718,7 +731,8 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         mealId = await db.MealItems.Where(x => x.VersionGroupId == groupId && x.IsLatest).Select(x => x.Id).SingleAsync(ct);
         var media = await db.MealMedia
             .Include(m => m.Translations)
-            .Where(m => m.MealItemId == mealId && m.Status == "ACTIVE" && m.MediaType == "IMAGE")
+            .Where(m => m.EntityId == mealId && m.Status == "ACTIVE" &&
+                m.MediaType == MealMediaTypes.MealItem)
             .OrderByDescending(m => m.IsPrimary)
             .ThenBy(m => m.DisplayOrder)
             .FirstOrDefaultAsync(ct);
@@ -737,7 +751,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         var response = new AdminMediaResponse(media.Id, mealId, media.MediaType, media.ObjectKey, media.PublicUrl, media.MimeType ?? "application/octet-stream", media.IsPrimary, media.DisplayOrder, media.Status, altTextEn, media.ThumbnailObjectKey, media.ThumbnailUrl);
         return new(response, previousObjectKey);
     }
-    public async Task<bool> DeleteMediaAsync(Guid mealId, Guid mediaId, CancellationToken ct) { var groupId = await db.MealItems.Where(x => x.Id == mealId).Select(x => (Guid?)x.VersionGroupId).SingleOrDefaultAsync(ct); if (groupId is null) return false; var latestId = await db.MealItems.Where(x => x.VersionGroupId == groupId && x.IsLatest).Select(x => x.Id).SingleAsync(ct); return await db.MealMedia.Where(x => x.Id == mediaId && x.MealItemId == latestId).ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, "DELETED").SetProperty(x => x.IsPrimary, false), ct) > 0; }
+    public async Task<bool> DeleteMediaAsync(Guid mealId, Guid mediaId, CancellationToken ct) { var groupId = await db.MealItems.Where(x => x.Id == mealId).Select(x => (Guid?)x.VersionGroupId).SingleOrDefaultAsync(ct); if (groupId is null) return false; var latestId = await db.MealItems.Where(x => x.VersionGroupId == groupId && x.IsLatest).Select(x => x.Id).SingleAsync(ct); return await db.MealMedia.Where(x => x.Id == mediaId && x.EntityId == latestId && (x.MediaType == MealMediaTypes.MealItem || x.MediaType == MealMediaTypes.Thumbnail)).ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, "DELETED").SetProperty(x => x.IsPrimary, false), ct) > 0; }
 
     public async Task<PagedResult<AdminMealPlanSummaryResponse>> GetMealPlansAsync(string? search, int page, int pageSize, CancellationToken ct)
     {
@@ -783,6 +797,12 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             .Include(x => x.Days).ThenInclude(x => x.Slots).ThenInclude(x => x.Options).ThenInclude(x => x.MealItem).ThenInclude(x => x.Translations)
             .SingleOrDefaultAsync(x => x.VersionGroupId == groupId && x.IsLatest, ct);
         if (plan is null) return null;
+        var planImage = await db.MealMedia.AsNoTracking()
+            .Where(x => x.Status == "ACTIVE" && x.MediaType == MealMediaTypes.MealPlan)
+            .Where(x => x.EntityId == plan.Id)
+            .OrderByDescending(x => x.IsPrimary)
+            .ThenBy(x => x.DisplayOrder)
+            .FirstOrDefaultAsync(ct);
 
         return new(
             plan.Id,
@@ -794,6 +814,8 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             plan.IsActive,
             plan.ValidFrom,
             plan.ValidUntil,
+            planImage?.PublicUrl ?? plan.ImageUrl,
+            planImage?.MediaType,
             plan.Translations.Select(x => new AdminPlanTranslationResponse(x.LanguageCode, x.Name, x.ShortDescription, x.FullDescription)).ToArray(),
             plan.Days.OrderBy(x => x.DisplayOrder).Select(day => new AdminPlanDayResponse(
                 day.Id,
@@ -820,30 +842,77 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             plan.IsLatest);
     }
 
-    public async Task<Guid> CreatePlanAsync(CreatePlanRequest request, Guid? userId, CancellationToken ct) { var now = clock.GetUtcNow(); ValidatePlanDays(request.Days ?? []); var id = Guid.NewGuid(); var p = new MealPlanTemplate { Id = id, VersionGroupId = id, VersionNumber = 1, IsLatest = true, Code = request.Code, PlanType = request.PlanType, DurationDays = request.DurationDays, IsCustomizable = request.IsCustomizable, IsActive = true, IsPublished = false, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 }; foreach (var t in request.Translations) p.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now }); AddPlanStructure(p, request.Days ?? [], now, userId); db.Add(p); await db.SaveChangesAsync(ct); return p.Id; }
+    public async Task<Guid> CreatePlanAsync(CreatePlanRequest request, Guid? userId, CancellationToken ct) { var now = clock.GetUtcNow(); ValidatePlanDays(request.Days ?? []); if (request.Publish) ValidatePlanForPublication(request); var id = Guid.NewGuid(); var p = new MealPlanTemplate { Id = id, VersionGroupId = id, VersionNumber = 1, IsLatest = true, Code = request.Code, PlanType = request.PlanType, DurationDays = request.DurationDays, IsCustomizable = request.IsCustomizable, IsActive = true, IsPublished = request.Publish, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 }; foreach (var t in request.Translations) p.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now }); AddPlanStructure(p, request.Days ?? [], now, userId); db.Add(p); await db.SaveChangesAsync(ct); return p.Id; }
     public async Task<VersionedUpdateResponse?> UpdatePlanAsync(Guid planId, CreatePlanRequest request, Guid? userId, CancellationToken ct)
     {
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         var requested = await db.MealPlanTemplates.AsNoTracking().Where(x => x.Id == planId).Select(x => new { x.VersionGroupId }).SingleOrDefaultAsync(ct);
         if (requested is null) return null;
         var p = await db.MealPlanTemplates.Include(x => x.Translations).Include(x => x.Days).ThenInclude(x => x.Slots).ThenInclude(x => x.Options).SingleAsync(x => x.VersionGroupId == requested.VersionGroupId && x.IsLatest, ct);
+        var sourcePlanMedia = await db.MealMedia.Include(x => x.Translations)
+            .Where(x => x.EntityId == p.Id && x.MediaType == MealMediaTypes.MealPlan)
+            .ToListAsync(ct);
         if (request.Days is not null) ValidatePlanDays(request.Days);
+        if (request.Publish) ValidatePlanForPublication(request);
         var now = clock.GetUtcNow();
         if (p.IsPublished)
         {
             p.IsLatest = false;
             await db.SaveChangesAsync(ct);
-            var draft = new MealPlanTemplate { Id = Guid.NewGuid(), VersionGroupId = p.VersionGroupId, VersionNumber = p.VersionNumber + 1, IsLatest = true, SupersedesId = p.Id, Code = p.Code, PlanType = request.PlanType, DurationDays = request.DurationDays, IsCustomizable = request.IsCustomizable, IsActive = true, IsPublished = false, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 };
+            var draft = new MealPlanTemplate { Id = Guid.NewGuid(), VersionGroupId = p.VersionGroupId, VersionNumber = p.VersionNumber + 1, IsLatest = true, SupersedesId = p.Id, Code = p.Code, PlanType = request.PlanType, DurationDays = request.DurationDays, IsCustomizable = request.IsCustomizable, IsActive = true, IsPublished = request.Publish, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil, DisplayOrder = p.DisplayOrder, ImageUrl = p.ImageUrl, IconUrl = p.IconUrl, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 };
             foreach (var t in request.Translations) draft.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now });
+            foreach (var source in sourcePlanMedia.Where(x => x.Status == "ACTIVE"))
+            {
+                var copy = new MealMedia { EntityId = draft.Id, MediaType = source.MediaType, StorageProvider = source.StorageProvider, BucketName = source.BucketName, ObjectKey = source.ObjectKey, PublicUrl = source.PublicUrl, ThumbnailObjectKey = source.ThumbnailObjectKey, ThumbnailUrl = source.ThumbnailUrl, MimeType = source.MimeType, FileSizeBytes = source.FileSizeBytes, WidthPixels = source.WidthPixels, HeightPixels = source.HeightPixels, IsPrimary = source.IsPrimary, DisplayOrder = source.DisplayOrder, Status = source.Status, CreatedAt = now, UpdatedAt = now, CreatedBy = userId };
+                foreach (var t in source.Translations) copy.Translations.Add(new() { LanguageCode = t.LanguageCode, AltText = t.AltText, Caption = t.Caption, CreatedAt = now, UpdatedAt = now });
+                db.MealMedia.Add(copy);
+            }
             if (request.Days is not null) AddPlanStructure(draft, request.Days, now, userId); else ClonePlanStructure(draft, p.Days, now, userId);
             db.Add(draft); await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return new(draft.Id, true);
         }
-        p.Code = request.Code; p.PlanType = request.PlanType; p.DurationDays = request.DurationDays; p.IsCustomizable = request.IsCustomizable; p.ValidFrom = request.ValidFrom; p.ValidUntil = request.ValidUntil; p.UpdatedAt = now; p.UpdatedBy = userId; p.RowVersion++;
+        p.Code = request.Code; p.PlanType = request.PlanType; p.DurationDays = request.DurationDays; p.IsCustomizable = request.IsCustomizable; p.IsPublished = request.Publish; p.ValidFrom = request.ValidFrom; p.ValidUntil = request.ValidUntil; p.UpdatedAt = now; p.UpdatedBy = userId; p.RowVersion++;
         db.MealPlanTemplateTranslations.RemoveRange(p.Translations); foreach (var t in request.Translations) p.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now });
         if (request.Days is not null) { await db.MealPlanTemplateDays.Where(x => x.MealPlanTemplateId == p.Id).ExecuteDeleteAsync(ct); AddPlanStructure(p, request.Days, now, userId); }
         await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return new(p.Id, false);
     }
-    public async Task<bool> DeletePlanAsync(Guid planId, CancellationToken ct) { await using var tx = await db.Database.BeginTransactionAsync(ct); await db.MealPlanPrices.Where(x => x.MealPlanTemplateId == planId).ExecuteDeleteAsync(ct); var deleted = await db.MealPlanTemplates.Where(x => x.Id == planId).ExecuteDeleteAsync(ct) > 0; await tx.CommitAsync(ct); return deleted; }
+    public async Task<AdminPlanImageResponse?> AddPlanImageAsync(Guid planId, SaveMediaRequest request, Guid? userId, CancellationToken ct)
+    {
+        if (!string.Equals(request.MediaType, MealMediaTypes.MealPlan, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Plan images must use the MEALPLAN media type.", nameof(request));
+        var groupId = await db.MealPlanTemplates.AsNoTracking().Where(x => x.Id == planId).Select(x => (Guid?)x.VersionGroupId).SingleOrDefaultAsync(ct);
+        if (groupId is null) return null;
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var plan = await db.MealPlanTemplates.SingleAsync(x => x.VersionGroupId == groupId && x.IsLatest, ct);
+        await db.MealMedia
+            .Where(x => x.EntityId == plan.Id && x.Status == "ACTIVE" && x.MediaType == MealMediaTypes.MealPlan)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(x => x.Status, "DELETED")
+                .SetProperty(x => x.IsPrimary, false), ct);
+        var now = clock.GetUtcNow();
+        var media = new MealMedia
+        {
+            EntityId = plan.Id,
+            MediaType = MealMediaTypes.MealPlan,
+            StorageProvider = "S3",
+            ObjectKey = request.ObjectKey,
+            PublicUrl = request.PublicUrl,
+            MimeType = request.ContentType,
+            IsPrimary = true,
+            DisplayOrder = request.DisplayOrder,
+            Status = "ACTIVE",
+            CreatedAt = now,
+            UpdatedAt = now,
+            CreatedBy = userId
+        };
+        db.MealMedia.Add(media);
+        plan.UpdatedAt = clock.GetUtcNow();
+        plan.UpdatedBy = userId;
+        plan.RowVersion++;
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return new(plan.Id, media.MediaType, media.PublicUrl ?? media.ObjectKey, request.ContentType);
+    }
+    public async Task<bool> DeletePlanAsync(Guid planId, CancellationToken ct) { await using var tx = await db.Database.BeginTransactionAsync(ct); await db.MealPlanPrices.Where(x => x.MealPlanTemplateId == planId).ExecuteDeleteAsync(ct); await db.MealMedia.Where(x => x.EntityId == planId && x.MediaType == MealMediaTypes.MealPlan).ExecuteDeleteAsync(ct); var deleted = await db.MealPlanTemplates.Where(x => x.Id == planId).ExecuteDeleteAsync(ct) > 0; await tx.CommitAsync(ct); return deleted; }
     public async Task<IReadOnlyList<MealPlanTemplateDayResponse>?> GetTemplateDaysAsync(Guid templateId, CancellationToken ct)
     {
         if (!await db.MealPlanTemplates.AnyAsync(x => x.Id == templateId, ct)) return null;
@@ -906,8 +975,6 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
     public async Task<Guid?> AddPlanSlotAsync(Guid dayId, CreatePlanSlotRequest request, Guid? userId, CancellationToken ct) { if (!await db.MealPlanTemplateDays.AnyAsync(x => x.Id == dayId, ct)) return null; var now = clock.GetUtcNow(); var s = new MealPlanTemplateSlot { MealPlanTemplateDayId = dayId, MealTypeId = request.MealTypeId, DisplayOrder = request.DisplayOrder, MinimumSelection = request.MinimumSelection, MaximumSelection = request.MaximumSelection, IsRequired = request.IsRequired, SelectionCutoffTime = request.SelectionCutoffTime, AllowsPaidUpgrade = request.AllowsPaidUpgrade, IsActive = true, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 }; db.Add(s); await db.SaveChangesAsync(ct); return s.Id; }
     public async Task<Guid?> AddSlotOptionAsync(Guid slotId, CreateSlotOptionRequest request, Guid? userId, CancellationToken ct) { if (!await db.MealPlanTemplateSlots.AnyAsync(x => x.Id == slotId, ct)) return null; if (request.IsDefault) await db.MealPlanSlotOptions.Where(x => x.MealPlanTemplateSlotId == slotId && x.IsDefault).ExecuteUpdateAsync(s => s.SetProperty(x => x.IsDefault, false), ct); var now = clock.GetUtcNow(); var o = new MealPlanSlotOption { MealPlanTemplateSlotId = slotId, MealItemId = request.MealItemId, AdditionalPrice = request.AdditionalPrice, IsDefault = request.IsDefault, IsAvailable = request.IsAvailable, DisplayOrder = request.DisplayOrder, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId }; db.Add(o); await db.SaveChangesAsync(ct); return o.Id; }
     public async Task<bool> DeleteSlotOptionAsync(Guid slotId, Guid optionId, CancellationToken ct) => await db.MealPlanSlotOptions.Where(x => x.Id == optionId && x.MealPlanTemplateSlotId == slotId).ExecuteDeleteAsync(ct) > 0;
-    public async Task<bool> SetPlanPublishedAsync(Guid planId, bool published, Guid? userId, CancellationToken ct) { var groupId = await db.MealPlanTemplates.Where(x => x.Id == planId).Select(x => (Guid?)x.VersionGroupId).SingleOrDefaultAsync(ct); if (groupId is null) return false; var p = await db.MealPlanTemplates.Include(x => x.Translations).Include(x => x.Days).ThenInclude(x => x.Slots).ThenInclude(x => x.Options).SingleAsync(x => x.VersionGroupId == groupId && x.IsLatest, ct); if (published && (p.Translations.Count == 0 || p.Days.Count == 0 || p.Days.Any(d => d.Slots.Count == 0 || d.Slots.Any(s => s.Options.Count == 0)))) throw new InvalidOperationException("A plan requires translations, days, slots, and options before publication."); p.IsPublished = published; p.UpdatedAt = clock.GetUtcNow(); p.UpdatedBy = userId; p.RowVersion++; await db.SaveChangesAsync(ct); return true; }
-
     private static void ClonePlanStructure(MealPlanTemplate target, IEnumerable<MealPlanTemplateDay> sourceDays, DateTimeOffset now, Guid? userId)
     {
         foreach (var sourceDay in sourceDays)
@@ -948,6 +1015,17 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         var duplicate = resolved.GroupBy(x => x).FirstOrDefault(x => x.Count() > 1);
         if (duplicate is not null) throw DuplicateWeekday(duplicate.Key);
         foreach (var weekday in resolved) RequireDeliveryWeekday(weekday);
+    }
+
+    private static void ValidatePlanForPublication(CreatePlanRequest request)
+    {
+        var days = request.Days?.ToArray() ?? [];
+        if (request.Translations.Count == 0 ||
+            days.Length == 0 ||
+            days.Any(day => day.Slots.Count == 0 ||
+                day.Slots.Any(slot => slot.Options.Count == 0)))
+            throw new InvalidOperationException(
+                "A plan requires translations, days, slots, and options before publication.");
     }
 
     private MenuWeekday RequireDeliveryWeekday(MenuWeekday? weekday)

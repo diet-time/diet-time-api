@@ -42,26 +42,27 @@ public sealed class GuestHomeService(
                     version.VersionNumber > p.VersionNumber) &&
                 (p.ValidFrom == null || p.ValidFrom <= requestedDate) &&
                 (p.ValidUntil == null || p.ValidUntil >= requestedDate))
-            .OrderBy(p => p.Days
-                .Where(d => d.IsActive)
-                .Select(d => (int?)d.DisplayOrder)
-                .Min() ?? int.MaxValue)
+            .OrderBy(p => p.DisplayOrder)
             .ThenBy(p => p.Code)
             .Select(p => new PlanRow(
                 p.Id,
                 p.Code,
-                p.Days
-                    .Where(d => d.IsActive)
-                    .Select(d => (int?)d.DisplayOrder)
-                    .Min() ?? int.MaxValue,
-                p.Days
+                p.DisplayOrder,
+                db.MealMedia
+                    .Where(m => m.EntityId == p.Id && m.Status == "ACTIVE" && m.MediaType == MealMediaTypes.MealPlan)
+                    .OrderByDescending(m => m.IsPrimary)
+                    .ThenBy(m => m.DisplayOrder)
+                    .Select(m => m.PublicUrl)
+                    .FirstOrDefault()
+                ?? p.ImageUrl
+                ?? p.Days
                     .Where(d => d.IsActive)
                     .SelectMany(d => d.Slots)
                     .Where(s => s.IsActive)
                     .SelectMany(s => s.Options)
                     .Where(o => o.IsAvailable)
-                    .SelectMany(o => o.MealItem.Media)
-                    .Where(m => m.Status == "ACTIVE" && m.MediaType == "IMAGE")
+                    .SelectMany(o => db.MealMedia.Where(m => m.EntityId == o.MealItemId))
+                    .Where(m => m.Status == "ACTIVE" && m.MediaType == MealMediaTypes.MealItem)
                     .OrderByDescending(m => m.IsPrimary)
                     .ThenBy(m => m.DisplayOrder)
                     .Select(m => m.PublicUrl)
@@ -185,14 +186,16 @@ public sealed class GuestHomeService(
                     ?? o.MealItem.Translations.Where(t => t.LanguageCode == "en").Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault()
                     ?? o.MealItem.Translations.Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault()
                     ?? o.MealItem.Sku,
-                o.MealItem.Media
-                    .Where(m => m.Status == "ACTIVE" && m.MediaType == "IMAGE")
+                db.MealMedia
+                    .Where(m => m.EntityId == o.MealItemId && m.Status == "ACTIVE" &&
+                        m.MediaType == MealMediaTypes.MealItem)
                     .OrderByDescending(m => m.IsPrimary)
                     .ThenBy(m => m.DisplayOrder)
                     .Select(m => m.PublicUrl)
                     .FirstOrDefault(),
-                o.MealItem.Media
-                    .Where(m => m.Status == "ACTIVE" && m.MediaType == "IMAGE")
+                db.MealMedia
+                    .Where(m => m.EntityId == o.MealItemId && m.Status == "ACTIVE" &&
+                        m.MediaType == MealMediaTypes.MealItem)
                     .OrderByDescending(m => m.IsPrimary)
                     .ThenBy(m => m.DisplayOrder)
                     .Select(m => m.ThumbnailUrl ?? m.PublicUrl)

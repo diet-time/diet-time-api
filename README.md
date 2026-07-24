@@ -9,7 +9,7 @@
 - `tests/DietTime.Meal.Api.IntegrationTests`: integration coverage for the meal API host.
 - `DietTime.Application`: use-case interfaces, validation, localization, availability, calendar, selection, and pricing rules.
 - `DietTime.Domain`: meal and plan entities matching the supplied schema.
-- `DietTime.Persistence`: one `DietTimeDbContext`, Fluent mappings, projected queries, transactional admin writes, development seed, and identity migration.
+- `DietTime.Persistence`: one `DietTimeDbContext`, Fluent mappings, projected queries, and transactional admin writes.
 - `DietTime.Infrastructure`: JWT/refresh-token issuance and server-side S3-compatible object storage integration.
 - `DietTime.Contracts`: request, response, envelope, pagination, and error contracts.
 
@@ -39,13 +39,7 @@ Do not use the checked-in development placeholders as credentials. Secret values
 
 ## Database assumptions
 
-The supplied meal tables, indexes, `pgcrypto`/`gen_random_uuid()`, and `set_updated_at()` trigger function already exist. Entity mappings preserve their names and constraints. Included migrations create ASP.NET Core Identity and hashed refresh-token storage, then add immutable version lineage for published meals and meal-plan templates:
-
-```powershell
-dotnet ef database update --project src/BuildingBlocks/DietTime.Persistence --startup-project src/Apis/DietTime.Meal.Api
-```
-
-Run the migrations after the supplied meal schema has been installed. The versioning migration adds `version_group_id`, `version_number`, `is_latest`, and `supersedes_id`, and replaces global SKU/code uniqueness with uniqueness on the latest logical record. Development seeding is opt-in with `DevelopmentSeed__Enabled=true`, exits when lookup data exists, and must never be enabled in production.
+The supplied meal tables, indexes, `pgcrypto`/`gen_random_uuid()`, and `set_updated_at()` trigger function already exist. Entity mappings preserve their names and constraints. Database changes are managed outside this repository.
 
 ## Public and customer endpoints
 

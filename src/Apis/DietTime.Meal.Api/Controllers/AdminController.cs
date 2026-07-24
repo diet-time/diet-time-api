@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Asp.Versioning;
 using DietTime.Application;
 using DietTime.Contracts;
+using DietTime.Domain;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -102,7 +103,7 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
     public async Task<ActionResult<ApiResponse<AdminMediaResponse>>> UploadMealMedia(
         Guid mealId,
         [FromForm] IFormFile file,
-        [FromForm] string? mediaType = "IMAGE",
+        [FromForm] string? mediaType = MealMediaTypes.MealItem,
         [FromForm] string? altTextEn = null,
         [FromForm] bool isPrimary = false,
         [FromForm] int displayOrder = 0,
@@ -117,16 +118,16 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
         if (altTextEn?.Length > 500)
             return BadRequest(new ProblemDetails { Title = "Invalid alt text", Detail = "altTextEn cannot exceed 500 characters." });
 
-        var normalizedMediaType = mediaType?.Trim().ToUpperInvariant() ?? "IMAGE";
-        if (normalizedMediaType is not ("IMAGE" or "THUMBNAIL"))
-            return BadRequest(new ProblemDetails { Title = "Invalid media type", Detail = "Only IMAGE and THUMBNAIL media are supported by this endpoint." });
+        var normalizedMediaType = mediaType?.Trim().ToUpperInvariant() ?? MealMediaTypes.MealItem;
+        if (normalizedMediaType is not (MealMediaTypes.MealItem or MealMediaTypes.Thumbnail))
+            return BadRequest(new ProblemDetails { Title = "Invalid media type", Detail = "Only MEALITEM and THUMBNAIL media are supported by this endpoint." });
 
         await using var content = file.OpenReadStream();
         var detected = await DetectImageTypeAsync(content, ct);
         if (detected is null || !detected.Value.ContentType.Equals(file.ContentType, StringComparison.OrdinalIgnoreCase))
             return BadRequest(new ProblemDetails { Title = "Invalid image", Detail = "Only valid JPEG, PNG, and WebP files are accepted, and the file content must match its Content-Type." });
 
-        var objectFolder = normalizedMediaType == "THUMBNAIL" ? "thumbnails" : "images";
+        var objectFolder = normalizedMediaType == MealMediaTypes.Thumbnail ? "thumbnails" : "images";
         var objectKey = $"meals/{mealId:D}/{objectFolder}/{Guid.NewGuid():N}{detected.Value.Extension}";
         var uploaded = false;
         try
@@ -134,7 +135,7 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
             await storage.UploadAsync(objectKey, content, detected.Value.ContentType, ct);
             uploaded = true;
 
-            if (normalizedMediaType == "THUMBNAIL")
+            if (normalizedMediaType == MealMediaTypes.Thumbnail)
             {
                 var thumbnail = await admin.SetThumbnailAsync(mealId, new(objectKey, GetApiMediaUrl(objectKey)), ct);
                 if (thumbnail is null)
@@ -178,13 +179,47 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
     [HttpGet("meal-plans/{planId:guid}")] public async Task<ActionResult<ApiResponse<AdminMealPlanDetailResponse>>> GetMealPlan(Guid planId, CancellationToken ct) { var plan = await admin.GetMealPlanAsync(planId, ct); return plan is null ? NotFound() : Ok(ApiResponse<AdminMealPlanDetailResponse>.Ok(plan)); }
     [HttpPost("meal-plans")] public async Task<ActionResult<ApiResponse<object>>> CreatePlan(CreatePlanRequest request, CancellationToken ct) { var id = await admin.CreatePlanAsync(request, UserId, ct); return Ok(ApiResponse<object>.Ok(new { id })); }
     [HttpPut("meal-plans/{planId:guid}")] public async Task<ActionResult<ApiResponse<VersionedUpdateResponse>>> UpdatePlan(Guid planId, CreatePlanRequest request, CancellationToken ct) { var result = await admin.UpdatePlanAsync(planId, request, UserId, ct); return result is null ? NotFound() : Ok(ApiResponse<VersionedUpdateResponse>.Ok(result)); }
+    [HttpPost("meal-plans/{planId:guid}/image/upload"), Consumes("multipart/form-data")]
+    public async Task<ActionResult<ApiResponse<AdminPlanImageResponse>>> UploadPlanImage(
+        Guid planId,
+        [FromForm] IFormFile file,
+        [FromForm] string? imageType = MealMediaTypes.MealPlan,
+        CancellationToken ct = default)
+    {
+        if (!string.Equals(imageType?.Trim(), MealMediaTypes.MealPlan, StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new ProblemDetails { Title = "Invalid image type", Detail = "Only the MEALPLAN image type is supported by this endpoint." });
+        if (file.Length == 0)
+            return BadRequest(new ProblemDetails { Title = "Invalid image", Detail = "The uploaded file is empty." });
+        if (file.Length > storage.MaxUploadSizeBytes)
+            return StatusCode(StatusCodes.Status413PayloadTooLarge, new ProblemDetails { Title = "Image too large", Detail = $"The maximum upload size is {storage.MaxUploadSizeBytes} bytes." });
+
+        await using var content = file.OpenReadStream();
+        var detected = await DetectImageTypeAsync(content, ct);
+        if (detected is null || !detected.Value.ContentType.Equals(file.ContentType, StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new ProblemDetails { Title = "Invalid image", Detail = "Only valid JPEG, PNG, and WebP files are accepted, and the file content must match its Content-Type." });
+
+        var objectKey = $"meal-plans/{planId:D}/images/{Guid.NewGuid():N}{detected.Value.Extension}";
+        await storage.UploadAsync(objectKey, content, detected.Value.ContentType, ct);
+        var publicUrl = GetApiMediaUrl(objectKey);
+        var media = await admin.AddPlanImageAsync(
+            planId,
+            new(objectKey, publicUrl, detected.Value.ContentType, MealMediaTypes.MealPlan, true, 0, null),
+            UserId,
+            ct);
+        if (media is null)
+        {
+            await TryDeleteObjectAsync(objectKey);
+            return NotFound();
+        }
+
+        return StatusCode(
+            StatusCodes.Status201Created,
+            ApiResponse<AdminPlanImageResponse>.Ok(media));
+    }
     [HttpDelete("meal-plans/{planId:guid}")] public async Task<IActionResult> DeletePlan(Guid planId, CancellationToken ct) => await admin.DeletePlanAsync(planId, ct) ? NoContent() : NotFound();
     [HttpPost("meal-plan-days/{dayId:guid}/slots")] public async Task<ActionResult<ApiResponse<object>>> Slot(Guid dayId, CreatePlanSlotRequest request, CancellationToken ct) { var id = await admin.AddPlanSlotAsync(dayId, request, UserId, ct); return id is null ? NotFound() : Ok(ApiResponse<object>.Ok(new { id })); }
     [HttpPost("meal-plan-slots/{slotId:guid}/options")] public async Task<ActionResult<ApiResponse<object>>> Option(Guid slotId, CreateSlotOptionRequest request, CancellationToken ct) { var id = await admin.AddSlotOptionAsync(slotId, request, UserId, ct); return id is null ? NotFound() : Ok(ApiResponse<object>.Ok(new { id })); }
     [HttpDelete("meal-plan-slots/{slotId:guid}/options/{optionId:guid}")] public async Task<IActionResult> DeleteOption(Guid slotId, Guid optionId, CancellationToken ct) => await admin.DeleteSlotOptionAsync(slotId, optionId, ct) ? NoContent() : NotFound();
-    [HttpPost("meal-plans/{planId:guid}/publish")] public async Task<IActionResult> Publish(Guid planId, CancellationToken ct) => await admin.SetPlanPublishedAsync(planId, true, UserId, ct) ? NoContent() : NotFound();
-    [HttpPost("meal-plans/{planId:guid}/unpublish")] public async Task<IActionResult> Unpublish(Guid planId, CancellationToken ct) => await admin.SetPlanPublishedAsync(planId, false, UserId, ct) ? NoContent() : NotFound();
-
     private async Task TryDeleteObjectAsync(string objectKey)
     {
         try { await storage.DeleteAsync(objectKey, CancellationToken.None); }
