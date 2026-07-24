@@ -28,7 +28,6 @@ public sealed record GuestHomeQuery(
     string MealTimeCode = "ALL",
     int Page = 1,
     int PageSize = 20);
-public sealed record GuestHeroResponse(string Title, string Subtitle, string? BannerImageUrl);
 public sealed record GuestPlanResponse(Guid Id, string Code, string Name, string Description, string? ImageUrl, string? IconUrl, int DisplayOrder, bool IsSelected);
 public sealed record GuestCalendarDayResponse(DateOnly Date, int DayNumber, string DayName, string ShortDayName, bool IsToday, bool IsSelected, bool IsAvailable);
 public sealed record GuestMealTimeResponse(Guid? Id, string Code, string Name, string? IconUrl, int DisplayOrder, bool IsSelected);
@@ -56,7 +55,6 @@ public sealed record GuestPaginationResponse(
     bool HasNextPage,
     bool HasPreviousPage);
 public sealed record GuestHomeResponse(
-    GuestHeroResponse Hero,
     IReadOnlyList<GuestPlanResponse> MealPlans,
     IReadOnlyList<GuestCalendarDayResponse> WeeklyCalendar,
     IReadOnlyList<GuestMealTimeResponse> MealTimeFilters,

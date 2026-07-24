@@ -10,7 +10,8 @@ namespace DietTime.Persistence;
 public sealed class GuestHomeService(
     DietTimeDbContext db,
     IMemoryCache cache,
-    GuestHomeCacheVersion cacheVersion) : IGuestHomeService
+    GuestHomeCacheVersion cacheVersion,
+    IStorageUrlService storage) : IGuestHomeService
 {
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(10);
 
@@ -60,16 +61,22 @@ public sealed class GuestHomeService(
                     .ThenBy(m => m.DisplayOrder)
                     .Select(m => m.PublicUrl)
                     .FirstOrDefault(),
+                db.MealMedia
+                    .Where(m => m.EntityId == p.Id && m.Status == "ACTIVE" && m.MediaType == MealMediaTypes.MealPlan)
+                    .OrderByDescending(m => m.IsPrimary)
+                    .ThenBy(m => m.DisplayOrder)
+                    .Select(m => m.ObjectKey)
+                    .FirstOrDefault(),
                 p.ValidFrom,
                 p.ValidUntil,
                 p.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault()
                     ?? p.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault()
                     ?? p.Translations.Select(t => t.Name).FirstOrDefault()
                     ?? p.Code,
-                p.Translations.Where(t => t.LanguageCode == language).Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault()
-                    ?? p.Translations.Where(t => t.LanguageCode == "en").Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault()
-                    ?? p.Translations.Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault()
-                    ?? p.Code))
+                p.Translations.Where(t => t.LanguageCode == language).Select(t => t.ShortDescription).FirstOrDefault()
+                    ?? p.Translations.Where(t => t.LanguageCode == "en").Select(t => t.ShortDescription).FirstOrDefault()
+                    ?? p.Translations.Select(t => t.ShortDescription).FirstOrDefault()
+                    ?? string.Empty))
             .ToListAsync(ct);
 
         if (plans.Count == 0)
@@ -231,13 +238,12 @@ public sealed class GuestHomeService(
             m.DisplayOrder)).ToArray();
 
         var response = new GuestHomeResponse(
-            new GuestHeroResponse(selectedPlan.Name, selectedPlan.Description, selectedPlan.ImageUrl),
             plans.Select(p => new GuestPlanResponse(
                 p.Id,
                 p.Code,
                 p.Name,
                 p.Description,
-                p.ImageUrl,
+                ResolveImage(p.ImageUrl, p.ImageObjectKey),
                 null,
                 p.DisplayOrder,
                 p.Id == selectedPlan.Id)).ToArray(),
@@ -256,11 +262,19 @@ public sealed class GuestHomeService(
         return response;
     }
 
+    private string? ResolveImage(string? publicUrl, string? objectKey) =>
+        !string.IsNullOrWhiteSpace(publicUrl)
+            ? publicUrl
+            : string.IsNullOrWhiteSpace(objectKey)
+                ? null
+                : storage.GetPublicUrl(objectKey);
+
     private sealed record PlanRow(
         Guid Id,
         string Code,
         int DisplayOrder,
         string? ImageUrl,
+        string? ImageObjectKey,
         DateOnly? ValidFrom,
         DateOnly? ValidUntil,
         string Name,
