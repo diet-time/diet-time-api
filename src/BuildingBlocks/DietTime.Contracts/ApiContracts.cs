@@ -29,7 +29,17 @@ public sealed record GuestHomeQuery(
     int Page = 1,
     int PageSize = 20,
     bool IncludeAll = false);
-public sealed record GuestPlanResponse(Guid Id, string Code, string Name, string Description, string? ImageUrl, string? IconUrl, int DisplayOrder, bool IsSelected, IReadOnlyList<GuestMealSlotResponse> Slots);
+public sealed record GuestPlanResponse(
+    Guid Id,
+    string Code,
+    string Name,
+    string Description,
+    string? ImageUrl,
+    string? IconUrl,
+    int DisplayOrder,
+    bool IsSelected,
+    IReadOnlyList<GuestMealSlotResponse> Slots,
+    IReadOnlyList<GuestMenuDayResponse> Menus);
 public sealed record GuestCalendarDayResponse(DateOnly Date, int DayNumber, string DayName, string ShortDayName, bool IsToday, bool IsSelected, bool IsAvailable);
 public sealed record GuestMealTimeResponse(Guid? Id, string Code, string Name, string? IconUrl, int DisplayOrder, bool IsSelected);
 public sealed record GuestSlotMealTimeResponse(Guid Id, string Code, string Name, int DisplayOrder);

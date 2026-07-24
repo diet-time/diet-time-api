@@ -16,12 +16,14 @@ public sealed class GuestHomeController(
 {
     /// <summary>Gets the complete guest home screen.</summary>
     /// <remarks>
-    /// Returns localized active plans with the selected plan's slots and meals nested beneath it,
-    /// plus the seven-day menu calendar, meal-time filters, and pagination.
+    /// Returns localized active plans with every configured Saturday-Friday menu nested beneath
+    /// each plan. The selected date's slots are also returned directly for backward compatibility,
+    /// together with the weekly calendar, meal-time filters, and pagination.
     ///
-    /// Set `includeAll=true` to include plan/date menu groups for one-request client-side filtering.
+    /// The top-level `menus` collection contains the same plan/date menu groups for compatibility
+    /// with clients that perform their filtering outside the nested meal-plan structure.
     ///
-    /// Example: `GET /api/v1/guest/home?language=en&amp;includeAll=true`
+    /// Example: `GET /api/v1/guest/home?language=en`
     /// </remarks>
     /// <response code="200">The complete guest home payload.</response>
     /// <response code="400">A query parameter is invalid or the requested plan is not active.</response>

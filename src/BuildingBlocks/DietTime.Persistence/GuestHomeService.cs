@@ -137,8 +137,10 @@ public sealed class GuestHomeService(
             return null;
 
         var culture = CultureInfo.GetCultureInfo(language == "ar" ? "ar-QA" : "en-US");
+        var daysSinceSaturday = ((int)selectedDate.DayOfWeek - (int)DayOfWeek.Saturday + 7) % 7;
+        var calendarStart = selectedDate.AddDays(-daysSinceSaturday);
         var weeklyCalendar = Enumerable.Range(0, 7)
-            .Select(offset => selectedDate.AddDays(offset))
+            .Select(offset => calendarStart.AddDays(offset))
             .Select(date => new GuestCalendarDayResponse(
                 date,
                 date.Day,
@@ -194,41 +196,38 @@ public sealed class GuestHomeService(
 
         var slots = BuildSlots(mealRows);
 
-        IReadOnlyList<GuestMenuDayResponse>? menus = null;
-        if (request.IncludeAll)
-        {
-            var planIds = plans.Select(p => p.Id).ToArray();
-            var allPlanDays = await db.MealPlanTemplateDays.AsNoTracking()
-                .Where(day => planIds.Contains(day.MealPlanTemplateId) && day.IsActive)
-                .Select(day => new { day.Id, day.MealPlanTemplateId, day.MenuWeekday })
+        var planIds = plans.Select(p => p.Id).ToArray();
+        var allPlanDays = await db.MealPlanTemplateDays.AsNoTracking()
+            .Where(day => planIds.Contains(day.MealPlanTemplateId) && day.IsActive)
+            .Select(day => new { day.Id, day.MealPlanTemplateId, day.MenuWeekday, day.DisplayOrder })
+            .ToListAsync(ct);
+        var menuTargets = (
+            from plan in plans
+            from calendarDay in weeklyCalendar
+            where (plan.ValidFrom is null || calendarDay.Date >= plan.ValidFrom)
+                && (plan.ValidUntil is null || calendarDay.Date <= plan.ValidUntil)
+            let templateDay = allPlanDays.FirstOrDefault(day =>
+                day.MealPlanTemplateId == plan.Id &&
+                day.MenuWeekday == MenuWeekdayExtensions.FromDate(calendarDay.Date))
+            where templateDay is not null
+            orderby plan.DisplayOrder, templateDay.DisplayOrder
+            select new MenuTarget(plan.Code, calendarDay.Date, templateDay.Id))
+            .ToArray();
+        var allDayIds = menuTargets.Select(target => target.DayId).Distinct().ToArray();
+        var allRows = allDayIds.Length == 0
+            ? new List<MealRow>()
+            : await ProjectMealRows(
+                    AvailableMealOptions(allDayIds, now)
+                        .OrderBy(option => option.Slot.DisplayOrder)
+                        .ThenBy(option => option.DisplayOrder),
+                    language)
                 .ToListAsync(ct);
-            var menuTargets = (
-                from plan in plans
-                from calendarDay in weeklyCalendar
-                where (plan.ValidFrom is null || calendarDay.Date >= plan.ValidFrom)
-                    && (plan.ValidUntil is null || calendarDay.Date <= plan.ValidUntil)
-                let templateDay = allPlanDays.FirstOrDefault(day =>
-                    day.MealPlanTemplateId == plan.Id &&
-                    day.MenuWeekday == MenuWeekdayExtensions.FromDate(calendarDay.Date))
-                where templateDay is not null
-                select new MenuTarget(plan.Code, calendarDay.Date, templateDay.Id))
-                .ToArray();
-            var allDayIds = menuTargets.Select(target => target.DayId).Distinct().ToArray();
-            var allRows = allDayIds.Length == 0
-                ? new List<MealRow>()
-                : await ProjectMealRows(
-                        AvailableMealOptions(allDayIds, now)
-                            .OrderBy(option => option.Slot.DisplayOrder)
-                            .ThenBy(option => option.DisplayOrder),
-                        language)
-                    .ToListAsync(ct);
-            menus = menuTargets
-                .Select(target => new GuestMenuDayResponse(
-                    target.PlanCode,
-                    target.Date,
-                    BuildSlots(allRows.Where(row => row.TemplateDayId == target.DayId))))
-                .ToArray();
-        }
+        var menus = menuTargets
+            .Select(target => new GuestMenuDayResponse(
+                target.PlanCode,
+                target.Date,
+                BuildSlots(allRows.Where(row => row.TemplateDayId == target.DayId))))
+            .ToArray();
 
         var response = new GuestHomeResponse(
             plans.Select(p => new GuestPlanResponse(
@@ -240,7 +239,8 @@ public sealed class GuestHomeService(
                 null,
                 p.DisplayOrder,
                 p.Id == selectedPlan.Id,
-                p.Id == selectedPlan.Id ? slots : [])).ToArray(),
+                p.Id == selectedPlan.Id ? slots : [],
+                menus.Where(menu => menu.PlanCode == p.Code).ToArray())).ToArray(),
             weeklyCalendar,
             mealTypes,
             new GuestPaginationResponse(
