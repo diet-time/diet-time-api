@@ -66,6 +66,31 @@ public sealed class MealPlanContractTests
     }
 
     [Fact]
+    public void Meal_plan_price_contract_exposes_package_dimensions_and_calculated_status()
+    {
+        var response = new AdminMealPlanPriceResponse(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            "PLN_CLASSIC",
+            "Balanced Living",
+            20,
+            3,
+            1,
+            "QAR",
+            1600m,
+            DateTimeOffset.Parse("2026-08-01T00:00:00Z"),
+            null,
+            true,
+            "ACTIVE",
+            false);
+
+        Assert.Equal(20, response.DurationDays);
+        Assert.Equal(3, response.MealsPerDay);
+        Assert.Equal(1, response.SnacksPerDay);
+        Assert.Equal("ACTIVE", response.Status);
+    }
+
+    [Fact]
     public void Meal_plan_image_type_is_stored_on_meal_media_not_plan_template()
     {
         Assert.Null(typeof(MealPlanTemplate).GetProperty("ImageType"));

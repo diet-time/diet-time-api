@@ -217,9 +217,94 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
             ApiResponse<AdminPlanImageResponse>.Ok(media));
     }
     [HttpDelete("meal-plans/{planId:guid}")] public async Task<IActionResult> DeletePlan(Guid planId, CancellationToken ct) => await admin.DeletePlanAsync(planId, ct) ? NoContent() : NotFound();
+    [HttpGet("meal-plan-pricing")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<AdminMealPlanPriceResponse>>>> GetMealPlanPricing(
+        [FromQuery] string? search = null,
+        [FromQuery] Guid? mealPlanTemplateId = null,
+        [FromQuery] string? status = null,
+        [FromQuery] string? currencyCode = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 25,
+        CancellationToken ct = default)
+    {
+        if (page < 1 || pageSize is < 1 or > 100) return BadRequest();
+        var allowedStatuses = new[] { "ACTIVE", "SCHEDULED", "EXPIRED", "INACTIVE" };
+        if (!string.IsNullOrWhiteSpace(status) && !allowedStatuses.Contains(status.Trim().ToUpperInvariant()))
+            return BadRequest(new ApiResponse<object> { Errors = [new("invalid_status", "Status must be Active, Scheduled, Expired, or Inactive.", "status")] });
+        var rows = await admin.GetMealPlanPricesAsync(search, mealPlanTemplateId, status, currencyCode, page, pageSize, ct);
+        return Ok(ApiResponse<IReadOnlyList<AdminMealPlanPriceResponse>>.Ok(rows.Items, rows.Meta));
+    }
+    [HttpGet("meal-plan-pricing/summary")]
+    public async Task<ActionResult<ApiResponse<AdminMealPlanPriceSummaryResponse>>> GetMealPlanPricingSummary(CancellationToken ct) =>
+        Ok(ApiResponse<AdminMealPlanPriceSummaryResponse>.Ok(await admin.GetMealPlanPriceSummaryAsync(ct)));
+    [HttpGet("meal-plan-pricing/currencies")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<string>>>> GetMealPlanPricingCurrencies(CancellationToken ct) =>
+        Ok(ApiResponse<IReadOnlyList<string>>.Ok(await admin.GetMealPlanPriceCurrenciesAsync(ct)));
+    [HttpGet("meal-plan-pricing/{priceId:guid}")]
+    public async Task<ActionResult<ApiResponse<AdminMealPlanPriceResponse>>> GetMealPlanPrice(Guid priceId, CancellationToken ct)
+    {
+        var price = await admin.GetMealPlanPriceAsync(priceId, ct);
+        return price is null ? NotFound() : Ok(ApiResponse<AdminMealPlanPriceResponse>.Ok(price));
+    }
+    [HttpPost("meal-plan-pricing")]
+    public async Task<ActionResult<ApiResponse<object>>> CreateMealPlanPrice(UpsertMealPlanPriceRequest request, CancellationToken ct)
+    {
+        var errors = ValidateMealPlanPrice(request);
+        if (errors.Count > 0) return BadRequest(new ApiResponse<object> { Errors = errors });
+        var id = await admin.CreateMealPlanPriceAsync(request, UserId, ct);
+        return id is null
+            ? PricingConflict()
+            : StatusCode(StatusCodes.Status201Created, ApiResponse<object>.Ok(new { id }));
+    }
+    [HttpPut("meal-plan-pricing/{priceId:guid}")]
+    public async Task<IActionResult> UpdateMealPlanPrice(Guid priceId, UpsertMealPlanPriceRequest request, CancellationToken ct)
+    {
+        var errors = ValidateMealPlanPrice(request);
+        if (errors.Count > 0) return BadRequest(new ApiResponse<object> { Errors = errors });
+        return await admin.UpdateMealPlanPriceAsync(priceId, request, UserId, ct) switch
+        {
+            AdminWriteResult.Success => NoContent(),
+            AdminWriteResult.NotFound => NotFound(),
+            _ => PricingConflict()
+        };
+    }
+    [HttpPatch("meal-plan-pricing/{priceId:guid}/status")]
+    public async Task<IActionResult> SetMealPlanPriceStatus(Guid priceId, SetMealPlanPriceStatusRequest request, CancellationToken ct) =>
+        await admin.SetMealPlanPriceStatusAsync(priceId, request.IsActive, UserId, ct) switch
+        {
+            AdminWriteResult.Success => NoContent(),
+            AdminWriteResult.NotFound => NotFound(),
+            _ => PricingConflict()
+        };
+    [HttpDelete("meal-plan-pricing/{priceId:guid}")]
+    public async Task<IActionResult> DeleteMealPlanPrice(Guid priceId, CancellationToken ct) =>
+        await admin.DeleteMealPlanPriceAsync(priceId, ct) switch
+        {
+            AdminWriteResult.Success => NoContent(),
+            AdminWriteResult.NotFound => NotFound(),
+            _ => Conflict(new ApiResponse<object> { Errors = [new("pricing_delete_not_permitted", "Only inactive future pricing records can be deleted. Deactivate historical records instead.")] })
+        };
     [HttpPost("meal-plan-days/{dayId:guid}/slots")] public async Task<ActionResult<ApiResponse<object>>> Slot(Guid dayId, CreatePlanSlotRequest request, CancellationToken ct) { var id = await admin.AddPlanSlotAsync(dayId, request, UserId, ct); return id is null ? NotFound() : Ok(ApiResponse<object>.Ok(new { id })); }
     [HttpPost("meal-plan-slots/{slotId:guid}/options")] public async Task<ActionResult<ApiResponse<object>>> Option(Guid slotId, CreateSlotOptionRequest request, CancellationToken ct) { var id = await admin.AddSlotOptionAsync(slotId, request, UserId, ct); return id is null ? NotFound() : Ok(ApiResponse<object>.Ok(new { id })); }
     [HttpDelete("meal-plan-slots/{slotId:guid}/options/{optionId:guid}")] public async Task<IActionResult> DeleteOption(Guid slotId, Guid optionId, CancellationToken ct) => await admin.DeleteSlotOptionAsync(slotId, optionId, ct) ? NoContent() : NotFound();
+
+    private ConflictObjectResult PricingConflict() =>
+        Conflict(new ApiResponse<object> { Errors = [new("pricing_period_overlap", "A pricing record already exists for this package configuration during the selected effective period.")] });
+
+    private static List<ApiError> ValidateMealPlanPrice(UpsertMealPlanPriceRequest request)
+    {
+        var errors = new List<ApiError>();
+        if (request.MealPlanTemplateId == Guid.Empty) errors.Add(new("required", "Meal plan template is required.", "mealPlanTemplateId"));
+        if (request.DurationDays <= 0) errors.Add(new("positive_number", "Duration days must be greater than zero.", "durationDays"));
+        if (request.MealsPerDay <= 0) errors.Add(new("positive_number", "Meals per day must be greater than zero.", "mealsPerDay"));
+        if (request.SnacksPerDay < 0) errors.Add(new("non_negative_number", "Snacks per day cannot be negative.", "snacksPerDay"));
+        if (string.IsNullOrWhiteSpace(request.CurrencyCode) || request.CurrencyCode.Trim().Length != 3) errors.Add(new("invalid_currency", "Currency must be a 3-letter code.", "currencyCode"));
+        if (request.Amount <= 0) errors.Add(new("positive_amount", "Amount must be greater than zero.", "amount"));
+        if (request.EffectiveFrom == default) errors.Add(new("required", "Effective from is required.", "effectiveFrom"));
+        if (request.EffectiveUntil.HasValue && request.EffectiveUntil < request.EffectiveFrom) errors.Add(new("invalid_period", "Effective until cannot be earlier than effective from.", "effectiveUntil"));
+        return errors;
+    }
+
     private async Task TryDeleteObjectAsync(string objectKey)
     {
         try { await storage.DeleteAsync(objectKey, CancellationToken.None); }

@@ -202,6 +202,33 @@ public sealed record AdminPlanSlotResponse(Guid Id, Guid MealTypeId, string Meal
 public sealed record AdminPlanDayResponse(Guid Id, Guid TemplateId, MenuWeekday MenuWeekday, int DisplayOrder, bool IsActive, int SlotCount, IReadOnlyList<AdminPlanSlotResponse> Slots);
 public sealed record AdminMealPlanDetailResponse(Guid Id, string Code, string PlanType, int DurationDays, bool IsCustomizable, bool IsPublished, bool IsActive, DateOnly? ValidFrom, DateOnly? ValidUntil, string? ImageUrl, string? ImageType, IReadOnlyList<AdminPlanTranslationResponse> Translations, IReadOnlyList<AdminPlanDayResponse> Days, Guid VersionGroupId, int VersionNumber, bool IsLatest);
 public sealed record AdminPlanImageResponse(Guid PlanId, string ImageType, string PublicUrl, string ContentType);
+public sealed record AdminMealPlanPriceResponse(
+    Guid Id,
+    Guid MealPlanTemplateId,
+    string MealPlanCode,
+    string MealPlanName,
+    int DurationDays,
+    int MealsPerDay,
+    int SnacksPerDay,
+    string CurrencyCode,
+    decimal Amount,
+    DateTimeOffset EffectiveFrom,
+    DateTimeOffset? EffectiveUntil,
+    bool IsActive,
+    string Status,
+    bool CanDelete);
+public sealed record AdminMealPlanPriceSummaryResponse(int Active, int Scheduled, int Expired, int Inactive);
+public sealed record UpsertMealPlanPriceRequest(
+    Guid MealPlanTemplateId,
+    int DurationDays,
+    int MealsPerDay,
+    int SnacksPerDay,
+    string CurrencyCode,
+    decimal Amount,
+    DateTimeOffset EffectiveFrom,
+    DateTimeOffset? EffectiveUntil,
+    bool IsActive);
+public sealed record SetMealPlanPriceStatusRequest(bool IsActive);
 public sealed record UpsertPlanOptionRequest(Guid MealItemId, decimal AdditionalPrice, bool IsDefault, bool IsAvailable, int DisplayOrder);
 public sealed record UpsertPlanSlotRequest(Guid MealTypeId, int DisplayOrder, int MinimumSelection, int MaximumSelection, bool IsRequired, TimeOnly? SelectionCutoffTime, bool AllowsPaidUpgrade, IReadOnlyList<UpsertPlanOptionRequest> Options);
 public sealed record UpsertPlanDayRequest(MenuWeekday? MenuWeekday, int DisplayOrder, bool IsActive, IReadOnlyList<UpsertPlanSlotRequest> Slots);
