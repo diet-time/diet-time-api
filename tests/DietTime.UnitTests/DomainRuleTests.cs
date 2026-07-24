@@ -17,4 +17,5 @@ public sealed class DomainRuleTests
     [Fact] public void Image_url_resolution_escapes_each_object_key_segment() { var options = Options.Create(new StorageOptions { PublicBaseUrl = "https://cdn.example.test/", BucketName = "meals" }); using var s3 = new AmazonS3Client("test", "test", new AmazonS3Config { ServiceURL = "http://localhost:9000", ForcePathStyle = true }); var service = new StorageUrlService(options, s3); Assert.Equal("https://cdn.example.test/meals/item%201.webp", service.GetPublicUrl("meals/item 1.webp")); }
     [Fact] public void Meal_media_defaults_to_meal_item_type() { Assert.Equal("MEALITEM", new MealMedia().MediaType); }
     [Fact] public void Meal_plan_media_uses_distinct_type() { Assert.Equal("MEALPLAN", MealMediaTypes.MealPlan); }
+    [Fact] public void Meal_plan_model_does_not_map_columns_missing_from_database() { Assert.Null(typeof(MealPlanTemplate).GetProperty("DisplayOrder")); Assert.Null(typeof(MealPlanTemplate).GetProperty("ImageUrl")); Assert.Null(typeof(MealPlanTemplate).GetProperty("IconUrl")); }
 }

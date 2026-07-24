@@ -814,7 +814,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             plan.IsActive,
             plan.ValidFrom,
             plan.ValidUntil,
-            planImage?.PublicUrl ?? plan.ImageUrl,
+            planImage?.PublicUrl,
             planImage?.MediaType,
             plan.Translations.Select(x => new AdminPlanTranslationResponse(x.LanguageCode, x.Name, x.ShortDescription, x.FullDescription)).ToArray(),
             plan.Days.OrderBy(x => x.DisplayOrder).Select(day => new AdminPlanDayResponse(
@@ -859,7 +859,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         {
             p.IsLatest = false;
             await db.SaveChangesAsync(ct);
-            var draft = new MealPlanTemplate { Id = Guid.NewGuid(), VersionGroupId = p.VersionGroupId, VersionNumber = p.VersionNumber + 1, IsLatest = true, SupersedesId = p.Id, Code = p.Code, PlanType = request.PlanType, DurationDays = request.DurationDays, IsCustomizable = request.IsCustomizable, IsActive = true, IsPublished = request.Publish, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil, DisplayOrder = p.DisplayOrder, ImageUrl = p.ImageUrl, IconUrl = p.IconUrl, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 };
+            var draft = new MealPlanTemplate { Id = Guid.NewGuid(), VersionGroupId = p.VersionGroupId, VersionNumber = p.VersionNumber + 1, IsLatest = true, SupersedesId = p.Id, Code = p.Code, PlanType = request.PlanType, DurationDays = request.DurationDays, IsCustomizable = request.IsCustomizable, IsActive = true, IsPublished = request.Publish, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 };
             foreach (var t in request.Translations) draft.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now });
             foreach (var source in sourcePlanMedia.Where(x => x.Status == "ACTIVE"))
             {

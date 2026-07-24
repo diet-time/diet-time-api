@@ -42,27 +42,20 @@ public sealed class GuestHomeService(
                     version.VersionNumber > p.VersionNumber) &&
                 (p.ValidFrom == null || p.ValidFrom <= requestedDate) &&
                 (p.ValidUntil == null || p.ValidUntil >= requestedDate))
-            .OrderBy(p => p.DisplayOrder)
+            .OrderBy(p => p.Days
+                .Where(d => d.IsActive)
+                .Select(d => (int?)d.DisplayOrder)
+                .Min() ?? int.MaxValue)
             .ThenBy(p => p.Code)
             .Select(p => new PlanRow(
                 p.Id,
                 p.Code,
-                p.DisplayOrder,
+                p.Days
+                    .Where(d => d.IsActive)
+                    .Select(d => (int?)d.DisplayOrder)
+                    .Min() ?? int.MaxValue,
                 db.MealMedia
                     .Where(m => m.EntityId == p.Id && m.Status == "ACTIVE" && m.MediaType == MealMediaTypes.MealPlan)
-                    .OrderByDescending(m => m.IsPrimary)
-                    .ThenBy(m => m.DisplayOrder)
-                    .Select(m => m.PublicUrl)
-                    .FirstOrDefault()
-                ?? p.ImageUrl
-                ?? p.Days
-                    .Where(d => d.IsActive)
-                    .SelectMany(d => d.Slots)
-                    .Where(s => s.IsActive)
-                    .SelectMany(s => s.Options)
-                    .Where(o => o.IsAvailable)
-                    .SelectMany(o => db.MealMedia.Where(m => m.EntityId == o.MealItemId))
-                    .Where(m => m.Status == "ACTIVE" && m.MediaType == MealMediaTypes.MealItem)
                     .OrderByDescending(m => m.IsPrimary)
                     .ThenBy(m => m.DisplayOrder)
                     .Select(m => m.PublicUrl)

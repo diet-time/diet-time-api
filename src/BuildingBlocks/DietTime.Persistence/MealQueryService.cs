@@ -20,23 +20,21 @@ public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService st
                 p.Code,
                 Name = p.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault() ?? p.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? p.Translations.Select(t => t.Name).FirstOrDefault() ?? p.Code,
                 Description = p.Translations.Where(t => t.LanguageCode == language).Select(t => t.ShortDescription).FirstOrDefault() ?? p.Translations.Where(t => t.LanguageCode == "en").Select(t => t.ShortDescription).FirstOrDefault() ?? p.Translations.Select(t => t.ShortDescription).FirstOrDefault(),
-                p.ImageUrl,
                 PlanMedia = db.MealMedia
                     .Where(m => m.EntityId == p.Id && m.Status == "ACTIVE" && m.MediaType == MealMediaTypes.MealPlan)
                     .OrderByDescending(m => m.IsPrimary)
                     .ThenBy(m => m.DisplayOrder)
                     .Select(m => new { m.PublicUrl, m.ObjectKey, m.ThumbnailUrl, m.ThumbnailObjectKey })
-                    .FirstOrDefault(),
-                Media = p.Days.SelectMany(d => d.Slots).SelectMany(s => s.Options).SelectMany(o => db.MealMedia.Where(m => m.EntityId == o.MealItemId)).Where(m => m.Status == "ACTIVE" && m.MediaType == MealMediaTypes.MealItem && m.IsPrimary).Select(m => new { m.PublicUrl, m.ObjectKey, m.ThumbnailUrl, m.ThumbnailObjectKey }).FirstOrDefault()
+                    .FirstOrDefault()
             }).ToListAsync(ct);
         return rows.Select(x => new PlanCategoryResponse(
             x.Id,
             x.Code,
             x.Name,
             x.Description,
-            x.PlanMedia is not null
-                ? Image(x.PlanMedia.ThumbnailUrl ?? x.PlanMedia.PublicUrl, x.PlanMedia.ThumbnailObjectKey ?? x.PlanMedia.ObjectKey, true)
-                : x.ImageUrl ?? (x.Media is null ? null : Image(x.Media.ThumbnailUrl ?? x.Media.PublicUrl, x.Media.ThumbnailObjectKey ?? x.Media.ObjectKey, true)),
+            x.PlanMedia is null
+                ? null
+                : Image(x.PlanMedia.ThumbnailUrl ?? x.PlanMedia.PublicUrl, x.PlanMedia.ThumbnailObjectKey ?? x.PlanMedia.ObjectKey, true),
             false)).ToArray();
     }
 
