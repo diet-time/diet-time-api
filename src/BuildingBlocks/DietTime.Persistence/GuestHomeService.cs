@@ -153,6 +153,35 @@ public sealed class GuestHomeService(
                     && (selectedPlan.ValidUntil is null || date <= selectedPlan.ValidUntil)))
             .ToArray();
 
+        var selectedPlanMealQuery = AvailableMealOptions([selectedDay.Id], now);
+        var selectedPlanMealRows = await ProjectMealRows(
+                selectedPlanMealQuery
+                    .OrderBy(option => option.Slot.DisplayOrder)
+                    .ThenBy(option => option.DisplayOrder),
+                language)
+            .ToListAsync(ct);
+        var selectedPlanSlots = BuildSlots(selectedPlanMealRows);
+
+        if (!request.IncludeAll)
+        {
+            var defaultResponse = new GuestHomeResponse(
+                [new GuestPlanResponse(
+                    selectedPlan.Id,
+                    selectedPlan.Code,
+                    selectedPlan.Name,
+                    selectedPlan.Description,
+                    ResolveImage(selectedPlan.ImageUrl, selectedPlan.ImageObjectKey),
+                    null,
+                    selectedPlan.DisplayOrder,
+                    true,
+                    selectedPlanSlots,
+                    [])],
+                weeklyCalendar);
+
+            cache.Set(cacheKey, defaultResponse, CacheDuration);
+            return defaultResponse;
+        }
+
         var mealTypes = await db.MealTypes.AsNoTracking()
             .Where(t => t.IsActive &&
                 (t.Code == "BREAKFAST" || t.Code == "LUNCH" || t.Code == "DINNER" ||

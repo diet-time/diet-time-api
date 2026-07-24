@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using DietTime.Domain;
 
 namespace DietTime.Contracts;
@@ -79,9 +80,9 @@ public sealed record GuestMenuDayResponse(
 public sealed record GuestHomeResponse(
     IReadOnlyList<GuestPlanResponse> MealPlans,
     IReadOnlyList<GuestCalendarDayResponse> WeeklyCalendar,
-    IReadOnlyList<GuestMealTimeResponse> MealTimeFilters,
-    GuestPaginationResponse Pagination,
-    IReadOnlyList<GuestMenuDayResponse>? Menus = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<GuestMealTimeResponse>? MealTimeFilters = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] GuestPaginationResponse? Pagination = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<GuestMenuDayResponse>? Menus = null);
 
 public sealed record CategoryResponse(Guid Id, string Code, string Name);
 public sealed record NutritionResponse(decimal? ServingQuantity, string? ServingUnit, decimal? CaloriesKcal, decimal? ProteinGrams, decimal? CarbohydratesGrams, decimal? FatGrams, decimal? SaturatedFatGrams, decimal? TransFatGrams, decimal? FiberGrams, decimal? SugarGrams, decimal? SodiumMg, decimal? CholesterolMg);
