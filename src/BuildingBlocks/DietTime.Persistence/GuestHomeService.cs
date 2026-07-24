@@ -42,14 +42,30 @@ public sealed class GuestHomeService(
                     version.VersionNumber > p.VersionNumber) &&
                 (p.ValidFrom == null || p.ValidFrom <= requestedDate) &&
                 (p.ValidUntil == null || p.ValidUntil >= requestedDate))
-            .OrderBy(p => p.DisplayOrder)
+            .OrderBy(p => p.Days
+                .Where(d => d.IsActive)
+                .Select(d => (int?)d.DisplayOrder)
+                .Min() ?? int.MaxValue)
             .ThenBy(p => p.Code)
             .Select(p => new PlanRow(
                 p.Id,
                 p.Code,
-                p.DisplayOrder,
-                p.ImageUrl,
-                p.IconUrl,
+                p.Days
+                    .Where(d => d.IsActive)
+                    .Select(d => (int?)d.DisplayOrder)
+                    .Min() ?? int.MaxValue,
+                p.Days
+                    .Where(d => d.IsActive)
+                    .SelectMany(d => d.Slots)
+                    .Where(s => s.IsActive)
+                    .SelectMany(s => s.Options)
+                    .Where(o => o.IsAvailable)
+                    .SelectMany(o => o.MealItem.Media)
+                    .Where(m => m.Status == "ACTIVE" && m.MediaType == "IMAGE")
+                    .OrderByDescending(m => m.IsPrimary)
+                    .ThenBy(m => m.DisplayOrder)
+                    .Select(m => m.PublicUrl)
+                    .FirstOrDefault(),
                 p.ValidFrom,
                 p.ValidUntil,
                 p.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault()
@@ -226,7 +242,7 @@ public sealed class GuestHomeService(
                 p.Name,
                 p.Description,
                 p.ImageUrl,
-                p.IconUrl,
+                null,
                 p.DisplayOrder,
                 p.Id == selectedPlan.Id)).ToArray(),
             weeklyCalendar,
@@ -249,7 +265,6 @@ public sealed class GuestHomeService(
         string Code,
         int DisplayOrder,
         string? ImageUrl,
-        string? IconUrl,
         DateOnly? ValidFrom,
         DateOnly? ValidUntil,
         string Name,
