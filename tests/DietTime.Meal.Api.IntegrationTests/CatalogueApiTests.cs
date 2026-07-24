@@ -35,6 +35,123 @@ public sealed class CatalogueApiTests : IAsyncLifetime
     [Fact] public async Task Wednesday_menu_contains_slots_and_options() { if (!enabled) return; var body = await client!.GetStringAsync($"/api/meal-plan-templates/{planId}/days/by-weekday/WEDNESDAY"); Assert.Contains(wednesdayDayId.ToString(), body, StringComparison.OrdinalIgnoreCase); Assert.Contains(mealId.ToString(), body, StringComparison.OrdinalIgnoreCase); Assert.Contains("minimumSelection", body); }
     [Fact] public async Task Deleting_template_day_soft_deactivates_without_deleting_slots() { if (!enabled) return; var response = await client!.DeleteAsync($"/api/meal-plan-templates/{planId}/days/{wednesdayDayId}"); Assert.Equal(HttpStatusCode.NoContent, response.StatusCode); using var scope = factory!.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>(); var day = await db.MealPlanTemplateDays.Include(x => x.Slots).ThenInclude(x => x.Options).SingleAsync(x => x.Id == wednesdayDayId); Assert.False(day.IsActive); Assert.NotEmpty(day.Slots); Assert.NotEmpty(day.Slots.Single().Options); }
     [Fact] public async Task Updating_active_meal_creates_latest_draft_version() { if (!enabled) return; using var scope = factory!.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>(); var source = await db.MealItems.Include(x => x.Translations).SingleAsync(x => x.Id == mealId); var request = new UpsertMealRequest(source.Sku, source.CategoryId, source.PreparationTimeMinutes, source.IsVegetarian, source.IsVegan, source.IsGlutenFree, source.IsDairyFree, source.IsAvailable, source.AvailableFrom, source.AvailableUntil, source.Translations.Select(x => new AdminTranslationRequest(x.LanguageCode, x.Name, x.ShortDescription, x.FullDescription)).ToArray(), null); var result = await scope.ServiceProvider.GetRequiredService<IAdminMealService>().UpdateMealAsync(mealId, request, null, default); Assert.NotNull(result); Assert.True(result.CreatedDraft); db.ChangeTracker.Clear(); var versions = await db.MealItems.Where(x => x.VersionGroupId == source.VersionGroupId).OrderBy(x => x.VersionNumber).ToListAsync(); Assert.Equal(2, versions.Count); Assert.Equal("ACTIVE", versions[0].Status); Assert.False(versions[0].IsLatest); Assert.Equal("DRAFT", versions[1].Status); Assert.True(versions[1].IsLatest); }
+    [Fact]
+    public async Task Activating_meal_version_repoints_current_plan_options_but_preserves_historical_plans()
+    {
+        if (!enabled) return;
+        using var scope = factory!.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        var source = await db.MealItems.SingleAsync(x => x.Id == mealId);
+        source.IsLatest = false;
+
+        var ingredient = new Ingredient
+        {
+            Code = $"ING-{Guid.NewGuid():N}",
+            IsActive = true,
+            CreatedAt = now,
+            UpdatedAt = now,
+            RowVersion = 1
+        };
+        var draft = new MealItem
+        {
+            Id = Guid.NewGuid(),
+            VersionGroupId = source.VersionGroupId,
+            VersionNumber = source.VersionNumber + 1,
+            IsLatest = true,
+            SupersedesId = source.Id,
+            Sku = source.Sku,
+            CategoryId = source.CategoryId,
+            Status = "DRAFT",
+            IsAvailable = true,
+            CreatedAt = now,
+            UpdatedAt = now,
+            RowVersion = 1,
+            Translations =
+            [
+                new() { LanguageCode = "en", Name = "Updated meal", CreatedAt = now, UpdatedAt = now },
+                new() { LanguageCode = "ar", Name = "Updated meal Arabic", CreatedAt = now, UpdatedAt = now }
+            ],
+            Nutrition = new() { CaloriesKcal = 425, CreatedAt = now, UpdatedAt = now },
+            Ingredients =
+            [
+                new() { Ingredient = ingredient, IsPrimaryIngredient = true, DisplayOrder = 1, CreatedAt = now }
+            ]
+        };
+
+        var mealType = await db.MealTypes.SingleAsync(x => x.Code == "BREAKFAST");
+        var historicalPlanId = Guid.NewGuid();
+        var historicalOptionId = Guid.NewGuid();
+        var historicalPlan = new MealPlanTemplate
+        {
+            Id = historicalPlanId,
+            VersionGroupId = historicalPlanId,
+            Code = $"HISTORY-{Guid.NewGuid():N}",
+            DurationDays = 1,
+            IsLatest = false,
+            IsPublished = false,
+            IsActive = false,
+            CreatedAt = now,
+            UpdatedAt = now,
+            RowVersion = 1
+        };
+        var historicalDay = new MealPlanTemplateDay
+        {
+            Plan = historicalPlan,
+            MenuWeekday = MenuWeekday.Monday,
+            IsActive = false,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        var historicalSlot = new MealPlanTemplateSlot
+        {
+            Day = historicalDay,
+            MealType = mealType,
+            IsActive = false,
+            CreatedAt = now,
+            UpdatedAt = now,
+            RowVersion = 1
+        };
+        historicalSlot.Options.Add(new()
+        {
+            Id = historicalOptionId,
+            MealItemId = source.Id,
+            IsAvailable = false,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+
+        db.Add(draft);
+        db.Add(historicalPlan);
+        db.MealMedia.Add(new()
+        {
+            EntityId = draft.Id,
+            MediaType = MealMediaTypes.MealItem,
+            ObjectKey = $"meal-items/{draft.Id:D}/images/meal.png",
+            IsPrimary = true,
+            Status = "ACTIVE",
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        await db.SaveChangesAsync();
+
+        var changed = await scope.ServiceProvider
+            .GetRequiredService<IAdminMealService>()
+            .SetMealStatusAsync(draft.Id, "ACTIVE", null, default);
+
+        Assert.True(changed);
+        db.ChangeTracker.Clear();
+        Assert.Equal("ARCHIVED", (await db.MealItems.SingleAsync(x => x.Id == source.Id)).Status);
+        Assert.Equal("ACTIVE", (await db.MealItems.SingleAsync(x => x.Id == draft.Id)).Status);
+        Assert.All(
+            await db.MealPlanSlotOptions
+                .Where(x => x.Slot.Day.MealPlanTemplateId == planId)
+                .ToListAsync(),
+            option => Assert.Equal(draft.Id, option.MealItemId));
+        Assert.Equal(
+            source.Id,
+            (await db.MealPlanSlotOptions.SingleAsync(x => x.Id == historicalOptionId)).MealItemId);
+    }
     [Fact] public async Task Updating_published_template_creates_latest_draft_version() { if (!enabled) return; using var scope = factory!.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>(); var source = await db.MealPlanTemplates.Include(x => x.Translations).SingleAsync(x => x.Id == planId); var request = new CreatePlanRequest(source.Code, source.PlanType, source.DurationDays, source.IsCustomizable, source.ValidFrom, source.ValidUntil, source.Translations.Select(x => new AdminTranslationRequest(x.LanguageCode, x.Name, x.ShortDescription, x.FullDescription)).ToArray()); var result = await scope.ServiceProvider.GetRequiredService<IAdminMealService>().UpdatePlanAsync(planId, request, null, default); Assert.NotNull(result); Assert.True(result.CreatedDraft); db.ChangeTracker.Clear(); var versions = await db.MealPlanTemplates.Include(x => x.Days).Where(x => x.VersionGroupId == source.VersionGroupId).OrderBy(x => x.VersionNumber).ToListAsync(); Assert.Equal(2, versions.Count); Assert.True(versions[0].IsPublished); Assert.False(versions[0].IsLatest); Assert.False(versions[1].IsPublished); Assert.True(versions[1].IsLatest); Assert.NotEmpty(versions[1].Days); }
     [Fact] public async Task Admin_meal_list_returns_price_category_and_nutrition() { if (!enabled) return; using var scope = factory!.Services.CreateScope(); var result = await scope.ServiceProvider.GetRequiredService<IAdminMealService>().GetMealsAsync(null, 1, 25, default); var meal = Assert.Single(result.Items); Assert.Equal("BREAKFAST", meal.Category.Code); Assert.Equal("Breakfast", meal.Category.Name); Assert.Equal(500, meal.Nutrition?.ServingQuantity); Assert.Equal(420, meal.Nutrition?.CaloriesKcal); Assert.Equal(25, meal.Price?.Amount); Assert.Equal("QAR", meal.Price?.CurrencyCode); }
     [Fact] public async Task Guest_home_is_public_and_returns_single_screen_payload() { if (!enabled) return; var response = await client!.GetAsync("/api/v1/guest/home?date=2026-07-23"); Assert.Equal(HttpStatusCode.OK, response.StatusCode); var body = await response.Content.ReadAsStringAsync(); using var json = System.Text.Json.JsonDocument.Parse(body); var data = json.RootElement.GetProperty("data"); Assert.False(data.TryGetProperty("hero", out _)); Assert.False(data.TryGetProperty("meals", out _)); var selectedPlan = data.GetProperty("mealPlans").EnumerateArray().Single(x => x.GetProperty("isSelected").GetBoolean()); var slot = Assert.Single(selectedPlan.GetProperty("slots").EnumerateArray()); Assert.Equal("BREAKFAST", slot.GetProperty("mealTime").GetProperty("code").GetString()); Assert.Single(slot.GetProperty("meals").EnumerateArray()); Assert.Equal("Classic short description", selectedPlan.GetProperty("description").GetString()); Assert.Equal("https://cdn.test/plan.png", selectedPlan.GetProperty("imageUrl").GetString()); Assert.True(data.TryGetProperty("weeklyCalendar", out _)); Assert.True(data.TryGetProperty("mealTimeFilters", out _)); Assert.True(data.TryGetProperty("pagination", out _)); }

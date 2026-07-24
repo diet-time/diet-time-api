@@ -658,6 +658,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         var groupId = await db.MealItems.Where(x => x.Id == mealId).Select(x => (Guid?)x.VersionGroupId).SingleOrDefaultAsync(ct);
         if (groupId is null) return false;
 
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
         var meal = await db.MealItems
             .Include(x => x.Translations)
             .Include(x => x.Nutrition)
@@ -674,8 +675,55 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             if (meal.Ingredients.Count == 0) missingRequirements.Add("ingredients");
             if (!await db.MealMedia.AnyAsync(x => x.EntityId == meal.Id && x.Status == "ACTIVE" &&
                 x.MediaType == MealMediaTypes.MealItem, ct)) missingRequirements.Add("meal image");
-            if (missingRequirements.Count > 0)
-                throw new InvalidOperationException($"A meal requires {string.Join(", ", missingRequirements)} before publication.");
+              if (missingRequirements.Count > 0)
+                  throw new InvalidOperationException($"A meal requires {string.Join(", ", missingRequirements)} before publication.");
+
+            var now = clock.GetUtcNow();
+            var previousVersionIds = await db.MealItems
+                .Where(x => x.VersionGroupId == groupId && x.Id != meal.Id)
+                .Select(x => x.Id)
+                .ToArrayAsync(ct);
+
+            if (previousVersionIds.Length > 0)
+            {
+                var currentPlanIds = await db.MealPlanTemplates
+                    .Where(plan => plan.IsLatest ||
+                        (plan.IsPublished && plan.IsActive &&
+                         !db.MealPlanTemplates.Any(candidate =>
+                             candidate.VersionGroupId == plan.VersionGroupId &&
+                             candidate.IsPublished &&
+                             candidate.VersionNumber > plan.VersionNumber)))
+                    .Select(plan => plan.Id)
+                    .ToArrayAsync(ct);
+
+                if (currentPlanIds.Length > 0)
+                {
+                    var currentSlotIds = await db.MealPlanTemplateSlots
+                        .Where(slot => currentPlanIds.Contains(slot.Day.MealPlanTemplateId))
+                        .Select(slot => slot.Id)
+                        .ToArrayAsync(ct);
+
+                    if (currentSlotIds.Length > 0)
+                    {
+                        await db.MealPlanSlotOptions
+                            .Where(option =>
+                                previousVersionIds.Contains(option.MealItemId) &&
+                                currentSlotIds.Contains(option.MealPlanTemplateSlotId))
+                            .ExecuteUpdateAsync(setters => setters
+                                .SetProperty(option => option.MealItemId, meal.Id)
+                                .SetProperty(option => option.UpdatedAt, now)
+                                .SetProperty(option => option.UpdatedBy, userId), ct);
+                    }
+                }
+
+                await db.MealItems
+                    .Where(x => x.VersionGroupId == groupId && x.Id != meal.Id && x.Status == "ACTIVE")
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(x => x.Status, "ARCHIVED")
+                        .SetProperty(x => x.UpdatedAt, now)
+                        .SetProperty(x => x.UpdatedBy, userId)
+                        .SetProperty(x => x.RowVersion, x => x.RowVersion + 1), ct);
+            }
         }
 
         meal.Status = normalizedStatus;
@@ -683,6 +731,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         meal.UpdatedAt = clock.GetUtcNow();
         meal.RowVersion++;
         await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
         return true;
     }
     public async Task<AdminMediaResponse?> AddMediaAsync(Guid mealId, SaveMediaRequest request, Guid? userId, CancellationToken ct)
