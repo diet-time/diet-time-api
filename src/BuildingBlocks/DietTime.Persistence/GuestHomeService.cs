@@ -156,8 +156,8 @@ public sealed class GuestHomeService(
         if (cache.TryGetValue(cacheKey, out GuestMenuResponse? cached))
             return cached;
 
-        var plan = await ActivePlans(request.Date, language)
-            .FirstOrDefaultAsync(candidate => candidate.Code == normalizedPlanCode, ct);
+        var plan = await ActivePlans(request.Date, language, normalizedPlanCode)
+            .FirstOrDefaultAsync(ct);
         if (plan is null)
             return null;
 
@@ -188,8 +188,12 @@ public sealed class GuestHomeService(
         return response;
     }
 
-    private IQueryable<PlanRow> ActivePlans(DateOnly date, string language) =>
-        db.MealPlanTemplates.AsNoTracking()
+    private IQueryable<PlanRow> ActivePlans(
+        DateOnly date,
+        string language,
+        string? planCode = null)
+    {
+        var plans = db.MealPlanTemplates.AsNoTracking()
             .Where(plan =>
                 plan.IsActive &&
                 plan.IsPublished &&
@@ -198,7 +202,12 @@ public sealed class GuestHomeService(
                     version.IsPublished &&
                     version.VersionNumber > plan.VersionNumber) &&
                 (plan.ValidFrom == null || plan.ValidFrom <= date) &&
-                (plan.ValidUntil == null || plan.ValidUntil >= date))
+                (plan.ValidUntil == null || plan.ValidUntil >= date));
+
+        if (planCode is not null)
+            plans = plans.Where(plan => plan.Code == planCode);
+
+        return plans
             .OrderBy(plan => plan.Days
                 .Where(day => day.IsActive)
                 .Select(day => (int?)day.DisplayOrder)
@@ -268,6 +277,7 @@ public sealed class GuestHomeService(
                         .Select(t => t.ShortDescription)
                         .FirstOrDefault()
                     ?? string.Empty));
+    }
 
     private IQueryable<MealPlanSlotOption> AvailableMealOptions(
         IReadOnlyCollection<Guid> templateDayIds,
