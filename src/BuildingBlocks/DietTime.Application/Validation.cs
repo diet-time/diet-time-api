@@ -15,8 +15,6 @@ public sealed class MealSelectionRequestValidator : AbstractValidator<MealSelect
 
 public sealed class GuestHomeQueryValidator : AbstractValidator<GuestHomeQuery>
 {
-    private static readonly string[] MealTimeCodes = ["ALL", "BREAKFAST", "LUNCH", "DINNER", "SNACK"];
-
     public GuestHomeQueryValidator()
     {
         RuleFor(x => x.Language)
@@ -27,12 +25,18 @@ public sealed class GuestHomeQueryValidator : AbstractValidator<GuestHomeQuery>
             .MaximumLength(100)
             .Matches("^[a-zA-Z0-9_-]+$")
             .When(x => !string.IsNullOrWhiteSpace(x.PlanCode));
-        RuleFor(x => x.MealTimeCode)
+    }
+}
+
+public sealed class GuestMenuQueryValidator : AbstractValidator<GuestMenuQuery>
+{
+    public GuestMenuQueryValidator()
+    {
+        RuleFor(x => x.Language)
             .NotEmpty()
-            .Must(x => x is not null && MealTimeCodes.Contains(x.Trim().ToUpperInvariant()))
-            .WithMessage("MealTimeCode must be ALL, BREAKFAST, LUNCH, DINNER, or SNACK.");
-        RuleFor(x => x.Page).GreaterThanOrEqualTo(1);
-        RuleFor(x => x.PageSize).InclusiveBetween(1, 100);
+            .Must(x => x is not null && (x.Equals("en", StringComparison.OrdinalIgnoreCase) || x.Equals("ar", StringComparison.OrdinalIgnoreCase)))
+            .WithMessage("Language must be either 'en' or 'ar'.");
+        RuleFor(x => x.Date).NotEmpty();
     }
 }
 

@@ -19,6 +19,7 @@ public interface IMealQueryService
 public interface IGuestHomeService
 {
     Task<GuestHomeResponse?> GetAsync(GuestHomeQuery query, DateTimeOffset now, CancellationToken cancellationToken);
+    Task<GuestMenuResponse?> GetMenuAsync(string planCode, GuestMenuQuery query, DateTimeOffset now, CancellationToken cancellationToken);
 }
 
 public interface IMealSelectionService

@@ -1,4 +1,3 @@
-using System.Text.Json.Serialization;
 using DietTime.Domain;
 
 namespace DietTime.Contracts;
@@ -25,12 +24,11 @@ public sealed record MealSearchResponse(Guid MealItemId, string Sku, string Name
 public sealed record GuestHomeQuery(
     string Language = "en",
     DateOnly? Date = null,
-    string? PlanCode = null,
-    string MealTimeCode = "ALL",
-    int Page = 1,
-    int PageSize = 20,
-    bool IncludeAll = false);
-public sealed record GuestPlanResponse(
+    string? PlanCode = null);
+public sealed record GuestMenuQuery(
+    DateOnly Date,
+    string Language = "en");
+public sealed record GuestPlanSummaryResponse(
     Guid Id,
     string Code,
     string Name,
@@ -39,11 +37,16 @@ public sealed record GuestPlanResponse(
     string? IconUrl,
     int DisplayOrder,
     bool IsSelected,
-    IReadOnlyList<GuestMealSlotResponse> Slots,
-    IReadOnlyList<GuestMenuDayResponse> Menus);
+    IReadOnlyList<GuestSlotResponse> Slots);
 public sealed record GuestCalendarDayResponse(DateOnly Date, int DayNumber, string DayName, string ShortDayName, bool IsToday, bool IsSelected, bool IsAvailable);
-public sealed record GuestMealTimeResponse(Guid? Id, string Code, string Name, string? IconUrl, int DisplayOrder, bool IsSelected);
 public sealed record GuestSlotMealTimeResponse(Guid Id, string Code, string Name, int DisplayOrder);
+public sealed record GuestSlotResponse(
+    Guid Id,
+    GuestSlotMealTimeResponse MealTime,
+    int DisplayOrder,
+    int MinimumSelection,
+    int MaximumSelection,
+    bool IsRequired);
 public sealed record GuestNutritionResponse(decimal? Calories, decimal? Protein, decimal? Carbs, decimal? Fat, decimal? Fiber);
 public sealed record GuestCodeNameResponse(string Code, string Name);
 public sealed record GuestMealSlotResponse(
@@ -66,23 +69,14 @@ public sealed record GuestMealResponse(
     IReadOnlyList<GuestCodeNameResponse> Allergens,
     bool IsAvailable,
     int DisplayOrder);
-public sealed record GuestPaginationResponse(
-    int Page,
-    int PageSize,
-    int TotalRecords,
-    int TotalPages,
-    bool HasNextPage,
-    bool HasPreviousPage);
-public sealed record GuestMenuDayResponse(
+public sealed record GuestMenuResponse(
+    Guid PlanId,
     string PlanCode,
     DateOnly Date,
     IReadOnlyList<GuestMealSlotResponse> Slots);
 public sealed record GuestHomeResponse(
-    IReadOnlyList<GuestPlanResponse> MealPlans,
-    IReadOnlyList<GuestCalendarDayResponse> WeeklyCalendar,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<GuestMealTimeResponse>? MealTimeFilters = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] GuestPaginationResponse? Pagination = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<GuestMenuDayResponse>? Menus = null);
+    IReadOnlyList<GuestPlanSummaryResponse> MealPlans,
+    IReadOnlyList<GuestCalendarDayResponse> WeeklyCalendar);
 
 public sealed record CategoryResponse(Guid Id, string Code, string Name);
 public sealed record NutritionResponse(decimal? ServingQuantity, string? ServingUnit, decimal? CaloriesKcal, decimal? ProteinGrams, decimal? CarbohydratesGrams, decimal? FatGrams, decimal? SaturatedFatGrams, decimal? TransFatGrams, decimal? FiberGrams, decimal? SugarGrams, decimal? SodiumMg, decimal? CholesterolMg);
