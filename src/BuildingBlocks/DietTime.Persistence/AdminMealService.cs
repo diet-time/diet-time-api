@@ -524,6 +524,9 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
                 x.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault()
                     ?? x.Translations.Select(t => t.Name).FirstOrDefault()
                     ?? x.Sku,
+                x.Translations.Where(t => t.LanguageCode == "ar").Select(t => t.Name).FirstOrDefault(),
+                x.AvailableFrom,
+                x.AvailableUntil,
                 new CategoryResponse(
                     x.Category.Id,
                     x.Category.Code,
@@ -593,14 +596,14 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
                 m.ThumbnailObjectKey,
                 m.ThumbnailUrl))
             .ToArray();
-        return new(x.Id, x.Status, new(x.Sku, x.CategoryId, x.PreparationTimeMinutes, x.IsVegetarian, x.IsVegan, x.IsGlutenFree, x.IsDairyFree, x.IsAvailable, x.AvailableFrom, x.AvailableUntil, translations, nutrition, ingredients, allergens, prices, x.Status, x.IsSpicy, x.SpiceLevel), media, x.VersionGroupId, x.VersionNumber, x.IsLatest);
+        return new(x.Id, x.Status, new(x.Sku, x.CategoryId, x.PreparationTimeMinutes, x.IsVegetarian, x.IsVegan, x.IsGlutenFree, x.IsDairyFree, x.IsAvailable, x.AvailableFrom, x.AvailableUntil, translations, nutrition, ingredients, allergens, prices, x.Status, x.IsSpicy, x.SpiceLevel, x.IsNutFree), media, x.VersionGroupId, x.VersionNumber, x.IsLatest);
     }
 
     public async Task<Guid> CreateMealAsync(UpsertMealRequest request, Guid? userId, CancellationToken ct)
     {
         await using var tx = await db.Database.BeginTransactionAsync(ct); var now = clock.GetUtcNow();
         var id = Guid.NewGuid();
-        var meal = new MealItem { Id = id, VersionGroupId = id, VersionNumber = 1, IsLatest = true, Sku = request.Sku, CategoryId = request.CategoryId, PreparationTimeMinutes = request.PreparationTimeMinutes, IsVegetarian = request.IsVegetarian, IsVegan = request.IsVegan, IsGlutenFree = request.IsGlutenFree, IsDairyFree = request.IsDairyFree, IsSpicy = request.IsSpicy ?? false, SpiceLevel = request.SpiceLevel ?? 0, IsAvailable = request.IsAvailable, AvailableFrom = request.AvailableFrom, AvailableUntil = request.AvailableUntil, Status = request.Status?.Trim().ToUpperInvariant() ?? "DRAFT", CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 };
+        var meal = new MealItem { Id = id, VersionGroupId = id, VersionNumber = 1, IsLatest = true, Sku = request.Sku, CategoryId = request.CategoryId, PreparationTimeMinutes = request.PreparationTimeMinutes, IsVegetarian = request.IsVegetarian, IsVegan = request.IsVegan, IsGlutenFree = request.IsGlutenFree, IsDairyFree = request.IsDairyFree, IsNutFree = request.IsNutFree ?? false, IsSpicy = request.IsSpicy ?? false, SpiceLevel = request.SpiceLevel ?? 0, IsAvailable = request.IsAvailable, AvailableFrom = request.AvailableFrom, AvailableUntil = request.AvailableUntil, Status = request.Status?.Trim().ToUpperInvariant() ?? "DRAFT", CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 };
         ApplyTranslations(meal, request.Translations, now); ApplyNutrition(meal, request.Nutrition, now); ApplyAggregate(meal, request, now, userId); db.MealItems.Add(meal); await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return meal.Id;
     }
 
@@ -1356,6 +1359,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         meal.IsVegan = request.IsVegan;
         meal.IsGlutenFree = request.IsGlutenFree;
         meal.IsDairyFree = request.IsDairyFree;
+        if (request.IsNutFree.HasValue) meal.IsNutFree = request.IsNutFree.Value;
         if (request.IsSpicy.HasValue) meal.IsSpicy = request.IsSpicy.Value;
         if (request.SpiceLevel.HasValue) meal.SpiceLevel = request.SpiceLevel.Value;
         else if (request.IsSpicy == false) meal.SpiceLevel = 0;
