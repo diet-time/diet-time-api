@@ -14,6 +14,7 @@ public sealed class GuestHomeService(
     IStorageUrlService storage) : IGuestHomeService
 {
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(10);
+    private const int GuestCalendarLeadTimeDays = 2;
 
     public async Task<GuestHomeResponse?> GetAsync(
         GuestHomeQuery request,
@@ -25,9 +26,10 @@ public sealed class GuestHomeService(
             ? null
             : request.PlanCode.Trim().ToUpperInvariant();
         var businessDate = DateOnly.FromDateTime(now.UtcDateTime);
-        var requestedDate = request.Date ?? businessDate;
+        var calendarStart = businessDate.AddDays(GuestCalendarLeadTimeDays);
+        var requestedDate = request.Date ?? calendarStart;
         var cacheKey =
-            $"guest-home-summary:{cacheVersion.Current}:{language}:{requestedDate:yyyy-MM-dd}:{planCode ?? "-"}";
+            $"guest-home-summary:{cacheVersion.Current}:{language}:{businessDate:yyyy-MM-dd}:{requestedDate:yyyy-MM-dd}:{planCode ?? "-"}";
 
         if (cache.TryGetValue(cacheKey, out GuestHomeResponse? cached))
             return cached;
@@ -71,9 +73,6 @@ public sealed class GuestHomeService(
             return null;
 
         var culture = CultureInfo.GetCultureInfo(language == "ar" ? "ar-QA" : "en-US");
-        var daysSinceSaturday =
-            ((int)selectedDate.DayOfWeek - (int)DayOfWeek.Saturday + 7) % 7;
-        var calendarStart = selectedDate.AddDays(-daysSinceSaturday);
         var weeklyCalendar = Enumerable.Range(0, 7)
             .Select(offset => calendarStart.AddDays(offset))
             .Select(date => new GuestCalendarDayResponse(
