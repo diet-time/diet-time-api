@@ -98,7 +98,9 @@ public sealed class GuestHomeService(
                 slot.Day.MenuWeekday == selectedWeekday &&
                 slot.IsActive &&
                 slot.MealType.IsActive)
-            .OrderBy(slot => slot.DisplayOrder)
+            .OrderBy(slot => slot.MealType.DisplayOrder)
+            .ThenBy(slot => slot.DisplayOrder)
+            .ThenBy(slot => slot.Id)
             .Select(slot => new SlotRow(
                 slot.Day.MealPlanTemplateId,
                 slot.Id,
@@ -133,6 +135,9 @@ public sealed class GuestHomeService(
                 plan.Id == selectedPlan.Id,
                 slotRows
                     .Where(slot => slot.PlanId == plan.Id)
+                    .OrderBy(slot => slot.MealTimeDisplayOrder)
+                    .ThenBy(slot => slot.DisplayOrder)
+                    .ThenBy(slot => slot.Id)
                     .Select(ToSlotResponse)
                     .ToArray()))
                 .ToArray(),
