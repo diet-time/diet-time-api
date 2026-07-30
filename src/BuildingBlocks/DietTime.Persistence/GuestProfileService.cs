@@ -10,11 +10,12 @@ namespace DietTime.Persistence;
 public sealed class GuestProfileService(
     DietTimeDbContext db,
     ICustomerNutritionCalculator nutritionCalculator,
+    IGuestOnboardingProgressResolver progressResolver,
     GuestProfileOptions options,
     TimeProvider clock,
     ILogger<GuestProfileService> logger) : IGuestProfileService
 {
-    public async Task<GuestCustomerProfileResponse?> GetAsync(
+    public async Task<GuestOnboardingProfileResponse?> GetAsync(
         Guid profileId,
         CancellationToken ct)
     {
@@ -27,7 +28,7 @@ public sealed class GuestProfileService(
                 x.GuestTokenExpiresAt > now &&
                 x.IsActive,
                 ct);
-        return profile is null ? null : ToResponse(profile, Today(now));
+        return profile is null ? null : ToResponse(profile);
     }
 
     public async Task<GuestProfileUpsertResult> UpsertAsync(
@@ -55,12 +56,23 @@ public sealed class GuestProfileService(
             {
                 return await UpsertCoreAsync(tokenHash, request, activeAllergens, ct);
             }
-            catch (DbUpdateConcurrencyException) when (attempt < maximumAttempts)
+            catch (DbUpdateConcurrencyException exception)
             {
+                var conflictDetails = DescribeConcurrencyConflicts(exception);
+                if (attempt == maximumAttempts)
+                {
+                    logger.LogWarning(
+                        "Guest profile update failed after {MaximumAttempts} concurrency attempts. Conflicting entries: {ConflictDetails}",
+                        maximumAttempts,
+                        conflictDetails);
+                    throw;
+                }
+
                 logger.LogWarning(
-                    "Guest profile update encountered a concurrency conflict; retrying attempt {Attempt} of {MaximumAttempts}",
+                    "Guest profile update encountered a concurrency conflict; retrying attempt {Attempt} of {MaximumAttempts}. Conflicting entries: {ConflictDetails}",
                     attempt + 1,
-                    maximumAttempts);
+                    maximumAttempts,
+                    conflictDetails);
             }
             catch (DbUpdateException exception)
                 when (attempt < maximumAttempts && IsUniqueViolation(exception))
@@ -128,23 +140,45 @@ public sealed class GuestProfileService(
             profile.RowVersion++;
         }
 
-        profile.GenderCode = NormalizeCode(request.GenderCode);
-        profile.DateOfBirth = request.DateOfBirth;
-        profile.HeightCm = request.HeightCm;
-        profile.WeightKg = request.WeightKg;
+        if (request.GenderCodeSupplied)
+            profile.GenderCode = NormalizeCode(request.GenderCode);
+        if (request.DateOfBirthSupplied)
+            profile.DateOfBirth = request.DateOfBirth;
+        if (request.HeightCmSupplied)
+            profile.HeightCm = request.HeightCm;
+        if (request.WeightKgSupplied)
+            profile.WeightKg = request.WeightKg;
         (profile.Bmi, profile.BmiCategoryCode) =
-            CustomerProfileCalculations.Bmi(request.HeightCm, request.WeightKg);
-        profile.GoalCode = NormalizeCode(request.GoalCode);
-        profile.DailyRoutineCode = NormalizeCode(request.DailyRoutineCode);
-        profile.ActivityLevelCode = NormalizeCode(request.ActivityLevelCode);
-        profile.PreferredLanguage = request.PreferredLanguage.Trim().ToLowerInvariant();
-        profile.OnboardingStatus = request.OnboardingStatus.Trim().ToUpperInvariant();
-        if (profile.OnboardingStatus is "PROFILE_COMPLETED" or "PLAN_SELECTED")
-            profile.OnboardingCompletedAt ??= now;
+            CustomerProfileCalculations.Bmi(profile.HeightCm, profile.WeightKg);
+        if (request.GoalCodeSupplied)
+            profile.GoalCode = NormalizeCode(request.GoalCode);
+        if (request.DailyRoutineCodeSupplied)
+            profile.DailyRoutineCode = NormalizeCode(request.DailyRoutineCode);
+        if (request.ActivityLevelCodeSupplied)
+            profile.ActivityLevelCode = NormalizeCode(request.ActivityLevelCode);
+        if (request.PreferredLanguageSupplied)
+            profile.PreferredLanguage = request.PreferredLanguage.Trim().ToLowerInvariant();
+        if (request.AllergensConfirmed.HasValue)
+            profile.AllergensConfirmed = request.AllergensConfirmed.Value;
+        if (request.PreferencesConfirmed.HasValue)
+            profile.PreferencesConfirmed = request.PreferencesConfirmed.Value;
+
+        if (request.PreferencesSupplied || request.PreferencesConfirmed == true)
+            SynchronizePreferences(profile, request.Preferences, now);
+        if (request.AllergensSupplied || request.AllergensConfirmed == true)
+            SynchronizeAllergens(profile, request.Allergens, activeAllergens, now);
+
+        var progress = ResolveProgress(profile);
+        profile.OnboardingStatus =
+            progress.NextStepCode == "PROFILE_COMPLETED"
+                ? "PROFILE_COMPLETED"
+                : "IN_PROGRESS";
+        profile.OnboardingCompletedAt =
+            profile.OnboardingStatus == "PROFILE_COMPLETED"
+                ? profile.OnboardingCompletedAt ?? now
+                : null;
         profile.UpdatedAt = now;
 
-        SynchronizePreferences(profile, request.Preferences, now);
-        SynchronizeAllergens(profile, request.Allergens, activeAllergens, now);
         var newTarget = RecalculateNutritionTarget(profile, today, now);
 
         await db.SaveChangesAsync(ct);
@@ -161,7 +195,7 @@ public sealed class GuestProfileService(
             "Guest profile {ProfileId} saved with onboarding status {OnboardingStatus}",
             profile.Id,
             profile.OnboardingStatus);
-        return new(ToResponse(profile, today), []);
+        return new(ToResponse(profile), []);
     }
 
     private IQueryable<CustomerProfile> ProfileQuery(bool tracking)
@@ -321,21 +355,17 @@ public sealed class GuestProfileService(
         current.CalculationMethod == calculated.CalculationMethod &&
         current.CalculationVersion == calculated.CalculationVersion;
 
-    private static GuestCustomerProfileResponse ToResponse(
-        CustomerProfile profile,
-        DateOnly today)
+    private GuestOnboardingProfileResponse ToResponse(CustomerProfile profile)
     {
         var current = profile.NutritionTargets
             .Where(x => x.IsCurrent)
             .OrderByDescending(x => x.CalculatedAt)
             .FirstOrDefault();
+        var progress = ResolveProgress(profile);
         return new(
             profile.Id,
             profile.GenderCode,
             profile.DateOfBirth,
-            profile.DateOfBirth is null
-                ? null
-                : CustomerProfileCalculations.Age(profile.DateOfBirth.Value, today),
             profile.HeightCm,
             profile.WeightKg,
             profile.Bmi,
@@ -344,21 +374,11 @@ public sealed class GuestProfileService(
             profile.DailyRoutineCode,
             profile.ActivityLevelCode,
             profile.PreferredLanguage,
-            profile.OnboardingStatus,
-            profile.IsActive,
-            profile.GuestTokenExpiresAt!.Value,
-            current is null
-                ? null
-                : new GuestNutritionTargetResponse(
-                    current.DailyCaloriesKcal,
-                    current.DailyProteinG,
-                    current.DailyCarbohydratesG,
-                    current.DailyFatG,
-                    current.DailyFiberG,
-                    current.DailyWaterMl,
-                    current.CalculationMethod,
-                    current.CalculationVersion,
-                    current.CalculatedAt),
+            progress.NextStepCode == "PROFILE_COMPLETED"
+                ? "PROFILE_COMPLETED"
+                : "IN_PROGRESS",
+            profile.AllergensConfirmed,
+            profile.PreferencesConfirmed,
             profile.Preferences
                 .OrderByDescending(x => x.PreferencePriority)
                 .ThenBy(x => x.PreferenceCode)
@@ -379,10 +399,37 @@ public sealed class GuestProfileService(
                     x.MedicallyConfirmed,
                     x.Notes))
                 .ToArray(),
-            profile.CreatedAt,
+            current is null
+                ? null
+                : new GuestNutritionTargetResponse(
+                    current.DailyCaloriesKcal,
+                    current.DailyProteinG,
+                    current.DailyCarbohydratesG,
+                    current.DailyFatG,
+                    current.DailyFiberG,
+                    current.DailyWaterMl,
+                    current.CalculationMethod,
+                    current.CalculationVersion,
+                    current.CalculatedAt),
+            progress.NextStepCode,
+            progress.CompletionPercentage,
+            progress.ShouldShowOnboarding,
+            profile.GuestTokenExpiresAt!.Value,
             profile.UpdatedAt,
             profile.RowVersion);
     }
+
+    private GuestOnboardingProgressResult ResolveProgress(CustomerProfile profile) =>
+        progressResolver.Resolve(new(
+            profile.GenderCode,
+            profile.DateOfBirth,
+            profile.HeightCm,
+            profile.WeightKg,
+            profile.GoalCode,
+            profile.DailyRoutineCode,
+            profile.ActivityLevelCode,
+            profile.AllergensConfirmed,
+            profile.PreferencesConfirmed));
 
     private static string ResolveName(Allergen allergen, string language) =>
         allergen.Translations
@@ -398,6 +445,35 @@ public sealed class GuestProfileService(
         {
             SqlState: PostgresErrorCodes.UniqueViolation
         };
+
+    private static string DescribeConcurrencyConflicts(
+        DbUpdateConcurrencyException exception) =>
+        string.Join(
+            "; ",
+            exception.Entries.Select(entry =>
+            {
+                var key = entry.Metadata.FindPrimaryKey();
+                var keyValues = key is null
+                    ? "<none>"
+                    : string.Join(
+                        ",",
+                        key.Properties.Select(property =>
+                            $"{property.Name}={entry.Property(property.Name).CurrentValue ?? "<null>"}"));
+                var rowVersion = entry.Properties.FirstOrDefault(property =>
+                    property.Metadata.Name == nameof(CustomerProfile.RowVersion));
+                var modifiedProperties = string.Join(
+                    ",",
+                    entry.Properties
+                        .Where(property => property.IsModified)
+                        .Select(property => property.Metadata.Name)
+                        .Order());
+
+                return
+                    $"{entry.Metadata.ClrType.Name}[{keyValues}] " +
+                    $"state={entry.State}, " +
+                    $"rowVersion(original={rowVersion?.OriginalValue ?? "<none>"},current={rowVersion?.CurrentValue ?? "<none>"}), " +
+                    $"modified=[{modifiedProperties}]";
+            }));
 
     private Task<List<Allergen>> LoadActiveAllergensAsync(
         IReadOnlyCollection<Guid> allergenIds,

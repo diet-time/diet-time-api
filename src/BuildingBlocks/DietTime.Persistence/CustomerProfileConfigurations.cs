@@ -36,6 +36,12 @@ public sealed class CustomerProfileConfiguration : IEntityTypeConfiguration<Cust
             .HasDefaultValue("NOT_STARTED")
             .IsRequired();
         entity.Property(x => x.OnboardingCompletedAt).HasColumnName("onboarding_completed_at");
+        entity.Property(x => x.AllergensConfirmed)
+            .HasColumnName("allergens_confirmed")
+            .HasDefaultValue(false);
+        entity.Property(x => x.PreferencesConfirmed)
+            .HasColumnName("preferences_confirmed")
+            .HasDefaultValue(false);
         entity.Property(x => x.IsActive).HasColumnName("is_active").HasDefaultValue(true);
         entity.Property(x => x.CreatedAt).HasColumnName("created_at");
         entity.Property(x => x.UpdatedAt).HasColumnName("updated_at");

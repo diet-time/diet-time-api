@@ -41,7 +41,7 @@ public sealed class GuestProfileController(
     /// <response code="429">The guest-profile rate limit was exceeded.</response>
     [HttpGet("profile")]
     [EnableRateLimiting("guest-profile")]
-    [ProducesResponseType(typeof(ApiResponse<GuestCustomerProfileResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<GuestOnboardingProfileResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status429TooManyRequests)]
@@ -56,13 +56,14 @@ public sealed class GuestProfileController(
         var profile = await profiles.GetAsync(resolution.ProfileId!.Value, ct);
         return profile is null
             ? InvalidSession()
-            : Ok(ApiResponse<GuestCustomerProfileResponse>.Ok(profile));
+            : Ok(ApiResponse<GuestOnboardingProfileResponse>.Ok(profile));
     }
 
     /// <summary>Creates or updates a progressive guest onboarding profile.</summary>
     /// <remarks>
-    /// Send the raw session token in `X-Guest-Token`. Preferences and allergens use replace-all
-    /// semantics, so an empty list removes all saved entries.
+    /// Send the raw session token in `X-Guest-Token`. Omitted profile fields preserve their
+    /// saved values. Preferences and allergens use replace-all semantics when their list is
+    /// supplied or their corresponding confirmation flag is true.
     ///
     /// First-step example:
     /// <code>
@@ -71,8 +72,8 @@ public sealed class GuestProfileController(
     ///   "dateOfBirth": "1990-06-15",
     ///   "preferredLanguage": "en",
     ///   "onboardingStatus": "IN_PROGRESS",
-    ///   "preferences": [],
-    ///   "allergens": []
+    ///   "allergensConfirmed": false,
+    ///   "preferencesConfirmed": false
     /// }
     /// </code>
     ///
@@ -88,6 +89,8 @@ public sealed class GuestProfileController(
     ///   "activityLevelCode": "LIGHT_ACTIVITY",
     ///   "preferredLanguage": "en",
     ///   "onboardingStatus": "PROFILE_COMPLETED",
+    ///   "allergensConfirmed": true,
+    ///   "preferencesConfirmed": true,
     ///   "preferences": [],
     ///   "allergens": []
     /// }
@@ -102,7 +105,7 @@ public sealed class GuestProfileController(
     [EnableRateLimiting("guest-profile")]
     [Consumes("application/json")]
     [RequestSizeLimit(64 * 1024)]
-    [ProducesResponseType(typeof(ApiResponse<GuestCustomerProfileResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<GuestOnboardingProfileResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
@@ -129,7 +132,7 @@ public sealed class GuestProfileController(
             });
         }
 
-        return Ok(ApiResponse<GuestCustomerProfileResponse>.Ok(result.Profile!));
+        return Ok(ApiResponse<GuestOnboardingProfileResponse>.Ok(result.Profile!));
     }
 
     private Task<GuestTokenResolution> ResolveAsync(

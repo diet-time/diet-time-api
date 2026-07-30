@@ -166,20 +166,6 @@ public sealed class UpsertGuestProfileRequestValidator : AbstractValidator<Upser
             .Must(items => items.Select(item => item.AllergenId).Distinct().Count() == items.Count)
             .WithMessage("Duplicate allergen IDs are not allowed.");
 
-        When(
-            x => string.Equals(x.OnboardingStatus, "PROFILE_COMPLETED", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(x.OnboardingStatus, "PLAN_SELECTED", StringComparison.OrdinalIgnoreCase),
-            () =>
-            {
-                RuleFor(x => x.GenderCode).NotEmpty();
-                RuleFor(x => x.DateOfBirth).NotNull();
-                RuleFor(x => x.HeightCm).NotNull();
-                RuleFor(x => x.WeightKg).NotNull();
-                RuleFor(x => x.GoalCode).NotEmpty();
-                RuleFor(x => x.DailyRoutineCode).NotEmpty();
-                RuleFor(x => x.ActivityLevelCode).NotEmpty();
-                RuleFor(x => x.PreferredLanguage).NotEmpty();
-            });
     }
 }
 

@@ -113,6 +113,8 @@ public sealed class CustomerProfile : Entity
     public string PreferredLanguage { get; set; } = "en";
     public string OnboardingStatus { get; set; } = "NOT_STARTED";
     public DateTimeOffset? OnboardingCompletedAt { get; set; }
+    public bool AllergensConfirmed { get; set; }
+    public bool PreferencesConfirmed { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }

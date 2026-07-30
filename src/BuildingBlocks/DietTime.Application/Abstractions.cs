@@ -106,12 +106,30 @@ public interface IGuestTokenResolver
 }
 
 public sealed record GuestProfileUpsertResult(
-    GuestCustomerProfileResponse? Profile,
+    GuestOnboardingProfileResponse? Profile,
     IReadOnlyList<Guid> InvalidAllergenIds);
 public interface IGuestProfileService
 {
-    Task<GuestCustomerProfileResponse?> GetAsync(Guid profileId, CancellationToken cancellationToken);
+    Task<GuestOnboardingProfileResponse?> GetAsync(Guid profileId, CancellationToken cancellationToken);
     Task<GuestProfileUpsertResult> UpsertAsync(string tokenHash, UpsertGuestProfileRequest request, CancellationToken cancellationToken);
+}
+public sealed record GuestOnboardingProgressInput(
+    string? GenderCode,
+    DateOnly? DateOfBirth,
+    decimal? HeightCm,
+    decimal? WeightKg,
+    string? GoalCode,
+    string? DailyRoutineCode,
+    string? ActivityLevelCode,
+    bool AllergensConfirmed,
+    bool PreferencesConfirmed);
+public sealed record GuestOnboardingProgressResult(
+    string NextStepCode,
+    int CompletionPercentage,
+    bool ShouldShowOnboarding);
+public interface IGuestOnboardingProgressResolver
+{
+    GuestOnboardingProgressResult Resolve(GuestOnboardingProgressInput input);
 }
 public interface IGuestPlanRecommendationService
 {

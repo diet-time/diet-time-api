@@ -1,6 +1,7 @@
 using DietTime.Application;
 using DietTime.Contracts;
 using DietTime.Infrastructure;
+using System.Text.Json;
 
 namespace DietTime.UnitTests;
 
@@ -58,7 +59,27 @@ public sealed class GuestOnboardingTests
     }
 
     [Fact]
-    public void Completed_guest_profile_requires_all_mandatory_answers()
+    public void Guest_profile_request_tracks_omitted_and_explicit_properties()
+    {
+        var request = JsonSerializer.Deserialize<UpsertGuestProfileRequest>(
+            """
+            {
+              "heightCm": 175,
+              "preferences": []
+            }
+            """,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+
+        Assert.True(request.HeightCmSupplied);
+        Assert.Equal(175m, request.HeightCm);
+        Assert.False(request.WeightKgSupplied);
+        Assert.True(request.PreferencesSupplied);
+        Assert.Empty(request.Preferences);
+        Assert.False(request.AllergensSupplied);
+    }
+
+    [Fact]
+    public void Client_completed_status_is_accepted_for_server_side_correction()
     {
         var validator = new UpsertGuestProfileRequestValidator(new FixedTimeProvider(Now));
 
@@ -68,15 +89,35 @@ public sealed class GuestOnboardingTests
             OnboardingStatus = "PROFILE_COMPLETED"
         });
 
-        Assert.False(result.IsValid);
-        Assert.Contains(result.Errors, x => x.PropertyName == nameof(UpsertGuestProfileRequest.GenderCode));
-        Assert.Contains(result.Errors, x => x.PropertyName == nameof(UpsertGuestProfileRequest.DateOfBirth));
-        Assert.Contains(result.Errors, x => x.PropertyName == nameof(UpsertGuestProfileRequest.HeightCm));
-        Assert.Contains(result.Errors, x => x.PropertyName == nameof(UpsertGuestProfileRequest.WeightKg));
-        Assert.Contains(result.Errors, x => x.PropertyName == nameof(UpsertGuestProfileRequest.GoalCode));
-        Assert.Contains(result.Errors, x => x.PropertyName == nameof(UpsertGuestProfileRequest.DailyRoutineCode));
-        Assert.Contains(result.Errors, x => x.PropertyName == nameof(UpsertGuestProfileRequest.ActivityLevelCode));
+        Assert.True(result.IsValid);
     }
+
+    [Theory]
+    [MemberData(nameof(ProgressCases))]
+    public void Progress_resolver_returns_first_incomplete_step_and_percentage(
+        GuestOnboardingProgressInput input,
+        string expectedStep,
+        int expectedPercentage)
+    {
+        var result = new GuestOnboardingProgressResolver().Resolve(input);
+
+        Assert.Equal(expectedStep, result.NextStepCode);
+        Assert.Equal(expectedPercentage, result.CompletionPercentage);
+        Assert.Equal(expectedStep != "PROFILE_COMPLETED", result.ShouldShowOnboarding);
+    }
+
+    public static TheoryData<GuestOnboardingProgressInput, string, int> ProgressCases =>
+        new()
+        {
+            { Progress(), "BASIC_DETAILS", 0 },
+            { Progress(gender: "MALE", dateOfBirth: new(1990, 6, 15)), "BODY_MEASUREMENTS", 14 },
+            { Progress(gender: "MALE", dateOfBirth: new(1990, 6, 15), height: 175, weight: 82), "GOAL", 29 },
+            { Progress(gender: "MALE", dateOfBirth: new(1990, 6, 15), height: 175, weight: 82, goal: "LOSE_WEIGHT"), "DAILY_ROUTINE", 43 },
+            { Progress(gender: "MALE", dateOfBirth: new(1990, 6, 15), height: 175, weight: 82, goal: "LOSE_WEIGHT", routine: "OFFICE_WORK"), "ACTIVITY_LEVEL", 57 },
+            { Progress(gender: "MALE", dateOfBirth: new(1990, 6, 15), height: 175, weight: 82, goal: "LOSE_WEIGHT", routine: "OFFICE_WORK", activity: "LIGHT_ACTIVITY"), "ALLERGENS", 71 },
+            { Progress(gender: "MALE", dateOfBirth: new(1990, 6, 15), height: 175, weight: 82, goal: "LOSE_WEIGHT", routine: "OFFICE_WORK", activity: "LIGHT_ACTIVITY", allergensConfirmed: true), "PREFERENCES", 86 },
+            { Progress(gender: "MALE", dateOfBirth: new(1990, 6, 15), height: 175, weight: 82, goal: "LOSE_WEIGHT", routine: "OFFICE_WORK", activity: "LIGHT_ACTIVITY", allergensConfirmed: true, preferencesConfirmed: true), "PROFILE_COMPLETED", 100 }
+        };
 
     [Theory]
     [InlineData("COMPLETED")]
@@ -99,4 +140,25 @@ public sealed class GuestOnboardingTests
     {
         public override DateTimeOffset GetUtcNow() => now;
     }
+
+    private static GuestOnboardingProgressInput Progress(
+        string? gender = null,
+        DateOnly? dateOfBirth = null,
+        decimal? height = null,
+        decimal? weight = null,
+        string? goal = null,
+        string? routine = null,
+        string? activity = null,
+        bool allergensConfirmed = false,
+        bool preferencesConfirmed = false) =>
+        new(
+            gender,
+            dateOfBirth,
+            height,
+            weight,
+            goal,
+            routine,
+            activity,
+            allergensConfirmed,
+            preferencesConfirmed);
 }

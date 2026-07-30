@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using DietTime.Domain;
 
 namespace DietTime.Contracts;
@@ -171,20 +172,41 @@ public sealed record CustomerProfileResponse(
 
 public sealed class UpsertGuestProfileRequest
 {
+    private string? genderCode;
+    private DateOnly? dateOfBirth;
+    private decimal? heightCm;
+    private decimal? weightKg;
+    private string? goalCode;
+    private string? dailyRoutineCode;
+    private string? activityLevelCode;
+    private string preferredLanguage = "en";
     private List<CustomerPreferenceRequest> preferences = [];
     private List<CustomerAllergenRequest> allergens = [];
 
-    public string? GenderCode { get; init; }
-    public DateOnly? DateOfBirth { get; init; }
-    public decimal? HeightCm { get; init; }
-    public decimal? WeightKg { get; init; }
-    public string? GoalCode { get; init; }
-    public string? DailyRoutineCode { get; init; }
-    public string? ActivityLevelCode { get; init; }
-    public string PreferredLanguage { get; init; } = "en";
+    public string? GenderCode { get => genderCode; init { genderCode = value; GenderCodeSupplied = true; } }
+    public DateOnly? DateOfBirth { get => dateOfBirth; init { dateOfBirth = value; DateOfBirthSupplied = true; } }
+    public decimal? HeightCm { get => heightCm; init { heightCm = value; HeightCmSupplied = true; } }
+    public decimal? WeightKg { get => weightKg; init { weightKg = value; WeightKgSupplied = true; } }
+    public string? GoalCode { get => goalCode; init { goalCode = value; GoalCodeSupplied = true; } }
+    public string? DailyRoutineCode { get => dailyRoutineCode; init { dailyRoutineCode = value; DailyRoutineCodeSupplied = true; } }
+    public string? ActivityLevelCode { get => activityLevelCode; init { activityLevelCode = value; ActivityLevelCodeSupplied = true; } }
+    public string PreferredLanguage { get => preferredLanguage; init { preferredLanguage = value; PreferredLanguageSupplied = true; } }
     public string OnboardingStatus { get; init; } = "IN_PROGRESS";
-    public List<CustomerPreferenceRequest> Preferences { get => preferences; init => preferences = value ?? []; }
-    public List<CustomerAllergenRequest> Allergens { get => allergens; init => allergens = value ?? []; }
+    public bool? AllergensConfirmed { get; init; }
+    public bool? PreferencesConfirmed { get; init; }
+    public List<CustomerPreferenceRequest> Preferences { get => preferences; init { preferences = value ?? []; PreferencesSupplied = true; } }
+    public List<CustomerAllergenRequest> Allergens { get => allergens; init { allergens = value ?? []; AllergensSupplied = true; } }
+
+    [JsonIgnore] public bool GenderCodeSupplied { get; private set; }
+    [JsonIgnore] public bool DateOfBirthSupplied { get; private set; }
+    [JsonIgnore] public bool HeightCmSupplied { get; private set; }
+    [JsonIgnore] public bool WeightKgSupplied { get; private set; }
+    [JsonIgnore] public bool GoalCodeSupplied { get; private set; }
+    [JsonIgnore] public bool DailyRoutineCodeSupplied { get; private set; }
+    [JsonIgnore] public bool ActivityLevelCodeSupplied { get; private set; }
+    [JsonIgnore] public bool PreferredLanguageSupplied { get; private set; }
+    [JsonIgnore] public bool PreferencesSupplied { get; private set; }
+    [JsonIgnore] public bool AllergensSupplied { get; private set; }
 }
 
 public sealed record GuestSessionResponse(string GuestToken, DateTimeOffset ExpiresAt);
@@ -211,11 +233,10 @@ public sealed record GuestAllergenResponse(
     string? SeverityCode,
     bool MedicallyConfirmed,
     string? Notes);
-public sealed record GuestCustomerProfileResponse(
-    Guid Id,
+public sealed record GuestOnboardingProfileResponse(
+    Guid ProfileId,
     string? GenderCode,
     DateOnly? DateOfBirth,
-    int? Age,
     decimal? HeightCm,
     decimal? WeightKg,
     decimal? Bmi,
@@ -225,12 +246,15 @@ public sealed record GuestCustomerProfileResponse(
     string? ActivityLevelCode,
     string PreferredLanguage,
     string OnboardingStatus,
-    bool IsActive,
-    DateTimeOffset GuestSessionExpiresAt,
-    GuestNutritionTargetResponse? NutritionTarget,
+    bool AllergensConfirmed,
+    bool PreferencesConfirmed,
     IReadOnlyList<GuestPreferenceResponse> Preferences,
     IReadOnlyList<GuestAllergenResponse> Allergens,
-    DateTimeOffset CreatedAt,
+    GuestNutritionTargetResponse? NutritionTarget,
+    string NextStepCode,
+    int CompletionPercentage,
+    bool ShouldShowOnboarding,
+    DateTimeOffset GuestSessionExpiresAt,
     DateTimeOffset UpdatedAt,
     long RowVersion);
 public sealed record GuestPlanRecommendationResponse(

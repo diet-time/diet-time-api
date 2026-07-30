@@ -60,6 +60,13 @@ public sealed class GuestOnboardingApiTests : IAsyncLifetime
             allergens = Array.Empty<object>()
         });
         Assert.Equal(HttpStatusCode.OK, partial.StatusCode);
+        using (var partialJson = JsonDocument.Parse(await partial.Content.ReadAsStringAsync()))
+        {
+            var partialData = partialJson.RootElement.GetProperty("data");
+            Assert.Equal("BODY_MEASUREMENTS", partialData.GetProperty("nextStepCode").GetString());
+            Assert.Equal(14, partialData.GetProperty("completionPercentage").GetInt32());
+            Assert.True(partialData.GetProperty("shouldShowOnboarding").GetBoolean());
+        }
 
         using (var scope = factory!.Services.CreateScope())
         {
@@ -78,11 +85,63 @@ public sealed class GuestOnboardingApiTests : IAsyncLifetime
         var data = completedJson.RootElement.GetProperty("data");
         Assert.Equal(26.78m, data.GetProperty("bmi").GetDecimal());
         Assert.Equal("PROFILE_COMPLETED", data.GetProperty("onboardingStatus").GetString());
+        Assert.Equal("PROFILE_COMPLETED", data.GetProperty("nextStepCode").GetString());
+        Assert.Equal(100, data.GetProperty("completionPercentage").GetInt32());
+        Assert.False(data.GetProperty("shouldShowOnboarding").GetBoolean());
         Assert.Equal("MIFFLIN_ST_JEOR", data.GetProperty("nutritionTarget").GetProperty("calculationMethod").GetString());
 
         var read = await GetAsync("/api/v1/guest/profile", token);
         Assert.Equal(HttpStatusCode.OK, read.StatusCode);
         Assert.DoesNotContain("guestTokenHash", await read.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Optional_empty_steps_are_distinct_from_unvisited_and_partial_saves_preserve_fields()
+    {
+        if (!enabled) return;
+        var token = await NewSessionAsync();
+
+        using var required = JsonDocument.Parse(
+            await (await PutProfileAsync(token, new
+            {
+                genderCode = "FEMALE",
+                dateOfBirth = "1992-03-20",
+                heightCm = 165,
+                weightKg = 62,
+                goalCode = "MAINTAIN_WEIGHT",
+                dailyRoutineCode = "OFFICE_WORK",
+                activityLevelCode = "LIGHT_ACTIVITY",
+                preferredLanguage = "en",
+                onboardingStatus = "PROFILE_COMPLETED"
+            })).Content.ReadAsStringAsync());
+        var requiredData = required.RootElement.GetProperty("data");
+        Assert.Equal("ALLERGENS", requiredData.GetProperty("nextStepCode").GetString());
+        Assert.Equal("IN_PROGRESS", requiredData.GetProperty("onboardingStatus").GetString());
+
+        using var allergens = JsonDocument.Parse(
+            await (await PutProfileAsync(token, new
+            {
+                allergensConfirmed = true,
+                allergens = Array.Empty<object>()
+            })).Content.ReadAsStringAsync());
+        var allergenData = allergens.RootElement.GetProperty("data");
+        Assert.Equal("PREFERENCES", allergenData.GetProperty("nextStepCode").GetString());
+        Assert.Equal(86, allergenData.GetProperty("completionPercentage").GetInt32());
+        Assert.Equal("FEMALE", allergenData.GetProperty("genderCode").GetString());
+        Assert.Equal(165m, allergenData.GetProperty("heightCm").GetDecimal());
+        Assert.Empty(allergenData.GetProperty("allergens").EnumerateArray());
+
+        using var preferences = JsonDocument.Parse(
+            await (await PutProfileAsync(token, new
+            {
+                preferencesConfirmed = true,
+                preferences = Array.Empty<object>()
+            })).Content.ReadAsStringAsync());
+        var preferenceData = preferences.RootElement.GetProperty("data");
+        Assert.Equal("PROFILE_COMPLETED", preferenceData.GetProperty("nextStepCode").GetString());
+        Assert.Equal(100, preferenceData.GetProperty("completionPercentage").GetInt32());
+        Assert.False(preferenceData.GetProperty("shouldShowOnboarding").GetBoolean());
+        Assert.Empty(preferenceData.GetProperty("preferences").EnumerateArray());
     }
 
     [Fact]
@@ -276,6 +335,8 @@ public sealed class GuestOnboardingApiTests : IAsyncLifetime
         activityLevelCode = "LIGHT_ACTIVITY",
         preferredLanguage = "en",
         onboardingStatus = "PROFILE_COMPLETED",
+        allergensConfirmed = true,
+        preferencesConfirmed = true,
         preferences = preferences ??
         [
             new { preferenceCode = "HIGH_PROTEIN", preferenceType = "DIET_STYLE", preferencePriority = 5 }
