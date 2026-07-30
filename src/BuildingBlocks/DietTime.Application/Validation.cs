@@ -40,6 +40,17 @@ public sealed class GuestMenuQueryValidator : AbstractValidator<GuestMenuQuery>
     }
 }
 
+public sealed class GuestAllergensQueryValidator : AbstractValidator<GuestAllergensQuery>
+{
+    public GuestAllergensQueryValidator()
+    {
+        RuleFor(x => x.Language)
+            .NotEmpty()
+            .Must(x => x is not null && (x.Equals("en", StringComparison.OrdinalIgnoreCase) || x.Equals("ar", StringComparison.OrdinalIgnoreCase)))
+            .WithMessage("Language must be either 'en' or 'ar'.");
+    }
+}
+
 public sealed class UpsertAllergenRequestValidator : AbstractValidator<UpsertAllergenRequest>
 {
     public UpsertAllergenRequestValidator()

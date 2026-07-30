@@ -28,6 +28,8 @@ public sealed record GuestHomeQuery(
 public sealed record GuestMenuQuery(
     DateOnly Date,
     string Language = "en");
+public sealed record GuestAllergensQuery(string Language = "en");
+public sealed record GuestAllergenResponse(Guid Id, string Code, string Name);
 public sealed record GuestPlanSummaryResponse(
     Guid Id,
     string Code,

@@ -20,6 +20,7 @@ public interface IGuestHomeService
 {
     Task<GuestHomeResponse?> GetAsync(GuestHomeQuery query, DateTimeOffset now, CancellationToken cancellationToken);
     Task<GuestMenuResponse?> GetMenuAsync(string planCode, GuestMenuQuery query, DateTimeOffset now, CancellationToken cancellationToken);
+    Task<IReadOnlyList<GuestAllergenResponse>> GetAllergensAsync(string language, CancellationToken cancellationToken);
 }
 
 public interface IMealSelectionService

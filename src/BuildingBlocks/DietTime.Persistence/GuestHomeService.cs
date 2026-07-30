@@ -192,6 +192,41 @@ public sealed class GuestHomeService(
         return response;
     }
 
+    public async Task<IReadOnlyList<GuestAllergenResponse>> GetAllergensAsync(
+        string language,
+        CancellationToken ct)
+    {
+        var normalizedLanguage = language.Trim().ToLowerInvariant();
+        var cacheKey = $"guest-allergens:{cacheVersion.Current}:{normalizedLanguage}";
+
+        if (cache.TryGetValue(cacheKey, out IReadOnlyList<GuestAllergenResponse>? cached) &&
+            cached is not null)
+        {
+            return cached;
+        }
+
+        var allergens = await db.Allergens.AsNoTracking()
+            .Where(allergen => allergen.IsActive)
+            .OrderBy(allergen => allergen.Code)
+            .Select(allergen => new GuestAllergenResponse(
+                allergen.Id,
+                allergen.Code,
+                allergen.Translations
+                    .Where(translation => translation.LanguageCode.ToLower() == normalizedLanguage)
+                    .Select(translation => translation.Name)
+                    .FirstOrDefault()
+                    ?? allergen.Translations
+                        .Where(translation => translation.LanguageCode.ToLower() == "en")
+                        .Select(translation => translation.Name)
+                        .FirstOrDefault()
+                    ?? allergen.Translations.Select(translation => translation.Name).FirstOrDefault()
+                    ?? allergen.Code))
+            .ToArrayAsync(ct);
+
+        cache.Set(cacheKey, allergens, CacheDuration);
+        return allergens;
+    }
+
     private IQueryable<PlanRow> ActivePlans(
         DateOnly date,
         string language,
