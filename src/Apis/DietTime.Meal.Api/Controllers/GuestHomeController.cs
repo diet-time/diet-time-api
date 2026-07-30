@@ -100,13 +100,13 @@ public sealed class GuestHomeController(
     /// <response code="400">The requested language is invalid.</response>
     [HttpGet("allergens")]
     [Produces("application/json")]
-    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<GuestAllergenResponse>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<GuestAllergenLookupResponse>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<ApiResponse<IReadOnlyList<GuestAllergenResponse>>>> GetAllergens(
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<GuestAllergenLookupResponse>>>> GetAllergens(
         [FromQuery] GuestAllergensQuery query,
         CancellationToken ct)
     {
         var response = await guestHome.GetAllergensAsync(query.Language, ct);
-        return Ok(ApiResponse<IReadOnlyList<GuestAllergenResponse>>.Ok(response));
+        return Ok(ApiResponse<IReadOnlyList<GuestAllergenLookupResponse>>.Ok(response));
     }
 }

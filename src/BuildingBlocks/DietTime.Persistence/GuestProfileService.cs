@@ -3,27 +3,36 @@ using DietTime.Contracts;
 using DietTime.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Npgsql;
 
 namespace DietTime.Persistence;
 
-public sealed class CustomerProfileService(
+public sealed class GuestProfileService(
     DietTimeDbContext db,
     ICustomerNutritionCalculator nutritionCalculator,
+    GuestProfileOptions options,
     TimeProvider clock,
-    ILogger<CustomerProfileService> logger) : ICustomerProfileService
+    ILogger<GuestProfileService> logger) : IGuestProfileService
 {
-    public async Task<CustomerProfileResponse?> GetAsync(
-        Guid userId,
+    public async Task<GuestCustomerProfileResponse?> GetAsync(
+        Guid profileId,
         CancellationToken ct)
     {
+        var now = clock.GetUtcNow();
         var profile = await ProfileQuery(tracking: false)
-            .SingleOrDefaultAsync(x => x.UserId == userId, ct);
-        return profile is null ? null : ToResponse(profile, Today());
+            .SingleOrDefaultAsync(x =>
+                x.Id == profileId &&
+                x.UserId == null &&
+                x.GuestTokenHash != null &&
+                x.GuestTokenExpiresAt > now &&
+                x.IsActive,
+                ct);
+        return profile is null ? null : ToResponse(profile, Today(now));
     }
 
-    public async Task<CustomerProfileUpsertResult> UpsertAsync(
-        Guid userId,
-        UpsertCustomerProfileRequest request,
+    public async Task<GuestProfileUpsertResult> UpsertAsync(
+        string tokenHash,
+        UpsertGuestProfileRequest request,
         CancellationToken ct)
     {
         var requestedAllergenIds = request.Allergens
@@ -34,35 +43,71 @@ public sealed class CustomerProfileService(
             .Include(x => x.Translations)
             .Where(x => requestedAllergenIds.Contains(x.Id) && x.IsActive)
             .ToListAsync(ct);
-        var activeAllergenIds = activeAllergens.Select(x => x.Id).ToHashSet();
-        var invalidAllergenIds = requestedAllergenIds
-            .Where(id => !activeAllergenIds.Contains(id))
+        var activeIds = activeAllergens.Select(x => x.Id).ToHashSet();
+        var invalidIds = requestedAllergenIds
+            .Where(id => !activeIds.Contains(id))
             .Order()
             .ToArray();
-        if (invalidAllergenIds.Length > 0)
-            return new(null, invalidAllergenIds);
+        if (invalidIds.Length > 0)
+            return new(null, invalidIds);
 
+        try
+        {
+            return await UpsertCoreAsync(tokenHash, request, activeAllergens, ct);
+        }
+        catch (DbUpdateException exception) when (IsUniqueViolation(exception))
+        {
+            db.ChangeTracker.Clear();
+            if (!await db.CustomerProfiles.AsNoTracking()
+                    .AnyAsync(x => x.GuestTokenHash == tokenHash, ct))
+            {
+                throw;
+            }
+
+            var retryAllergens = await db.Allergens
+                .Include(x => x.Translations)
+                .Where(x => requestedAllergenIds.Contains(x.Id) && x.IsActive)
+                .ToListAsync(ct);
+            return await UpsertCoreAsync(tokenHash, request, retryAllergens, ct);
+        }
+    }
+
+    private async Task<GuestProfileUpsertResult> UpsertCoreAsync(
+        string tokenHash,
+        UpsertGuestProfileRequest request,
+        IReadOnlyCollection<Allergen> activeAllergens,
+        CancellationToken ct)
+    {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var now = clock.GetUtcNow();
-        var today = DateOnly.FromDateTime(now.UtcDateTime);
+        var today = Today(now);
         var profile = await ProfileQuery(tracking: true)
-            .SingleOrDefaultAsync(x => x.UserId == userId, ct);
+            .SingleOrDefaultAsync(x => x.GuestTokenHash == tokenHash, ct);
 
         if (profile is null)
         {
             profile = new CustomerProfile
             {
                 Id = Guid.NewGuid(),
-                UserId = userId,
-                CreatedAt = now,
-                CreatedBy = userId,
+                UserId = null,
+                GuestTokenHash = tokenHash,
+                GuestTokenExpiresAt = now.AddDays(options.TokenExpiryDays),
                 IsActive = true,
+                CreatedAt = now,
+                UpdatedAt = now,
                 RowVersion = 1
             };
             db.CustomerProfiles.Add(profile);
         }
         else
         {
+            if (profile.UserId is not null ||
+                !profile.IsActive ||
+                profile.GuestTokenExpiresAt is null ||
+                profile.GuestTokenExpiresAt <= now)
+            {
+                throw new InvalidGuestSessionException();
+            }
             profile.RowVersion++;
         }
 
@@ -77,27 +122,25 @@ public sealed class CustomerProfileService(
         profile.ActivityLevelCode = NormalizeCode(request.ActivityLevelCode);
         profile.PreferredLanguage = request.PreferredLanguage.Trim().ToLowerInvariant();
         profile.OnboardingStatus = request.OnboardingStatus.Trim().ToUpperInvariant();
-        if (profile.OnboardingStatus == "COMPLETED")
+        if (profile.OnboardingStatus is "PROFILE_COMPLETED" or "PLAN_SELECTED")
             profile.OnboardingCompletedAt ??= now;
         profile.UpdatedAt = now;
-        profile.UpdatedBy = userId;
 
         SynchronizePreferences(profile, request.Preferences, now);
-        SynchronizeAllergens(profile, request.Allergens, activeAllergens, userId, now);
-        var nutritionTarget = RecalculateNutritionTarget(profile, today, userId, now);
+        SynchronizeAllergens(profile, request.Allergens, activeAllergens, now);
+        var newTarget = RecalculateNutritionTarget(profile, today, now);
 
         await db.SaveChangesAsync(ct);
-        if (nutritionTarget is not null)
+        if (newTarget is not null)
         {
-            profile.NutritionTargets.Add(nutritionTarget);
+            profile.NutritionTargets.Add(newTarget);
             await db.SaveChangesAsync(ct);
         }
         await transaction.CommitAsync(ct);
 
         logger.LogInformation(
-            "Customer profile {ProfileId} was saved for authenticated user {UserId} with onboarding status {OnboardingStatus}",
+            "Guest profile {ProfileId} saved with onboarding status {OnboardingStatus}",
             profile.Id,
-            userId,
             profile.OnboardingStatus);
         return new(ToResponse(profile, today), []);
     }
@@ -119,24 +162,23 @@ public sealed class CustomerProfileService(
         IReadOnlyCollection<CustomerPreferenceRequest> requested,
         DateTimeOffset now)
     {
-        var requestedByCode = requested.ToDictionary(
+        var remaining = requested.ToDictionary(
             x => x.PreferenceCode.Trim(),
             StringComparer.OrdinalIgnoreCase);
         foreach (var existing in profile.Preferences.ToArray())
         {
-            if (!requestedByCode.Remove(existing.PreferenceCode, out var item))
+            if (!remaining.Remove(existing.PreferenceCode, out var item))
             {
                 db.CustomerProfilePreferences.Remove(existing);
                 continue;
             }
-
             existing.PreferenceCode = item.PreferenceCode.Trim();
             existing.PreferenceType = NormalizeCode(item.PreferenceType);
             existing.PreferencePriority = item.PreferencePriority;
             existing.UpdatedAt = now;
         }
 
-        foreach (var item in requestedByCode.Values)
+        foreach (var item in remaining.Values)
         {
             profile.Preferences.Add(new CustomerProfilePreference
             {
@@ -154,27 +196,24 @@ public sealed class CustomerProfileService(
         CustomerProfile profile,
         IReadOnlyCollection<CustomerAllergenRequest> requested,
         IReadOnlyCollection<Allergen> activeAllergens,
-        Guid userId,
         DateTimeOffset now)
     {
-        var requestedById = requested.ToDictionary(x => x.AllergenId);
+        var remaining = requested.ToDictionary(x => x.AllergenId);
         foreach (var existing in profile.Allergens.ToArray())
         {
-            if (!requestedById.Remove(existing.AllergenId, out var item))
+            if (!remaining.Remove(existing.AllergenId, out var item))
             {
                 db.CustomerProfileAllergens.Remove(existing);
                 continue;
             }
-
             existing.SeverityCode = NormalizeCode(item.SeverityCode);
             existing.MedicallyConfirmed = item.MedicallyConfirmed;
             existing.Notes = NormalizeText(item.Notes);
             existing.UpdatedAt = now;
-            existing.UpdatedBy = userId;
         }
 
         var allergensById = activeAllergens.ToDictionary(x => x.Id);
-        foreach (var item in requestedById.Values)
+        foreach (var item in remaining.Values)
         {
             profile.Allergens.Add(new CustomerProfileAllergen
             {
@@ -185,9 +224,7 @@ public sealed class CustomerProfileService(
                 MedicallyConfirmed = item.MedicallyConfirmed,
                 Notes = NormalizeText(item.Notes),
                 CreatedAt = now,
-                UpdatedAt = now,
-                CreatedBy = userId,
-                UpdatedBy = userId
+                UpdatedAt = now
             });
         }
     }
@@ -195,17 +232,8 @@ public sealed class CustomerProfileService(
     private CustomerNutritionTarget? RecalculateNutritionTarget(
         CustomerProfile profile,
         DateOnly today,
-        Guid userId,
         DateTimeOffset now)
     {
-        foreach (var current in profile.NutritionTargets.Where(x => x.IsCurrent))
-        {
-            current.IsCurrent = false;
-            current.UpdatedAt = now;
-            current.UpdatedBy = userId;
-            current.RowVersion++;
-        }
-
         CustomerNutritionCalculationResult? calculation;
         try
         {
@@ -222,11 +250,24 @@ public sealed class CustomerProfileService(
         {
             logger.LogError(
                 exception,
-                "Nutrition target calculation failed for customer profile {ProfileId}",
+                "Nutrition calculation failed for guest profile {ProfileId}",
                 profile.Id);
             return null;
         }
 
+        var current = profile.NutritionTargets
+            .Where(x => x.IsCurrent)
+            .OrderByDescending(x => x.CalculatedAt)
+            .FirstOrDefault();
+        if (calculation is not null && current is not null && Same(current, calculation))
+            return null;
+
+        foreach (var target in profile.NutritionTargets.Where(x => x.IsCurrent))
+        {
+            target.IsCurrent = false;
+            target.UpdatedAt = now;
+            target.RowVersion++;
+        }
         if (calculation is null)
             return null;
 
@@ -245,24 +286,32 @@ public sealed class CustomerProfileService(
             IsCurrent = true,
             CreatedAt = now,
             UpdatedAt = now,
-            CreatedBy = userId,
-            UpdatedBy = userId,
             RowVersion = 1
         };
     }
 
-    private static CustomerProfileResponse ToResponse(
+    private static bool Same(
+        CustomerNutritionTarget current,
+        CustomerNutritionCalculationResult calculated) =>
+        current.DailyCaloriesKcal == calculated.DailyCaloriesKcal &&
+        current.DailyProteinG == calculated.DailyProteinG &&
+        current.DailyCarbohydratesG == calculated.DailyCarbohydratesG &&
+        current.DailyFatG == calculated.DailyFatG &&
+        current.DailyFiberG == calculated.DailyFiberG &&
+        current.DailyWaterMl == calculated.DailyWaterMl &&
+        current.CalculationMethod == calculated.CalculationMethod &&
+        current.CalculationVersion == calculated.CalculationVersion;
+
+    private static GuestCustomerProfileResponse ToResponse(
         CustomerProfile profile,
         DateOnly today)
     {
-        var language = profile.PreferredLanguage;
-        var currentTarget = profile.NutritionTargets
+        var current = profile.NutritionTargets
             .Where(x => x.IsCurrent)
             .OrderByDescending(x => x.CalculatedAt)
             .FirstOrDefault();
         return new(
             profile.Id,
-            profile.UserId!.Value,
             profile.GenderCode,
             profile.DateOfBirth,
             profile.DateOfBirth is null
@@ -277,24 +326,24 @@ public sealed class CustomerProfileService(
             profile.ActivityLevelCode,
             profile.PreferredLanguage,
             profile.OnboardingStatus,
-            profile.OnboardingCompletedAt,
             profile.IsActive,
-            currentTarget is null
+            profile.GuestTokenExpiresAt!.Value,
+            current is null
                 ? null
-                : new CustomerNutritionTargetResponse(
-                    currentTarget.DailyCaloriesKcal,
-                    currentTarget.DailyProteinG,
-                    currentTarget.DailyCarbohydratesG,
-                    currentTarget.DailyFatG,
-                    currentTarget.DailyFiberG,
-                    currentTarget.DailyWaterMl,
-                    currentTarget.CalculationMethod,
-                    currentTarget.CalculationVersion,
-                    currentTarget.CalculatedAt),
+                : new GuestNutritionTargetResponse(
+                    current.DailyCaloriesKcal,
+                    current.DailyProteinG,
+                    current.DailyCarbohydratesG,
+                    current.DailyFatG,
+                    current.DailyFiberG,
+                    current.DailyWaterMl,
+                    current.CalculationMethod,
+                    current.CalculationVersion,
+                    current.CalculatedAt),
             profile.Preferences
                 .OrderByDescending(x => x.PreferencePriority)
                 .ThenBy(x => x.PreferenceCode)
-                .Select(x => new CustomerPreferenceResponse(
+                .Select(x => new GuestPreferenceResponse(
                     x.Id,
                     x.PreferenceCode,
                     x.PreferenceType,
@@ -302,11 +351,11 @@ public sealed class CustomerProfileService(
                 .ToArray(),
             profile.Allergens
                 .OrderBy(x => x.Allergen.Code)
-                .Select(x => new CustomerAllergenResponse(
+                .Select(x => new GuestAllergenResponse(
                     x.Id,
                     x.AllergenId,
                     x.Allergen.Code,
-                    ResolveAllergenName(x.Allergen, language),
+                    ResolveName(x.Allergen, profile.PreferredLanguage),
                     x.SeverityCode,
                     x.MedicallyConfirmed,
                     x.Notes))
@@ -316,22 +365,25 @@ public sealed class CustomerProfileService(
             profile.RowVersion);
     }
 
-    private static string ResolveAllergenName(Allergen allergen, string language) =>
+    private static string ResolveName(Allergen allergen, string language) =>
         allergen.Translations
             .FirstOrDefault(x => x.LanguageCode.Equals(language, StringComparison.OrdinalIgnoreCase))
             ?.Name
         ?? allergen.Translations
             .FirstOrDefault(x => x.LanguageCode.Equals("en", StringComparison.OrdinalIgnoreCase))
             ?.Name
-        ?? allergen.Translations.FirstOrDefault()?.Name
         ?? allergen.Code;
 
-    private DateOnly Today() =>
-        DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
+    private static bool IsUniqueViolation(DbUpdateException exception) =>
+        exception.InnerException is PostgresException
+        {
+            SqlState: PostgresErrorCodes.UniqueViolation
+        };
 
+    private static DateOnly Today(DateTimeOffset now) =>
+        DateOnly.FromDateTime(now.UtcDateTime);
     private static string? NormalizeCode(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim().ToUpperInvariant();
-
     private static string? NormalizeText(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

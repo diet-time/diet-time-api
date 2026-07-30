@@ -20,7 +20,7 @@ public interface IGuestHomeService
 {
     Task<GuestHomeResponse?> GetAsync(GuestHomeQuery query, DateTimeOffset now, CancellationToken cancellationToken);
     Task<GuestMenuResponse?> GetMenuAsync(string planCode, GuestMenuQuery query, DateTimeOffset now, CancellationToken cancellationToken);
-    Task<IReadOnlyList<GuestAllergenResponse>> GetAllergensAsync(string language, CancellationToken cancellationToken);
+    Task<IReadOnlyList<GuestAllergenLookupResponse>> GetAllergensAsync(string language, CancellationToken cancellationToken);
 }
 
 public interface IMealSelectionService
@@ -63,6 +63,68 @@ public interface ICustomerNutritionCalculator
 {
     CustomerNutritionCalculationResult? Calculate(CustomerNutritionCalculationInput input);
 }
+
+public sealed class GuestProfileOptions
+{
+    public const string SectionName = "GuestProfile";
+    public int TokenExpiryDays { get; set; } = 30;
+    public int TokenLengthBytes { get; set; } = 32;
+    public string HashAlgorithm { get; set; } = "SHA256";
+    public int ExpiredProfileRetentionDays { get; set; } = 7;
+    public int CleanupIntervalHours { get; set; } = 24;
+    public int CleanupBatchSize { get; set; } = 500;
+}
+
+public sealed record GuestSessionTokenResult(string RawToken, DateTimeOffset ExpiresAt);
+public interface IGuestTokenGenerator
+{
+    GuestSessionTokenResult Generate();
+}
+public interface IGuestTokenHasher
+{
+    bool IsValidFormat(string? rawToken);
+    string Hash(string rawToken);
+    bool Verify(string rawToken, string storedHash);
+}
+
+public enum GuestTokenResolutionStatus
+{
+    Valid,
+    ProfileNotFound,
+    Invalid
+}
+public sealed record GuestTokenResolution(
+    GuestTokenResolutionStatus Status,
+    string? TokenHash,
+    Guid? ProfileId);
+public interface IGuestTokenResolver
+{
+    Task<GuestTokenResolution> ResolveAsync(
+        IReadOnlyList<string> tokenHeaders,
+        bool requireProfile,
+        CancellationToken cancellationToken);
+}
+
+public sealed record GuestProfileUpsertResult(
+    GuestCustomerProfileResponse? Profile,
+    IReadOnlyList<Guid> InvalidAllergenIds);
+public interface IGuestProfileService
+{
+    Task<GuestCustomerProfileResponse?> GetAsync(Guid profileId, CancellationToken cancellationToken);
+    Task<GuestProfileUpsertResult> UpsertAsync(string tokenHash, UpsertGuestProfileRequest request, CancellationToken cancellationToken);
+}
+public interface IGuestPlanRecommendationService
+{
+    Task<IReadOnlyList<GuestPlanRecommendationResponse>> GetAsync(
+        Guid profileId,
+        CancellationToken cancellationToken);
+}
+public interface IGuestProfileCleanupService
+{
+    Task<int> DeleteExpiredBatchAsync(CancellationToken cancellationToken);
+}
+public sealed class InvalidGuestSessionException()
+    : Exception("Guest session is invalid or has expired.");
 
 public interface IAdminMealService
 {

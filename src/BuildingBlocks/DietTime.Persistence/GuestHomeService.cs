@@ -192,14 +192,14 @@ public sealed class GuestHomeService(
         return response;
     }
 
-    public async Task<IReadOnlyList<GuestAllergenResponse>> GetAllergensAsync(
+    public async Task<IReadOnlyList<GuestAllergenLookupResponse>> GetAllergensAsync(
         string language,
         CancellationToken ct)
     {
         var normalizedLanguage = language.Trim().ToLowerInvariant();
         var cacheKey = $"guest-allergens:{cacheVersion.Current}:{normalizedLanguage}";
 
-        if (cache.TryGetValue(cacheKey, out IReadOnlyList<GuestAllergenResponse>? cached) &&
+        if (cache.TryGetValue(cacheKey, out IReadOnlyList<GuestAllergenLookupResponse>? cached) &&
             cached is not null)
         {
             return cached;
@@ -208,7 +208,7 @@ public sealed class GuestHomeService(
         var allergens = await db.Allergens.AsNoTracking()
             .Where(allergen => allergen.IsActive)
             .OrderBy(allergen => allergen.Code)
-            .Select(allergen => new GuestAllergenResponse(
+            .Select(allergen => new GuestAllergenLookupResponse(
                 allergen.Id,
                 allergen.Code,
                 allergen.Translations

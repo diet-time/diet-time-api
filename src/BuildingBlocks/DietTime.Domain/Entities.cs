@@ -97,7 +97,10 @@ public sealed class MealPlanPrice : Entity { public Guid MealPlanTemplateId { ge
 
 public sealed class CustomerProfile : Entity
 {
-    public Guid UserId { get; set; }
+    public Guid? UserId { get; set; }
+    public string? GuestTokenHash { get; set; }
+    public DateTimeOffset? GuestTokenExpiresAt { get; set; }
+    public DateTimeOffset? LinkedAt { get; set; }
     public string? GenderCode { get; set; }
     public DateOnly? DateOfBirth { get; set; }
     public decimal? HeightCm { get; set; }
@@ -108,7 +111,7 @@ public sealed class CustomerProfile : Entity
     public string? DailyRoutineCode { get; set; }
     public string? ActivityLevelCode { get; set; }
     public string PreferredLanguage { get; set; } = "en";
-    public string OnboardingStatus { get; set; } = "IN_PROGRESS";
+    public string OnboardingStatus { get; set; } = "NOT_STARTED";
     public DateTimeOffset? OnboardingCompletedAt { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; }
