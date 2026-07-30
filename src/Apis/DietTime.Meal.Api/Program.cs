@@ -150,7 +150,7 @@ builder.Services.AddRateLimiter(o =>
 });
 
 var app = builder.Build();
-app.UseMiddleware<CorrelationIdMiddleware>(); app.UseMiddleware<ExceptionMiddleware>(); app.UseSerilogRequestLogging(); app.UseMiddleware<SecurityHeadersMiddleware>(); app.UseRateLimiter();
+app.UseMiddleware<CorrelationIdMiddleware>(); app.UseSerilogRequestLogging(); app.UseMiddleware<ExceptionMiddleware>(); app.UseMiddleware<SecurityHeadersMiddleware>(); app.UseRateLimiter();
 if (!app.Environment.IsProduction()) { app.UseSwagger(); app.UseSwaggerUI(o => o.SwaggerEndpoint("/swagger/v1/swagger.json", "Diet Time Meal API v1")); }
 app.UseCors("Flutter"); if (!app.Environment.IsDevelopment()) app.UseHttpsRedirection(); app.UseAuthentication(); app.UseAuthorization(); app.MapControllers(); app.MapHealthChecks("/health");
 app.Run();

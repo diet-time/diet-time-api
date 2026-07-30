@@ -165,6 +165,8 @@ public sealed class GuestOnboardingApiTests : IAsyncLifetime
 
         var responses = await Task.WhenAll(
             PutProfileAsync(token, request),
+            PutProfileAsync(token, request),
+            PutProfileAsync(token, request),
             PutProfileAsync(token, request));
 
         Assert.All(responses, response => Assert.Equal(HttpStatusCode.OK, response.StatusCode));

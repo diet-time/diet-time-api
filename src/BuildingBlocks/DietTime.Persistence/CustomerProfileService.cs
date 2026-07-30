@@ -89,7 +89,9 @@ public sealed class CustomerProfileService(
         await db.SaveChangesAsync(ct);
         if (nutritionTarget is not null)
         {
-            profile.NutritionTargets.Add(nutritionTarget);
+            nutritionTarget.CustomerProfileId = profile.Id;
+            nutritionTarget.CustomerProfile = profile;
+            db.CustomerNutritionTargets.Add(nutritionTarget);
             await db.SaveChangesAsync(ct);
         }
         await transaction.CommitAsync(ct);

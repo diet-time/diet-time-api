@@ -35,14 +35,12 @@ public sealed class GuestProfileService(
         UpsertGuestProfileRequest request,
         CancellationToken ct)
     {
+        const int maximumAttempts = 5;
         var requestedAllergenIds = request.Allergens
             .Select(x => x.AllergenId)
             .Distinct()
             .ToArray();
-        var activeAllergens = await db.Allergens
-            .Include(x => x.Translations)
-            .Where(x => requestedAllergenIds.Contains(x.Id) && x.IsActive)
-            .ToListAsync(ct);
+        var activeAllergens = await LoadActiveAllergensAsync(requestedAllergenIds, ct);
         var activeIds = activeAllergens.Select(x => x.Id).ToHashSet();
         var invalidIds = requestedAllergenIds
             .Where(id => !activeIds.Contains(id))
@@ -51,25 +49,44 @@ public sealed class GuestProfileService(
         if (invalidIds.Length > 0)
             return new(null, invalidIds);
 
-        try
+        for (var attempt = 1; attempt <= maximumAttempts; attempt++)
         {
-            return await UpsertCoreAsync(tokenHash, request, activeAllergens, ct);
-        }
-        catch (DbUpdateException exception) when (IsUniqueViolation(exception))
-        {
-            db.ChangeTracker.Clear();
-            if (!await db.CustomerProfiles.AsNoTracking()
-                    .AnyAsync(x => x.GuestTokenHash == tokenHash, ct))
+            try
             {
-                throw;
+                return await UpsertCoreAsync(tokenHash, request, activeAllergens, ct);
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < maximumAttempts)
+            {
+                logger.LogWarning(
+                    "Guest profile update encountered a concurrency conflict; retrying attempt {Attempt} of {MaximumAttempts}",
+                    attempt + 1,
+                    maximumAttempts);
+            }
+            catch (DbUpdateException exception)
+                when (attempt < maximumAttempts && IsUniqueViolation(exception))
+            {
+                db.ChangeTracker.Clear();
+                if (!await db.CustomerProfiles.AsNoTracking()
+                        .AnyAsync(x => x.GuestTokenHash == tokenHash, ct))
+                {
+                    throw;
+                }
+
+                logger.LogWarning(
+                    "Concurrent guest profile creation was detected; retrying attempt {Attempt} of {MaximumAttempts}",
+                    attempt + 1,
+                    maximumAttempts);
             }
 
-            var retryAllergens = await db.Allergens
-                .Include(x => x.Translations)
-                .Where(x => requestedAllergenIds.Contains(x.Id) && x.IsActive)
-                .ToListAsync(ct);
-            return await UpsertCoreAsync(tokenHash, request, retryAllergens, ct);
+            db.ChangeTracker.Clear();
+            await Task.Delay(
+                TimeSpan.FromMilliseconds(Random.Shared.Next(10, 31) * attempt),
+                ct);
+            activeAllergens = await LoadActiveAllergensAsync(requestedAllergenIds, ct);
         }
+
+        throw new DbUpdateConcurrencyException(
+            "Guest profile could not be saved after repeated concurrent updates.");
     }
 
     private async Task<GuestProfileUpsertResult> UpsertCoreAsync(
@@ -133,7 +150,9 @@ public sealed class GuestProfileService(
         await db.SaveChangesAsync(ct);
         if (newTarget is not null)
         {
-            profile.NutritionTargets.Add(newTarget);
+            newTarget.CustomerProfileId = profile.Id;
+            newTarget.CustomerProfile = profile;
+            db.CustomerNutritionTargets.Add(newTarget);
             await db.SaveChangesAsync(ct);
         }
         await transaction.CommitAsync(ct);
@@ -379,6 +398,14 @@ public sealed class GuestProfileService(
         {
             SqlState: PostgresErrorCodes.UniqueViolation
         };
+
+    private Task<List<Allergen>> LoadActiveAllergensAsync(
+        IReadOnlyCollection<Guid> allergenIds,
+        CancellationToken ct) =>
+        db.Allergens
+            .Include(x => x.Translations)
+            .Where(x => allergenIds.Contains(x.Id) && x.IsActive)
+            .ToListAsync(ct);
 
     private static DateOnly Today(DateTimeOffset now) =>
         DateOnly.FromDateTime(now.UtcDateTime);
