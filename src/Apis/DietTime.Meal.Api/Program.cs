@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Security.Claims;
 using System.Threading.RateLimiting;
 using Amazon.S3;
 using Asp.Versioning;
@@ -11,12 +12,15 @@ using DietTime.Persistence;
 using FluentValidation;
 using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Serilog;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 var maxUploadSizeBytes = builder.Configuration.GetValue<long?>("Storage:MaxUploadSizeBytes") ?? 10 * 1024 * 1024;
@@ -42,6 +46,7 @@ builder.Services.AddIdentityCore<ApplicationUser>(o => { o.Password.RequiredLeng
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
 builder.Services.Configure<DeliveryScheduleOptions>(builder.Configuration.GetSection(DeliveryScheduleOptions.SectionName));
+builder.Services.Configure<CustomerNutritionOptions>(builder.Configuration.GetSection(CustomerNutritionOptions.SectionName));
 builder.Services.PostConfigure<StorageOptions>(options =>
 {
     options.ServiceUrl = builder.Configuration["AWS_ENDPOINT_URL"] ?? options.ServiceUrl;
@@ -56,10 +61,35 @@ builder.Services.PostConfigure<StorageOptions>(options =>
     else if (!string.IsNullOrWhiteSpace(builder.Configuration["AWS_ENDPOINT_URL"]))
         options.ForcePathStyle = false;
 });
-builder.Services.AddAuthentication(DevelopmentAuthenticationHandler.SchemeName)
-    .AddScheme<AuthenticationSchemeOptions, DevelopmentAuthenticationHandler>(
-        DevelopmentAuthenticationHandler.SchemeName,
-        _ => { });
+if (builder.Environment.IsDevelopment())
+{
+    builder.Services.AddAuthentication(DevelopmentAuthenticationHandler.SchemeName)
+        .AddScheme<AuthenticationSchemeOptions, DevelopmentAuthenticationHandler>(
+            DevelopmentAuthenticationHandler.SchemeName,
+            _ => { });
+}
+else
+{
+    var jwt = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>()
+        ?? throw new InvalidOperationException("JWT configuration is required.");
+    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(options =>
+        {
+            options.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuer = true,
+                ValidIssuer = jwt.Issuer,
+                ValidateAudience = true,
+                ValidAudience = jwt.Audience,
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.Key)),
+                ValidateLifetime = true,
+                ClockSkew = TimeSpan.FromMinutes(1),
+                NameClaimType = "sub",
+                RoleClaimType = ClaimTypes.Role
+            };
+        });
+}
 builder.Services.AddAuthorization();
 
 builder.Services.AddSingleton<IAmazonS3>(services =>
@@ -72,7 +102,7 @@ builder.Services.AddSingleton<IAmazonS3>(services =>
         AuthenticationRegion = storage.Region
     });
 });
-builder.Services.AddSingleton(TimeProvider.System); builder.Services.AddMemoryCache(); builder.Services.AddScoped<ILanguageResolver, LanguageResolver>(); builder.Services.AddScoped<IStorageUrlService, StorageUrlService>(); builder.Services.AddScoped<IMealQueryService, MealQueryService>(); builder.Services.AddScoped<IGuestHomeService, GuestHomeService>(); builder.Services.AddScoped<IMealSelectionService, MealSelectionService>(); builder.Services.AddScoped<IAdminMealService, AdminMealService>(); builder.Services.AddScoped<ITemplateMenuReader>(services => (AdminMealService)services.GetRequiredService<IAdminMealService>()); builder.Services.AddScoped<IOperationalCalendarService, DefaultOperationalCalendarService>(); builder.Services.AddScoped<IDeliverySchedulingService, DeliverySchedulingService>(); builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddSingleton(TimeProvider.System); builder.Services.AddMemoryCache(); builder.Services.AddScoped<ILanguageResolver, LanguageResolver>(); builder.Services.AddScoped<IStorageUrlService, StorageUrlService>(); builder.Services.AddScoped<IMealQueryService, MealQueryService>(); builder.Services.AddScoped<IGuestHomeService, GuestHomeService>(); builder.Services.AddScoped<IMealSelectionService, MealSelectionService>(); builder.Services.AddScoped<IAdminMealService, AdminMealService>(); builder.Services.AddScoped<ITemplateMenuReader>(services => (AdminMealService)services.GetRequiredService<IAdminMealService>()); builder.Services.AddScoped<IOperationalCalendarService, DefaultOperationalCalendarService>(); builder.Services.AddScoped<IDeliverySchedulingService, DeliverySchedulingService>(); builder.Services.AddScoped<IAuthService, AuthService>(); builder.Services.AddScoped<ICustomerProfileService, CustomerProfileService>(); builder.Services.AddSingleton(services => services.GetRequiredService<IOptions<CustomerNutritionOptions>>().Value); builder.Services.AddSingleton<ICustomerNutritionCalculator, CustomerNutritionCalculator>();
 builder.Services.AddValidatorsFromAssemblyContaining<MealSelectionRequestValidator>(); builder.Services.AddFluentValidationAutoValidation();
 
 builder.Services.AddControllers().AddJsonOptions(o => { o.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull; o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(new UpperCaseJsonNamingPolicy())); });

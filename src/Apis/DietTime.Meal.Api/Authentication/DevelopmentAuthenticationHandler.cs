@@ -15,13 +15,18 @@ public sealed class DevelopmentAuthenticationHandler(
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        Claim[] claims =
-        [
+        var claims = new List<Claim>
+        {
             new(ClaimTypes.Name, "Local Development User"),
             new(ClaimTypes.Role, "Admin"),
             new(ClaimTypes.Role, "Dietitian"),
             new(ClaimTypes.Role, "ContentManager")
-        ];
+        };
+        if (Request.Headers.TryGetValue("X-Development-User-Id", out var values) &&
+            Guid.TryParse(values.FirstOrDefault(), out var userId))
+        {
+            claims.Add(new Claim(ClaimTypes.NameIdentifier, userId.ToString()));
+        }
         var identity = new ClaimsIdentity(claims, SchemeName);
         var principal = new ClaimsPrincipal(identity);
         var ticket = new AuthenticationTicket(principal, SchemeName);

@@ -95,6 +95,80 @@ public sealed record MealSelectionRequest(Guid PlanId, Guid TemplateDayId, IRead
 public sealed record MealSelectionItemRequest(Guid SlotId, Guid SlotOptionId, Guid MealItemId);
 public sealed record MealSelectionValidationResponse(bool IsValid, decimal TotalAdditionalPrice, string CurrencyCode, IReadOnlyList<string> Warnings);
 
+public sealed class UpsertCustomerProfileRequest
+{
+    private List<CustomerPreferenceRequest> preferences = [];
+    private List<CustomerAllergenRequest> allergens = [];
+
+    public string? GenderCode { get; init; }
+    public DateOnly? DateOfBirth { get; init; }
+    public decimal? HeightCm { get; init; }
+    public decimal? WeightKg { get; init; }
+    public string? GoalCode { get; init; }
+    public string? DailyRoutineCode { get; init; }
+    public string? ActivityLevelCode { get; init; }
+    public string PreferredLanguage { get; init; } = "en";
+    public string OnboardingStatus { get; init; } = "IN_PROGRESS";
+    public List<CustomerPreferenceRequest> Preferences { get => preferences; init => preferences = value ?? []; }
+    public List<CustomerAllergenRequest> Allergens { get => allergens; init => allergens = value ?? []; }
+}
+
+public sealed record CustomerPreferenceRequest(
+    string PreferenceCode,
+    string? PreferenceType,
+    int PreferencePriority);
+public sealed record CustomerAllergenRequest(
+    Guid AllergenId,
+    string? SeverityCode,
+    bool MedicallyConfirmed,
+    string? Notes);
+public sealed record CustomerNutritionTargetResponse(
+    int? DailyCaloriesKcal,
+    decimal? DailyProteinG,
+    decimal? DailyCarbohydratesG,
+    decimal? DailyFatG,
+    decimal? DailyFiberG,
+    int? DailyWaterMl,
+    string? CalculationMethod,
+    string? CalculationVersion,
+    DateTimeOffset CalculatedAt);
+public sealed record CustomerPreferenceResponse(
+    Guid Id,
+    string PreferenceCode,
+    string? PreferenceType,
+    int PreferencePriority);
+public sealed record CustomerAllergenResponse(
+    Guid Id,
+    Guid AllergenId,
+    string AllergenCode,
+    string? AllergenName,
+    string? SeverityCode,
+    bool MedicallyConfirmed,
+    string? Notes);
+public sealed record CustomerProfileResponse(
+    Guid Id,
+    Guid UserId,
+    string? GenderCode,
+    DateOnly? DateOfBirth,
+    int? Age,
+    decimal? HeightCm,
+    decimal? WeightKg,
+    decimal? Bmi,
+    string? BmiCategoryCode,
+    string? GoalCode,
+    string? DailyRoutineCode,
+    string? ActivityLevelCode,
+    string PreferredLanguage,
+    string OnboardingStatus,
+    DateTimeOffset? OnboardingCompletedAt,
+    bool IsActive,
+    CustomerNutritionTargetResponse? NutritionTarget,
+    IReadOnlyList<CustomerPreferenceResponse> Preferences,
+    IReadOnlyList<CustomerAllergenResponse> Allergens,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt,
+    long RowVersion);
+
 public sealed record ChangeMealStatusRequest(string Status);
 public sealed record AdminMealSummaryResponse(
     Guid Id,

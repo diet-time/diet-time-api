@@ -34,13 +34,18 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
     public DbSet<MealPlanTemplateSlotTranslation> MealPlanTemplateSlotTranslations => Set<MealPlanTemplateSlotTranslation>();
     public DbSet<MealPlanSlotOption> MealPlanSlotOptions => Set<MealPlanSlotOption>();
     public DbSet<MealPlanPrice> MealPlanPrices => Set<MealPlanPrice>();
+    public DbSet<CustomerProfile> CustomerProfiles => Set<CustomerProfile>();
+    public DbSet<CustomerNutritionTarget> CustomerNutritionTargets => Set<CustomerNutritionTarget>();
+    public DbSet<CustomerProfilePreference> CustomerProfilePreferences => Set<CustomerProfilePreference>();
+    public DbSet<CustomerProfileAllergen> CustomerProfileAllergens => Set<CustomerProfileAllergen>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
         base.OnModelCreating(b);
+        b.Entity<ApplicationUser>().ToTable("users", "public");
         b.Entity<RefreshToken>(e => { e.ToTable("refresh_tokens"); e.Property(x => x.TokenHash).HasMaxLength(64); e.HasIndex(x => x.TokenHash).IsUnique(); e.HasIndex(x => x.UserId); e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade); });
-        ConfigureLookups(b); ConfigureMeals(b); ConfigurePlans(b);
+        ConfigureLookups(b); ConfigureMeals(b); ConfigurePlans(b); ConfigureCustomerProfiles(b);
     }
 
     private static void ConfigureLookups(ModelBuilder b)
@@ -76,6 +81,85 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
         Translation<MealPlanTemplateSlotTranslation>(b, "meal_plan_template_slot_translations", 10); b.Entity<MealPlanTemplateSlotTranslation>(e => { e.HasIndex(x => new { x.MealPlanTemplateSlotId, x.LanguageCode }).IsUnique(); e.HasOne(x => x.Slot).WithMany(x => x.Translations).HasForeignKey(x => x.MealPlanTemplateSlotId).OnDelete(DeleteBehavior.Cascade); });
         b.Entity<MealPlanSlotOption>(e => { e.ToTable("meal_plan_slot_options"); e.Property(x => x.AdditionalPrice).HasPrecision(12, 2); e.HasIndex(x => x.MealPlanTemplateSlotId).HasDatabaseName("ix_meal_plan_slot_options_slot"); e.HasIndex(x => x.MealItemId).HasDatabaseName("ix_meal_plan_slot_options_meal"); e.HasOne(x => x.Slot).WithMany(x => x.Options).HasForeignKey(x => x.MealPlanTemplateSlotId).OnDelete(DeleteBehavior.Cascade); e.HasOne(x => x.MealItem).WithMany().HasForeignKey(x => x.MealItemId).OnDelete(DeleteBehavior.Restrict); });
         b.Entity<MealPlanPrice>(e => { e.ToTable("meal_plan_prices"); e.Property(x => x.Amount).HasPrecision(12, 2); e.Property(x => x.CurrencyCode).HasColumnType("char(3)"); e.HasIndex(x => new { x.MealPlanTemplateId, x.DurationDays, x.MealsPerDay, x.SnacksPerDay, x.CurrencyCode }).HasDatabaseName("ix_meal_plan_prices_package"); e.HasOne(x => x.Plan).WithMany(x => x.Prices).HasForeignKey(x => x.MealPlanTemplateId).OnDelete(DeleteBehavior.Restrict); });
+    }
+
+    private static void ConfigureCustomerProfiles(ModelBuilder b)
+    {
+        b.Entity<CustomerProfile>(e =>
+        {
+            e.ToTable("customer_profiles", "public");
+            e.Property(x => x.GenderCode).HasMaxLength(30);
+            e.Property(x => x.HeightCm).HasPrecision(6, 2);
+            e.Property(x => x.WeightKg).HasPrecision(6, 2);
+            e.Property(x => x.Bmi).HasPrecision(5, 2);
+            e.Property(x => x.BmiCategoryCode).HasMaxLength(30);
+            e.Property(x => x.GoalCode).HasMaxLength(50);
+            e.Property(x => x.DailyRoutineCode).HasMaxLength(50);
+            e.Property(x => x.ActivityLevelCode).HasMaxLength(50);
+            e.Property(x => x.PreferredLanguage).HasMaxLength(10);
+            e.Property(x => x.OnboardingStatus).HasMaxLength(30);
+            e.Property(x => x.RowVersion).IsConcurrencyToken();
+            e.HasIndex(x => x.UserId).IsUnique().HasDatabaseName("ux_customer_profiles_user");
+            e.HasOne<ApplicationUser>()
+                .WithOne()
+                .HasForeignKey<CustomerProfile>(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<CustomerNutritionTarget>(e =>
+        {
+            e.ToTable("customer_nutrition_targets", "public");
+            e.Property(x => x.DailyProteinG).HasPrecision(10, 2);
+            e.Property(x => x.DailyCarbohydratesG).HasPrecision(10, 2);
+            e.Property(x => x.DailyFatG).HasPrecision(10, 2);
+            e.Property(x => x.DailyFiberG).HasPrecision(10, 2);
+            e.Property(x => x.CalculationMethod).HasMaxLength(50);
+            e.Property(x => x.CalculationVersion).HasMaxLength(30);
+            e.Property(x => x.RowVersion).IsConcurrencyToken();
+            e.HasIndex(x => x.CustomerProfileId).HasDatabaseName("ix_customer_nutrition_targets_profile");
+            e.HasIndex(x => x.CustomerProfileId)
+                .IsUnique()
+                .HasFilter("is_current = true")
+                .HasDatabaseName("ux_customer_nutrition_targets_current");
+            e.HasOne(x => x.CustomerProfile)
+                .WithMany(x => x.NutritionTargets)
+                .HasForeignKey(x => x.CustomerProfileId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<CustomerProfilePreference>(e =>
+        {
+            e.ToTable("customer_profile_preferences", "public");
+            e.Property(x => x.PreferenceCode).HasMaxLength(50);
+            e.Property(x => x.PreferenceType).HasMaxLength(30);
+            e.HasIndex(x => x.CustomerProfileId).HasDatabaseName("ix_customer_profile_preferences_profile");
+            e.HasIndex(x => new { x.CustomerProfileId, x.PreferenceCode })
+                .IsUnique()
+                .HasDatabaseName("ux_customer_profile_preferences_code");
+            e.HasOne(x => x.CustomerProfile)
+                .WithMany(x => x.Preferences)
+                .HasForeignKey(x => x.CustomerProfileId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<CustomerProfileAllergen>(e =>
+        {
+            e.ToTable("customer_profile_allergens", "public");
+            e.Property(x => x.SeverityCode).HasMaxLength(30);
+            e.Property(x => x.Notes).HasMaxLength(500);
+            e.HasIndex(x => x.CustomerProfileId).HasDatabaseName("ix_customer_profile_allergens_profile");
+            e.HasIndex(x => new { x.CustomerProfileId, x.AllergenId })
+                .IsUnique()
+                .HasDatabaseName("ux_customer_profile_allergens_allergen");
+            e.HasOne(x => x.CustomerProfile)
+                .WithMany(x => x.Allergens)
+                .HasForeignKey(x => x.CustomerProfileId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Allergen)
+                .WithMany()
+                .HasForeignKey(x => x.AllergenId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
     }
 
     private static void Translation<T>(ModelBuilder b, string table, int languageLength) where T : Translation

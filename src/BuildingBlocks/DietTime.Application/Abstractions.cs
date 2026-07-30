@@ -28,6 +28,42 @@ public interface IMealSelectionService
     Task<MealSelectionValidationResponse> ValidateAsync(MealSelectionRequest request, DateTimeOffset now, CancellationToken cancellationToken);
 }
 
+public sealed record CustomerProfileUpsertResult(
+    CustomerProfileResponse? Profile,
+    IReadOnlyList<Guid> InvalidAllergenIds)
+{
+    public bool IsSuccess => Profile is not null && InvalidAllergenIds.Count == 0;
+}
+
+public interface ICustomerProfileService
+{
+    Task<CustomerProfileResponse?> GetAsync(Guid userId, CancellationToken cancellationToken);
+    Task<CustomerProfileUpsertResult> UpsertAsync(Guid userId, UpsertCustomerProfileRequest request, CancellationToken cancellationToken);
+}
+
+public sealed record CustomerNutritionCalculationInput(
+    string? GenderCode,
+    DateOnly? DateOfBirth,
+    decimal? HeightCm,
+    decimal? WeightKg,
+    string? GoalCode,
+    string? ActivityLevelCode,
+    DateOnly CalculationDate);
+public sealed record CustomerNutritionCalculationResult(
+    int? DailyCaloriesKcal,
+    decimal? DailyProteinG,
+    decimal? DailyCarbohydratesG,
+    decimal? DailyFatG,
+    decimal? DailyFiberG,
+    int? DailyWaterMl,
+    string? CalculationMethod,
+    string? CalculationVersion);
+
+public interface ICustomerNutritionCalculator
+{
+    CustomerNutritionCalculationResult? Calculate(CustomerNutritionCalculationInput input);
+}
+
 public interface IAdminMealService
 {
     Task<AdminDashboardResponse> GetDashboardAsync(CancellationToken cancellationToken);
