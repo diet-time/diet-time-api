@@ -94,3 +94,91 @@ public sealed class MealPlanTemplateSlot : Entity { public Guid MealPlanTemplate
 public sealed class MealPlanTemplateSlotTranslation : Translation { public Guid MealPlanTemplateSlotId { get; set; } public MealPlanTemplateSlot Slot { get; set; } = null!; public string? Title { get; set; } public string? Instruction { get; set; } }
 public sealed class MealPlanSlotOption : Entity { public Guid MealPlanTemplateSlotId { get; set; } public MealPlanTemplateSlot Slot { get; set; } = null!; public Guid MealItemId { get; set; } public MealItem MealItem { get; set; } = null!; public decimal AdditionalPrice { get; set; } public bool IsDefault { get; set; } public bool IsAvailable { get; set; } public int DisplayOrder { get; set; } public DateTimeOffset? AvailableFrom { get; set; } public DateTimeOffset? AvailableUntil { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } }
 public sealed class MealPlanPrice : Entity { public Guid MealPlanTemplateId { get; set; } public MealPlanTemplate Plan { get; set; } = null!; public int DurationDays { get; set; } public int MealsPerDay { get; set; } public int SnacksPerDay { get; set; } public string CurrencyCode { get; set; } = "QAR"; public decimal Amount { get; set; } public DateTimeOffset EffectiveFrom { get; set; } public DateTimeOffset? EffectiveUntil { get; set; } public bool IsActive { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } }
+
+// User Management Entities
+public sealed class Customer : Entity
+{
+    public string CustomerName { get; set; } = "";
+    public int? Age { get; set; }
+    public string? Mobile { get; set; }
+    public string? Email { get; set; }
+    public string Status { get; set; } = "ACTIVE"; // ACTIVE, INACTIVE, SUSPENDED
+    public bool IsActive { get; set; } = true;
+    public decimal? Weight { get; set; }
+    public decimal? Height { get; set; }
+    public decimal? BMI { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public string CreatedBy { get; set; } = "SYSTEM";
+    public string? UpdatedBy { get; set; }
+}
+
+public sealed class UserProfile : Entity
+{
+    public Guid UserId { get; set; }
+    public string FirstName { get; set; } = "";
+    public string LastName { get; set; } = "";
+    public string Status { get; set; } = "ACTIVE"; // ACTIVE, INACTIVE, SUSPENDED
+    public bool IsActive { get; set; } = true;
+    public bool IsCustomer { get; set; } = false;
+    public Guid? CustomerId { get; set; }
+    public Customer? Customer { get; set; }
+    public string? Mobile { get; set; }
+    public string CreatedBy { get; set; } = "SYSTEM";
+    public DateTimeOffset CreatedAt { get; set; }
+    public string? ModifiedBy { get; set; }
+    public DateTimeOffset? ModifiedAt { get; set; }
+
+    public string FullName => $"{FirstName} {LastName}".Trim();
+}
+
+public sealed class ApplicationRole : Entity
+{
+    public string RoleName { get; set; } = "";
+    public string? Description { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public string CreatedBy { get; set; } = "SYSTEM";
+    public string? UpdatedBy { get; set; }
+    public ICollection<RoleMenuMapping> MenuMappings { get; set; } = [];
+}
+
+public sealed class Menu : Entity
+{
+    public string MainMenuCode { get; set; } = "";
+    public string MainMenuName { get; set; } = "";
+    public string SubMenuCode { get; set; } = "";
+    public string SubMenuName { get; set; } = "";
+    public string? RouteUrl { get; set; }
+    public string? Icon { get; set; }
+    public int DisplayOrder { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public string CreatedBy { get; set; } = "SYSTEM";
+    public string? UpdatedBy { get; set; }
+    public ICollection<RoleMenuMapping> RoleMappings { get; set; } = [];
+}
+
+public sealed class RoleMenuMapping : Entity
+{
+    public Guid RoleId { get; set; }
+    public ApplicationRole Role { get; set; } = null!;
+    public Guid MenuId { get; set; }
+    public Menu Menu { get; set; } = null!;
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+public sealed class UserAttribute : Entity
+{
+    public Guid UserId { get; set; }
+    public string Key { get; set; } = "";
+    public string Value { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    // Common keys
+    public const string PasswordKey = "PWD";
+    public const string PasswordGenerationKey = "PWDGEN";
+}

@@ -21,6 +21,7 @@ Required Railway variables:
 ASPNETCORE_ENVIRONMENT=Production
 PORT=8080
 ConnectionStrings__DefaultConnection=Host=...;Port=5432;Database=...;Username=...;Password=...;SSL Mode=Require;Trust Server Certificate=true
+DTDBCONNECTION=Host=...;Port=5432;Database=...;Username=...;Password=...;SSL Mode=Require;Trust Server Certificate=true
 Storage__PublicBaseUrl=<public bucket/CDN base URL>
 Storage__MaxUploadSizeBytes=10485760
 Api__PublicBaseUrl=https://your-api-domain
@@ -33,9 +34,25 @@ AWS_S3_URL_STYLE=virtual
 Cors__AllowedOrigins__0=https://your-flutter-web-origin.example
 ```
 
-JWT bearer validation is temporarily disabled in all environments. Requests are authenticated by the temporary development handler with the admin, dietitian, and content-manager roles. Do not treat the deployed API as access-controlled until JWT authentication is restored.
+JWT bearer validation is enabled outside Development. Development keeps the temporary admin/dietitian/content-manager handler for catalogue work, while `/auth/me` explicitly validates bearer tokens so the real login flow can also be tested locally.
 
 Do not use the checked-in development placeholders as credentials. Secret values belong in Railway variables or .NET user secrets.
+
+Authentication uses one rotating session contract:
+
+```text
+POST /api/v1/auth/register
+POST /api/v1/auth/login
+POST /api/v1/auth/refresh
+POST /api/v1/auth/logout
+GET  /api/v1/auth/me
+```
+
+`DTDBCONNECTION` takes precedence when both database variables are present. It accepts either an Npgsql connection string or a `postgres://`/`postgresql://` URI. Keep only one database variable configured in each deployed environment when possible.
+
+Login, registration, and refresh return an `ApiResponse<AuthSessionResponse>`. Refresh tokens are hashed in PostgreSQL, rotated on every refresh, and revoked on logout. Browser clients receive the refresh token in an HttpOnly cookie (`Secure` outside Development); native clients store the returned refresh token in platform secure storage. Access tokens remain short-lived and are sent as bearer tokens.
+
+Apply `20260730000000_AddRefreshSessions` to environments that do not already have the `refresh_tokens` table before deploying this session flow.
 
 ## Database assumptions
 
@@ -55,6 +72,8 @@ POST /api/v1/meal-selections/validate        (JWT)
 POST /api/v1/auth/register
 POST /api/v1/auth/login
 POST /api/v1/auth/refresh
+POST /api/v1/auth/logout
+GET  /api/v1/auth/me
 ```
 
 Admin endpoints from the brief are under `/api/v1/admin` and require `Admin`, `Dietitian`, or `ContentManager`. Meal images are uploaded as multipart form data to `POST /api/v1/admin/meals/{mealId}/media/upload`; send `mediaType=IMAGE` for the original or `mediaType=THUMBNAIL` for its thumbnail. An original image must exist before its thumbnail is uploaded. The persisted `public_url` and `thumbnail_url` point to the public API media route (`GET /api/v1/media/{objectKey}`), while storage credentials and object URLs remain server-side. Set `Api__PublicBaseUrl` to the externally reachable API origin in deployed environments.

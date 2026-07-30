@@ -1,0 +1,110 @@
+using System.Reflection;
+using System.Net;
+using DietTime.Contracts;
+using DietTime.Persistence;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Routing;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
+
+namespace DietTime.Meal.Api.IntegrationTests;
+
+public sealed class AuthenticationContractTests
+{
+    [Fact]
+    public void Authentication_routes_are_unique_and_complete()
+    {
+        var routes = typeof(Program).Assembly
+            .GetTypes()
+            .Where(type => typeof(ControllerBase).IsAssignableFrom(type))
+            .SelectMany(type =>
+            {
+                var prefixes = type.GetCustomAttributes<RouteAttribute>()
+                    .Select(attribute => attribute.Template)
+                    .Where(template => template.Contains("/auth", StringComparison.OrdinalIgnoreCase));
+                return type.GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                    .SelectMany(method => method.GetCustomAttributes<HttpMethodAttribute>())
+                    .SelectMany(attribute => prefixes.Select(prefix =>
+                        $"{attribute.HttpMethods.Single()} {prefix}/{attribute.Template}"));
+            })
+            .ToArray();
+
+        Assert.Equal(routes.Length, routes.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Contains(routes, route => route.EndsWith("/register", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(routes, route => route.EndsWith("/login", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(routes, route => route.EndsWith("/refresh", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(routes, route => route.EndsWith("/logout", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(routes, route => route.EndsWith("/me", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Session_contract_carries_user_roles_and_both_expirations()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var response = new AuthSessionResponse(
+            "access",
+            now.AddMinutes(15),
+            "refresh",
+            now.AddDays(7),
+            new AuthUserResponse(Guid.NewGuid(), "admin@example.test", "Admin", ["Admin"]));
+
+        Assert.Equal("access", response.AccessToken);
+        Assert.Equal("refresh", response.RefreshToken);
+        Assert.True(response.AccessTokenExpiresAt < response.RefreshTokenExpiresAt);
+        Assert.Contains("Admin", response.User.Roles);
+    }
+
+    [Fact]
+    public void Refresh_session_migration_targets_the_identity_user_table()
+    {
+        var options = new DbContextOptionsBuilder<DietTimeDbContext>()
+            .UseNpgsql("Host=localhost;Database=contract_check;Username=postgres;Password=unused")
+            .UseSnakeCaseNamingConvention()
+            .Options;
+        using var context = new DietTimeDbContext(options);
+
+        Assert.Equal(
+            "AspNetUsers",
+            context.Model.FindEntityType(typeof(ApplicationUser))?.GetTableName());
+    }
+
+    [Fact]
+    public async Task Swagger_document_generates_with_multipart_upload_operations()
+    {
+        await using var factory = new ApiFactory(
+            "Host=localhost;Database=swagger_check;Username=postgres;Password=unused");
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/swagger/v1/swagger.json");
+        var document = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("/api/v1/admin/meals/{mealId}/media/upload", document);
+        Assert.Contains("/api/v1/admin/meal-plans/{planId}/image/upload", document);
+    }
+
+    [Theory]
+    [InlineData("Host=localhost;Database=diettime;Username=postgres;Password=test")]
+    [InlineData("\"Host=localhost;Database=diettime;Username=postgres;Password=test\"")]
+    public void Database_connection_resolver_accepts_npgsql_strings(string value)
+    {
+        var normalized = DatabaseConnectionStringResolver.Normalize(value);
+        var parsed = new NpgsqlConnectionStringBuilder(normalized);
+
+        Assert.Equal("localhost", parsed.Host);
+        Assert.Equal("diettime", parsed.Database);
+    }
+
+    [Fact]
+    public void Database_connection_resolver_accepts_postgres_uris()
+    {
+        var normalized = DatabaseConnectionStringResolver.Normalize(
+            "postgresql://postgres:secret@db.example.test:5433/diettime");
+        var parsed = new NpgsqlConnectionStringBuilder(normalized);
+
+        Assert.Equal("db.example.test", parsed.Host);
+        Assert.Equal(5433, parsed.Port);
+        Assert.Equal("diettime", parsed.Database);
+        Assert.Equal("postgres", parsed.Username);
+    }
+}

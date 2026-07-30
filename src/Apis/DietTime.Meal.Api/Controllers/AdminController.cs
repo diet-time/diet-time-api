@@ -102,7 +102,7 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
     [HttpPost("meals/{mealId:guid}/media/upload"), Consumes("multipart/form-data")]
     public async Task<ActionResult<ApiResponse<AdminMediaResponse>>> UploadMealMedia(
         Guid mealId,
-        [FromForm] IFormFile file,
+        IFormFile file,
         [FromForm] string? mediaType = MealMediaTypes.MealItem,
         [FromForm] string? altTextEn = null,
         [FromForm] bool isPrimary = false,
@@ -182,7 +182,7 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
     [HttpPost("meal-plans/{planId:guid}/image/upload"), Consumes("multipart/form-data")]
     public async Task<ActionResult<ApiResponse<AdminPlanImageResponse>>> UploadPlanImage(
         Guid planId,
-        [FromForm] IFormFile file,
+        IFormFile file,
         [FromForm] string? imageType = MealMediaTypes.MealPlan,
         CancellationToken ct = default)
     {

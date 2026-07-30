@@ -101,7 +101,9 @@ public interface IDeliverySchedulingService
 }
 public interface IAuthService
 {
-    Task<TokenResponse?> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken);
-    Task<TokenResponse?> LoginAsync(LoginRequest request, CancellationToken cancellationToken);
-    Task<TokenResponse?> RefreshAsync(RefreshRequest request, CancellationToken cancellationToken);
+    Task<AuthSessionResponse?> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken);
+    Task<AuthSessionResponse?> LoginAsync(LoginRequest request, CancellationToken cancellationToken);
+    Task<AuthSessionResponse?> RefreshAsync(string refreshToken, CancellationToken cancellationToken);
+    Task RevokeAsync(string refreshToken, CancellationToken cancellationToken);
+    Task<AuthUserResponse?> GetUserAsync(Guid userId, CancellationToken cancellationToken);
 }

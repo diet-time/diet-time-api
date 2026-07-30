@@ -246,7 +246,169 @@ public sealed record MealPlanTemplateDayDetailResponse(Guid Id, Guid TemplateId,
 public sealed record TemplateDayErrorResponse(string Code, string Message);
 public sealed record CreatePlanSlotRequest(Guid MealTypeId, int DisplayOrder, int MinimumSelection, int MaximumSelection, bool IsRequired, TimeOnly? SelectionCutoffTime, bool AllowsPaidUpgrade);
 public sealed record CreateSlotOptionRequest(Guid MealItemId, decimal AdditionalPrice, bool IsDefault, bool IsAvailable, int DisplayOrder);
-public sealed record RegisterRequest(string Email, string Password);
+public sealed record RegisterRequest(string Email, string Password, string? FirstName = null, string? LastName = null);
 public sealed record LoginRequest(string Email, string Password);
-public sealed record RefreshRequest(string RefreshToken);
-public sealed record TokenResponse(string AccessToken, string RefreshToken, DateTimeOffset ExpiresAt);
+public sealed record RefreshRequest(string? RefreshToken = null);
+public sealed record LogoutRequest(string? RefreshToken = null);
+public sealed record AuthUserResponse(Guid Id, string Email, string Name, IReadOnlyList<string> Roles);
+public sealed record AuthSessionResponse(
+    string AccessToken,
+    DateTimeOffset AccessTokenExpiresAt,
+    string RefreshToken,
+    DateTimeOffset RefreshTokenExpiresAt,
+    AuthUserResponse User);
+
+// User Management DTOs
+public sealed record UserProfileResponse(
+    Guid Id,
+    Guid UserId,
+    string FirstName,
+    string LastName,
+    string FullName,
+    string Email,
+    string? Mobile,
+    string Status,
+    bool IsActive,
+    bool IsCustomer,
+    Guid? CustomerId,
+    string? CreatedBy,
+    DateTimeOffset CreatedAt,
+    string? ModifiedBy,
+    DateTimeOffset ModifiedAt);
+
+public sealed record CreateUserProfileRequest(
+    string Email,
+    string FirstName,
+    string LastName,
+    string? Mobile,
+    string Password,
+    string Status = "ACTIVE",
+    bool IsActive = true);
+
+public sealed record UpdateUserProfileRequest(
+    string FirstName,
+    string LastName,
+    string? Mobile,
+    string Status,
+    bool IsActive);
+
+public sealed record CustomerResponse(
+    Guid Id,
+    string CustomerName,
+    int? Age,
+    string? Mobile,
+    string? Email,
+    string Status,
+    bool IsActive,
+    decimal? Weight,
+    decimal? Height,
+    decimal? BMI,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public sealed record CreateCustomerRequest(
+    string CustomerName,
+    int? Age,
+    string? Mobile,
+    string? Email,
+    decimal? Weight,
+    decimal? Height,
+    string Status = "ACTIVE",
+    bool IsActive = true);
+
+public sealed record UpdateCustomerRequest(
+    string CustomerName,
+    int? Age,
+    string? Mobile,
+    string? Email,
+    decimal? Weight,
+    decimal? Height,
+    string Status,
+    bool IsActive);
+
+public sealed record ApplicationRoleResponse(
+    Guid Id,
+    string RoleName,
+    string? Description,
+    bool IsActive,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public sealed record CreateApplicationRoleRequest(
+    string RoleName,
+    string? Description,
+    bool IsActive = true);
+
+public sealed record UpdateApplicationRoleRequest(
+    string RoleName,
+    string? Description,
+    bool IsActive);
+
+public sealed record MenuResponse(
+    Guid Id,
+    string MainMenuCode,
+    string MainMenuName,
+    string SubMenuCode,
+    string SubMenuName,
+    string? RouteUrl,
+    string? Icon,
+    int DisplayOrder,
+    bool IsActive,
+    string? CreatedBy,
+    DateTimeOffset CreatedAt,
+    string? UpdatedBy,
+    DateTimeOffset UpdatedAt);
+
+public sealed record CreateMenuRequest(
+    string MainMenuCode,
+    string MainMenuName,
+    string SubMenuCode,
+    string SubMenuName,
+    string? RouteUrl,
+    string? Icon,
+    int DisplayOrder,
+    bool IsActive = true);
+
+public sealed record UpdateMenuRequest(
+    string MainMenuCode,
+    string MainMenuName,
+    string SubMenuCode,
+    string SubMenuName,
+    string? RouteUrl,
+    string? Icon,
+    int DisplayOrder,
+    bool IsActive);
+
+public sealed record RoleMenuMappingResponse(
+    Guid Id,
+    Guid RoleId,
+    string RoleName,
+    Guid MenuId,
+    string MenuName,
+    DateTimeOffset CreatedAt);
+
+public sealed record CreateRoleMenuMappingRequest(
+    Guid RoleId,
+    Guid MenuId);
+
+public sealed record RoleMenusResponse(
+    Guid RoleId,
+    string RoleName,
+    IReadOnlyList<MenuResponse> Menus);
+
+// Password management DTOs
+
+public sealed record RequestPasswordResetRequest(
+    string Email);
+
+public sealed record RequestPasswordResetResponse(
+    string Message,
+    bool Success);
+
+public sealed record SetPasswordRequest(
+    string ResetToken,
+    string NewPassword);
+
+public sealed record SetPasswordResponse(
+    string Message,
+    bool Success);
