@@ -7,10 +7,11 @@ using Microsoft.Extensions.Caching.Memory;
 
 namespace DietTime.Persistence;
 
-public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService storage, IMemoryCache cache) : IMealQueryService
+public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService storage, IMemoryCache cache, TimeProvider clock) : IMealQueryService
 {
     public async Task<IReadOnlyList<PlanCategoryResponse>> GetPlanCategoriesAsync(string language, DateOnly today, CancellationToken ct)
     {
+        var now = clock.GetUtcNow();
         var rows = await db.MealPlanTemplates.AsNoTracking()
             .Where(p => p.IsActive && p.IsPublished && !db.MealPlanTemplates.Any(v => v.VersionGroupId == p.VersionGroupId && v.IsPublished && v.VersionNumber > p.VersionNumber) && (p.ValidFrom == null || p.ValidFrom <= today) && (p.ValidUntil == null || p.ValidUntil >= today))
             .OrderBy(p => p.PlanType).ThenBy(p => p.Code)
@@ -25,8 +26,58 @@ public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService st
                     .OrderByDescending(m => m.IsPrimary)
                     .ThenBy(m => m.DisplayOrder)
                     .Select(m => new { m.PublicUrl, m.ObjectKey, m.ThumbnailUrl, m.ThumbnailObjectKey })
+                    .FirstOrDefault(),
+                Price = p.Prices
+                    .Where(price =>
+                        price.IsActive &&
+                        price.EffectiveFrom <= now &&
+                        (price.EffectiveUntil == null || price.EffectiveUntil > now))
+                    .OrderBy(price => price.Amount)
+                    .ThenBy(price => price.DurationDays)
+                    .Select(price => new { price.Amount, price.CurrencyCode, price.DurationDays })
                     .FirstOrDefault()
             }).ToListAsync(ct);
+
+        var planIds = rows.Select(row => row.Id).ToArray();
+        var calorieRows = await db.MealPlanSlotOptions.AsNoTracking()
+            .Where(option =>
+                planIds.Contains(option.Slot.Day.MealPlanTemplateId) &&
+                option.Slot.Day.IsActive &&
+                option.Slot.IsActive &&
+                option.IsAvailable &&
+                (option.AvailableFrom == null || option.AvailableFrom <= now) &&
+                (option.AvailableUntil == null || option.AvailableUntil > now) &&
+                option.MealItem.Status == "ACTIVE" &&
+                option.MealItem.IsAvailable &&
+                (option.MealItem.AvailableFrom == null || option.MealItem.AvailableFrom <= now) &&
+                (option.MealItem.AvailableUntil == null || option.MealItem.AvailableUntil > now) &&
+                option.MealItem.Nutrition != null &&
+                option.MealItem.Nutrition.CaloriesKcal != null)
+            .Select(option => new
+            {
+                PlanId = option.Slot.Day.MealPlanTemplateId,
+                DayId = option.Slot.MealPlanTemplateDayId,
+                SlotId = option.MealPlanTemplateSlotId,
+                option.IsDefault,
+                option.DisplayOrder,
+                CaloriesKcal = option.MealItem.Nutrition!.CaloriesKcal!.Value
+            })
+            .ToListAsync(ct);
+        var dailyCaloriesByPlan = calorieRows
+            .GroupBy(row => row.PlanId)
+            .ToDictionary(
+                plan => plan.Key,
+                plan => (decimal?)Math.Round(
+                    plan.GroupBy(row => row.DayId)
+                        .Average(day => day
+                            .GroupBy(row => row.SlotId)
+                            .Sum(slot => slot
+                                .OrderByDescending(row => row.IsDefault)
+                                .ThenBy(row => row.DisplayOrder)
+                                .First()
+                                .CaloriesKcal)),
+                    0));
+
         return rows.Select(x => new PlanCategoryResponse(
             x.Id,
             x.Code,
@@ -35,7 +86,11 @@ public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService st
             x.PlanMedia is null
                 ? null
                 : Image(x.PlanMedia.ThumbnailUrl ?? x.PlanMedia.PublicUrl, x.PlanMedia.ThumbnailObjectKey ?? x.PlanMedia.ObjectKey, true),
-            false)).ToArray();
+            false,
+            dailyCaloriesByPlan.GetValueOrDefault(x.Id),
+            x.Price?.Amount,
+            x.Price?.CurrencyCode.Trim(),
+            x.Price?.DurationDays)).ToArray();
     }
 
     public async Task<MealPlanResponse?> GetPlanAsync(Guid planId, string language, DateOnly today, CancellationToken ct)
