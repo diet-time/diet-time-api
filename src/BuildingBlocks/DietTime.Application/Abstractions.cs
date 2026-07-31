@@ -39,6 +39,7 @@ public interface ICustomerProfileService
 {
     Task<CustomerProfileResponse?> GetAsync(Guid userId, CancellationToken cancellationToken);
     Task<CustomerProfileUpsertResult> UpsertAsync(Guid userId, UpsertCustomerProfileRequest request, CancellationToken cancellationToken);
+    Task<CustomerProfileResponse> UpdatePreferredNameAsync(Guid userId, string preferredName, CancellationToken cancellationToken);
 }
 
 public sealed record CustomerNutritionCalculationInput(

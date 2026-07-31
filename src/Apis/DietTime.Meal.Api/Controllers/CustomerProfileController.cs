@@ -110,6 +110,27 @@ public sealed class CustomerProfileController(
         return Ok(ApiResponse<CustomerProfileResponse>.Ok(result.Profile!));
     }
 
+    /// <summary>Updates only the authenticated customer's preferred name.</summary>
+    [HttpPatch("preferred-name")]
+    [Consumes("application/json")]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(ApiResponse<CustomerProfileResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> UpdatePreferredName(
+        UpdateCustomerPreferredNameRequest request,
+        CancellationToken ct)
+    {
+        if (!TryGetUserId(out var userId))
+            return Unauthorized();
+
+        var profile = await profiles.UpdatePreferredNameAsync(
+            userId,
+            request.PreferredName,
+            ct);
+        return Ok(ApiResponse<CustomerProfileResponse>.Ok(profile));
+    }
+
     private bool TryGetUserId(out Guid userId)
     {
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier)

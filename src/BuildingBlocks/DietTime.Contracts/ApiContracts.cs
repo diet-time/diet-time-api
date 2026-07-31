@@ -123,6 +123,7 @@ public sealed record CustomerAllergenRequest(
     string? SeverityCode,
     bool MedicallyConfirmed,
     string? Notes);
+public sealed record UpdateCustomerPreferredNameRequest(string PreferredName);
 public sealed record CustomerNutritionTargetResponse(
     int? DailyCaloriesKcal,
     decimal? DailyProteinG,
@@ -149,6 +150,7 @@ public sealed record CustomerAllergenResponse(
 public sealed record CustomerProfileResponse(
     Guid Id,
     Guid UserId,
+    string? PreferredName,
     string? GenderCode,
     DateOnly? DateOfBirth,
     int? Age,

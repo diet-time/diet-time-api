@@ -145,6 +145,16 @@ public sealed class CustomerProfileTests
         Assert.Null(result);
     }
 
+    [Fact]
+    public void Preferred_name_is_required_and_limited_to_100_characters()
+    {
+        var validator = new UpdateCustomerPreferredNameRequestValidator();
+
+        Assert.False(validator.Validate(new UpdateCustomerPreferredNameRequest(" ")).IsValid);
+        Assert.False(validator.Validate(new UpdateCustomerPreferredNameRequest(new string('x', 101))).IsValid);
+        Assert.True(validator.Validate(new UpdateCustomerPreferredNameRequest("Noor")).IsValid);
+    }
+
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;

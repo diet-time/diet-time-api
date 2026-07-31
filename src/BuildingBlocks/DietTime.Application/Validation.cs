@@ -110,6 +110,15 @@ public sealed class UpsertCustomerProfileRequestValidator : AbstractValidator<Up
     }
 }
 
+public sealed class UpdateCustomerPreferredNameRequestValidator
+    : AbstractValidator<UpdateCustomerPreferredNameRequest>
+{
+    public UpdateCustomerPreferredNameRequestValidator()
+    {
+        RuleFor(x => x.PreferredName).NotEmpty().MaximumLength(100);
+    }
+}
+
 public sealed class UpsertGuestProfileRequestValidator : AbstractValidator<UpsertGuestProfileRequest>
 {
     private static readonly HashSet<string> SupportedStatuses =

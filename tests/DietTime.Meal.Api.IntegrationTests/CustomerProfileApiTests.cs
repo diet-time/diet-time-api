@@ -89,6 +89,30 @@ public sealed class CustomerProfileApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Updates_preferred_name_without_replacing_profile_answers()
+    {
+        if (!enabled) return;
+        Authenticate(userId);
+        await client!.PutAsJsonAsync("/api/v1/customer/profile", CompleteRequest());
+
+        var response = await client!.PatchAsJsonAsync(
+            "/api/v1/customer/profile/preferred-name",
+            new { preferredName = "Noor" });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = json.RootElement.GetProperty("data");
+        Assert.Equal("Noor", data.GetProperty("preferredName").GetString());
+        Assert.Equal("LOSE_WEIGHT", data.GetProperty("goalCode").GetString());
+
+        using var scope = factory!.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
+        var profile = await db.CustomerProfiles.SingleAsync(x => x.UserId == userId);
+        Assert.Equal("Noor", profile.PreferredName);
+        Assert.Equal("LOSE_WEIGHT", profile.GoalCode);
+    }
+
+    [Fact]
     public async Task Updates_existing_children_in_place_and_empty_lists_remove_them()
     {
         if (!enabled) return;

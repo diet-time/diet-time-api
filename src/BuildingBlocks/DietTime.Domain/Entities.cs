@@ -98,6 +98,7 @@ public sealed class MealPlanPrice : Entity { public Guid MealPlanTemplateId { ge
 public sealed class CustomerProfile : Entity
 {
     public Guid? UserId { get; set; }
+    public string? PreferredName { get; set; }
     public string? GuestTokenHash { get; set; }
     public DateTimeOffset? GuestTokenExpiresAt { get; set; }
     public DateTimeOffset? LinkedAt { get; set; }

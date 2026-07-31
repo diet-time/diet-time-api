@@ -13,6 +13,7 @@ public sealed class CustomerProfileConfiguration : IEntityTypeConfiguration<Cust
 
         entity.Property(x => x.Id).HasColumnName("id");
         entity.Property(x => x.UserId).HasColumnName("user_id").IsRequired(false);
+        entity.Property(x => x.PreferredName).HasColumnName("preferred_name").HasMaxLength(100);
         entity.Property(x => x.GuestTokenHash).HasColumnName("guest_token_hash").HasMaxLength(128);
         entity.Property(x => x.GuestTokenExpiresAt).HasColumnName("guest_token_expires_at");
         entity.Property(x => x.LinkedAt).HasColumnName("linked_at");

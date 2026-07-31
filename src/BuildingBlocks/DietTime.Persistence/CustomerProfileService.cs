@@ -104,6 +104,45 @@ public sealed class CustomerProfileService(
         return new(ToResponse(profile, today), []);
     }
 
+    public async Task<CustomerProfileResponse> UpdatePreferredNameAsync(
+        Guid userId,
+        string preferredName,
+        CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var profile = await ProfileQuery(tracking: true)
+            .SingleOrDefaultAsync(x => x.UserId == userId, ct);
+
+        if (profile is null)
+        {
+            profile = new CustomerProfile
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                CreatedAt = now,
+                CreatedBy = userId,
+                IsActive = true,
+                RowVersion = 1
+            };
+            db.CustomerProfiles.Add(profile);
+        }
+        else
+        {
+            profile.RowVersion++;
+        }
+
+        profile.PreferredName = preferredName.Trim();
+        profile.UpdatedAt = now;
+        profile.UpdatedBy = userId;
+        await db.SaveChangesAsync(ct);
+
+        logger.LogInformation(
+            "Preferred name was saved for customer profile {ProfileId} and authenticated user {UserId}",
+            profile.Id,
+            userId);
+        return ToResponse(profile, DateOnly.FromDateTime(now.UtcDateTime));
+    }
+
     private IQueryable<CustomerProfile> ProfileQuery(bool tracking)
     {
         var query = db.CustomerProfiles
@@ -265,6 +304,7 @@ public sealed class CustomerProfileService(
         return new(
             profile.Id,
             profile.UserId!.Value,
+            profile.PreferredName,
             profile.GenderCode,
             profile.DateOfBirth,
             profile.DateOfBirth is null
