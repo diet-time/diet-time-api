@@ -125,9 +125,6 @@ public sealed class CustomerProfile : Entity
 {
     public Guid? UserId { get; set; }
     public string? PreferredName { get; set; }
-    public string? GuestTokenHash { get; set; }
-    public DateTimeOffset? GuestTokenExpiresAt { get; set; }
-    public DateTimeOffset? LinkedAt { get; set; }
     public string? GenderCode { get; set; }
     public DateOnly? DateOfBirth { get; set; }
     public decimal? HeightCm { get; set; }

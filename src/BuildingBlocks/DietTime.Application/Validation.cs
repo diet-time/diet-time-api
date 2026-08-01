@@ -119,65 +119,6 @@ public sealed class UpdateCustomerPreferredNameRequestValidator
     }
 }
 
-public sealed class UpsertGuestProfileRequestValidator : AbstractValidator<UpsertGuestProfileRequest>
-{
-    private static readonly HashSet<string> SupportedStatuses =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            "NOT_STARTED",
-            "IN_PROGRESS",
-            "PROFILE_COMPLETED",
-            "PLAN_SELECTED"
-        };
-
-    public UpsertGuestProfileRequestValidator(TimeProvider clock)
-    {
-        var today = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
-
-        RuleFor(x => x.HeightCm).InclusiveBetween(50m, 300m).When(x => x.HeightCm.HasValue);
-        RuleFor(x => x.WeightKg).InclusiveBetween(15m, 500m).When(x => x.WeightKg.HasValue);
-        RuleFor(x => x.DateOfBirth)
-            .Must(value => value is null || value <= today)
-            .WithMessage("Date of birth cannot be in the future.")
-            .Must(value => value is null || value >= today.AddYears(-120))
-            .WithMessage("Date of birth cannot represent an age older than 120 years.");
-        RuleFor(x => x.GenderCode).MaximumLength(30);
-        RuleFor(x => x.GoalCode).MaximumLength(50);
-        RuleFor(x => x.DailyRoutineCode).MaximumLength(50);
-        RuleFor(x => x.ActivityLevelCode).MaximumLength(50);
-        RuleFor(x => x.PreferredLanguage).NotEmpty().MaximumLength(10);
-        RuleFor(x => x.OnboardingStatus)
-            .NotEmpty()
-            .MaximumLength(30)
-            .Must(status => status is not null && SupportedStatuses.Contains(status))
-            .WithMessage("Onboarding status must be NOT_STARTED, IN_PROGRESS, PROFILE_COMPLETED, or PLAN_SELECTED.");
-
-        RuleForEach(x => x.Preferences).ChildRules(preference =>
-        {
-            preference.RuleFor(x => x.PreferenceCode).NotEmpty().MaximumLength(50);
-            preference.RuleFor(x => x.PreferenceType).MaximumLength(30);
-            preference.RuleFor(x => x.PreferencePriority).InclusiveBetween(1, 5);
-        });
-        RuleFor(x => x.Preferences)
-            .Must(items => items
-                .Select(item => item.PreferenceCode?.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Count() == items.Count)
-            .WithMessage("Duplicate preference codes are not allowed.");
-
-        RuleForEach(x => x.Allergens).ChildRules(allergen =>
-        {
-            allergen.RuleFor(x => x.AllergenId).NotEmpty();
-            allergen.RuleFor(x => x.SeverityCode).MaximumLength(30);
-            allergen.RuleFor(x => x.Notes).MaximumLength(500);
-        });
-        RuleFor(x => x.Allergens)
-            .Must(items => items.Select(item => item.AllergenId).Distinct().Count() == items.Count)
-            .WithMessage("Duplicate allergen IDs are not allowed.");
-
-    }
-}
-
 public sealed class UpsertAllergenRequestValidator : AbstractValidator<UpsertAllergenRequest>
 {
     public UpsertAllergenRequestValidator()

@@ -45,19 +45,6 @@ builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptio
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
 builder.Services.Configure<DeliveryScheduleOptions>(builder.Configuration.GetSection(DeliveryScheduleOptions.SectionName));
 builder.Services.Configure<CustomerNutritionOptions>(builder.Configuration.GetSection(CustomerNutritionOptions.SectionName));
-builder.Services.AddOptions<GuestProfileOptions>()
-    .Bind(builder.Configuration.GetSection(GuestProfileOptions.SectionName))
-    .Validate(
-        options =>
-            options.TokenExpiryDays > 0 &&
-            options.TokenLengthBytes is >= 32 and <= 128 &&
-            options.ExpiredProfileRetentionDays >= 0 &&
-            options.CleanupIntervalHours > 0 &&
-            options.CleanupBatchSize is >= 1 and <= 5000 &&
-            (options.HashAlgorithm.Equals("SHA256", StringComparison.OrdinalIgnoreCase) ||
-             options.HashAlgorithm.Equals("SHA-256", StringComparison.OrdinalIgnoreCase)),
-        "Guest profile configuration is invalid.")
-    .ValidateOnStart();
 builder.Services.PostConfigure<StorageOptions>(options =>
 {
     options.ServiceUrl = builder.Configuration["AWS_ENDPOINT_URL"] ?? options.ServiceUrl;
@@ -90,7 +77,7 @@ builder.Services.AddSingleton<IAmazonS3>(services =>
         AuthenticationRegion = storage.Region
     });
 });
-builder.Services.AddSingleton(TimeProvider.System); builder.Services.AddMemoryCache(); builder.Services.AddScoped<ILanguageResolver, LanguageResolver>(); builder.Services.AddScoped<IStorageUrlService, StorageUrlService>(); builder.Services.AddScoped<IMealQueryService, MealQueryService>(); builder.Services.AddScoped<IGuestHomeService, GuestHomeService>(); builder.Services.AddScoped<IMealSelectionService, MealSelectionService>(); builder.Services.AddScoped<IAdminMealService, AdminMealService>(); builder.Services.AddScoped<ITemplateMenuReader>(services => (AdminMealService)services.GetRequiredService<IAdminMealService>()); builder.Services.AddScoped<IOperationalCalendarService, DefaultOperationalCalendarService>(); builder.Services.AddScoped<IDeliverySchedulingService, DeliverySchedulingService>(); builder.Services.AddScoped<IAuthService, AuthService>(); builder.Services.AddScoped<ICustomerProfileService, CustomerProfileService>(); builder.Services.AddSingleton(services => services.GetRequiredService<IOptions<CustomerNutritionOptions>>().Value); builder.Services.AddSingleton<ICustomerNutritionCalculator, CustomerNutritionCalculator>(); builder.Services.AddSingleton<IGuestOnboardingProgressResolver, GuestOnboardingProgressResolver>(); builder.Services.AddSingleton(services => services.GetRequiredService<IOptions<GuestProfileOptions>>().Value); builder.Services.AddSingleton<IGuestTokenGenerator, GuestTokenGenerator>(); builder.Services.AddSingleton<IGuestTokenHasher, GuestTokenHasher>(); builder.Services.AddScoped<IGuestTokenResolver, GuestTokenResolver>(); builder.Services.AddScoped<IGuestProfileService, GuestProfileService>(); builder.Services.AddScoped<IGuestPlanRecommendationService, GuestPlanRecommendationService>(); builder.Services.AddScoped<IGuestProfileCleanupService, GuestProfileCleanupService>(); builder.Services.AddHostedService<GuestProfileCleanupWorker>();
+builder.Services.AddSingleton(TimeProvider.System); builder.Services.AddMemoryCache(); builder.Services.AddScoped<ILanguageResolver, LanguageResolver>(); builder.Services.AddScoped<IStorageUrlService, StorageUrlService>(); builder.Services.AddScoped<IMealQueryService, MealQueryService>(); builder.Services.AddScoped<IGuestHomeService, GuestHomeService>(); builder.Services.AddScoped<IMealSelectionService, MealSelectionService>(); builder.Services.AddScoped<IAdminMealService, AdminMealService>(); builder.Services.AddScoped<ITemplateMenuReader>(services => (AdminMealService)services.GetRequiredService<IAdminMealService>()); builder.Services.AddScoped<IOperationalCalendarService, DefaultOperationalCalendarService>(); builder.Services.AddScoped<IDeliverySchedulingService, DeliverySchedulingService>(); builder.Services.AddScoped<IAuthService, AuthService>(); builder.Services.AddScoped<ICustomerProfileService, CustomerProfileService>(); builder.Services.AddSingleton(services => services.GetRequiredService<IOptions<CustomerNutritionOptions>>().Value); builder.Services.AddSingleton<ICustomerNutritionCalculator, CustomerNutritionCalculator>();
 builder.Services.AddValidatorsFromAssemblyContaining<MealSelectionRequestValidator>(); builder.Services.AddFluentValidationAutoValidation();
 
 builder.Services.AddControllers().AddJsonOptions(o => { o.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull; o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(new UpperCaseJsonNamingPolicy())); });
@@ -101,24 +88,6 @@ var origins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string
 builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = 429;
-    o.AddPolicy("guest-session", context =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 10,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0
-            }));
-    o.AddPolicy("guest-profile", context =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 60,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0
-            }));
     o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx => RateLimitPartition.GetFixedWindowLimiter(ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new() { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 
