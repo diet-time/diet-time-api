@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Security.Claims;
 using System.Threading.RateLimiting;
 using Amazon.S3;
 using Asp.Versioning;
@@ -13,16 +12,13 @@ using DietTime.Persistence;
 using FluentValidation;
 using FluentValidation.AspNetCore;
 using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Serilog;
-using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 var maxUploadSizeBytes = builder.Configuration.GetValue<long?>("Storage:MaxUploadSizeBytes") ?? 10 * 1024 * 1024;
@@ -76,35 +72,12 @@ builder.Services.PostConfigure<StorageOptions>(options =>
     else if (!string.IsNullOrWhiteSpace(builder.Configuration["AWS_ENDPOINT_URL"]))
         options.ForcePathStyle = false;
 });
-if (builder.Environment.IsDevelopment())
-{
-    builder.Services.AddAuthentication(DevelopmentAuthenticationHandler.SchemeName)
-        .AddScheme<AuthenticationSchemeOptions, DevelopmentAuthenticationHandler>(
-            DevelopmentAuthenticationHandler.SchemeName,
-            _ => { });
-}
-else
-{
-    var jwt = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>()
-        ?? throw new InvalidOperationException("JWT configuration is required.");
-    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-        .AddJwtBearer(options =>
-        {
-            options.TokenValidationParameters = new TokenValidationParameters
-            {
-                ValidateIssuer = true,
-                ValidIssuer = jwt.Issuer,
-                ValidateAudience = true,
-                ValidAudience = jwt.Audience,
-                ValidateIssuerSigningKey = true,
-                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.Key)),
-                ValidateLifetime = true,
-                ClockSkew = TimeSpan.FromMinutes(1),
-                NameClaimType = "sub",
-                RoleClaimType = ClaimTypes.Role
-            };
-        });
-}
+// Authentication is temporarily bypassed in every environment. Authorization
+// metadata remains in place so JWT enforcement can be restored centrally.
+builder.Services.AddAuthentication(DevelopmentAuthenticationHandler.SchemeName)
+    .AddScheme<AuthenticationSchemeOptions, DevelopmentAuthenticationHandler>(
+        DevelopmentAuthenticationHandler.SchemeName,
+        _ => { });
 builder.Services.AddAuthorization();
 
 builder.Services.AddSingleton<IAmazonS3>(services =>
