@@ -978,7 +978,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         Guid? mealPlanTemplateId,
         string? status,
         string? currencyCode,
-        Guid? packageId,
+        string? packageId,
         string? packageCode,
         int page,
         int pageSize,
@@ -998,8 +998,11 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         }
         if (mealPlanTemplateId.HasValue)
             query = query.Where(x => x.MealPlanTemplateId == mealPlanTemplateId);
-        if (packageId.HasValue)
-            query = query.Where(x => x.MealPlanPricePackageId == packageId);
+        if (!string.IsNullOrWhiteSpace(packageId))
+        {
+            var normalizedPackageId = NormalizePackageCode(packageId);
+            query = query.Where(x => x.MealPlanPricePackageId == normalizedPackageId);
+        }
         if (!string.IsNullOrWhiteSpace(packageCode))
         {
             var normalizedPackageCode = NormalizePackageCode(packageCode);
@@ -1129,14 +1132,15 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         var resolution = await ResolvePricingPackageAsync(request, ct);
         if (resolution.Status != MealPlanPriceWriteStatus.Success)
             return new(resolution.Status);
-        if (await HasPriceOverlapAsync(request, resolution.DurationDays, request.MealPlanPricePackageId, null, ct))
+        var packageId = NormalizePackageReference(request.MealPlanPricePackageId);
+        if (await HasPriceOverlapAsync(request, resolution.DurationDays, packageId, null, ct))
             return new(MealPlanPriceWriteStatus.Conflict);
 
         var now = clock.GetUtcNow();
         var price = new MealPlanPrice
         {
             MealPlanTemplateId = request.MealPlanTemplateId,
-            MealPlanPricePackageId = request.MealPlanPricePackageId,
+            MealPlanPricePackageId = packageId,
             DurationDays = resolution.DurationDays,
             MealsPerDay = request.MealsPerDay,
             SnacksPerDay = request.SnacksPerDay,
@@ -1167,11 +1171,12 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         var resolution = await ResolvePricingPackageAsync(request, ct);
         if (resolution.Status != MealPlanPriceWriteStatus.Success)
             return new(resolution.Status);
-        if (await HasPriceOverlapAsync(request, resolution.DurationDays, request.MealPlanPricePackageId, priceId, ct))
+        var packageId = NormalizePackageReference(request.MealPlanPricePackageId);
+        if (await HasPriceOverlapAsync(request, resolution.DurationDays, packageId, priceId, ct))
             return new(MealPlanPriceWriteStatus.Conflict);
 
         price.MealPlanTemplateId = request.MealPlanTemplateId;
-        price.MealPlanPricePackageId = request.MealPlanPricePackageId;
+        price.MealPlanPricePackageId = packageId;
         price.DurationDays = resolution.DurationDays;
         price.MealsPerDay = request.MealsPerDay;
         price.SnacksPerDay = request.SnacksPerDay;
@@ -1262,7 +1267,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         var count = await query.CountAsync(ct);
         var rows = await ordered.Skip((page - 1) * pageSize).Take(pageSize)
             .Select(x => new MealPlanPricePackageResponse(
-                x.Id, x.Code, x.NameEn, x.NameAr, x.DurationDays, x.DisplayOrder,
+                x.Code, x.Code, x.NameEn, x.NameAr, x.DurationDays, x.DisplayOrder,
                 x.IsActive, x.CreatedAt, x.UpdatedAt))
             .ToListAsync(ct);
         return new(rows, new(page, pageSize, count, (int)Math.Ceiling(count / (double)pageSize)));
@@ -1275,18 +1280,18 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             .ThenBy(x => x.DurationDays)
             .ThenBy(x => x.Code)
             .Select(x => new MealPlanPricePackageLookupResponse(
-                x.Id, x.Code, x.NameEn, x.NameEn, x.NameAr, x.DurationDays, x.DisplayOrder))
+                x.Code, x.Code, x.NameEn, x.NameEn, x.NameAr, x.DurationDays, x.DisplayOrder))
             .ToListAsync(ct);
 
-    public Task<MealPlanPricePackageResponse?> GetMealPlanPricePackageAsync(Guid packageId, CancellationToken ct) =>
+    public Task<MealPlanPricePackageResponse?> GetMealPlanPricePackageAsync(string packageId, CancellationToken ct) =>
         db.MealPlanPricePackages.AsNoTracking()
-            .Where(x => x.Id == packageId)
+            .Where(x => x.Code == NormalizePackageCode(packageId))
             .Select(x => new MealPlanPricePackageResponse(
-                x.Id, x.Code, x.NameEn, x.NameAr, x.DurationDays, x.DisplayOrder,
+                x.Code, x.Code, x.NameEn, x.NameAr, x.DurationDays, x.DisplayOrder,
                 x.IsActive, x.CreatedAt, x.UpdatedAt))
             .SingleOrDefaultAsync(ct);
 
-    public async Task<(MealPlanPricePackageWriteResult Result, Guid? Id)> CreateMealPlanPricePackageAsync(
+    public async Task<(MealPlanPricePackageWriteResult Result, string? Id)> CreateMealPlanPricePackageAsync(
         UpsertMealPlanPricePackageRequest request,
         Guid? userId,
         CancellationToken ct)
@@ -1297,7 +1302,6 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         var now = clock.GetUtcNow();
         var package = new MealPlanPricePackage
         {
-            Id = Guid.NewGuid(),
             Code = code,
             NameEn = request.NameEn.Trim(),
             NameAr = request.NameAr.Trim(),
@@ -1311,23 +1315,24 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         };
         db.MealPlanPricePackages.Add(package);
         await db.SaveChangesAsync(ct);
-        return (MealPlanPricePackageWriteResult.Success, package.Id);
+        return (MealPlanPricePackageWriteResult.Success, package.Code);
     }
 
     public async Task<MealPlanPricePackageWriteResult> UpdateMealPlanPricePackageAsync(
-        Guid packageId,
+        string packageId,
         UpsertMealPlanPricePackageRequest request,
         Guid? userId,
         CancellationToken ct)
     {
-        var package = await db.MealPlanPricePackages.SingleOrDefaultAsync(x => x.Id == packageId, ct);
+        var normalizedId = NormalizePackageCode(packageId);
+        var package = await db.MealPlanPricePackages.SingleOrDefaultAsync(x => x.Code == normalizedId, ct);
         if (package is null)
             return MealPlanPricePackageWriteResult.NotFound;
         var code = NormalizePackageCode(request.Code);
-        if (await db.MealPlanPricePackages.AnyAsync(x => x.Id != packageId && x.Code.ToUpper() == code, ct))
-            return MealPlanPricePackageWriteResult.DuplicateCode;
+        if (code != normalizedId)
+            return MealPlanPricePackageWriteResult.IdentifierChange;
         if (package.DurationDays != request.DurationDays
-            && await db.MealPlanPrices.AnyAsync(x => x.MealPlanPricePackageId == packageId, ct))
+            && await db.MealPlanPrices.AnyAsync(x => x.MealPlanPricePackageId == normalizedId, ct))
             return MealPlanPricePackageWriteResult.DurationInUse;
 
         package.Code = code;
@@ -1343,12 +1348,13 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
     }
 
     public async Task<AdminWriteResult> SetMealPlanPricePackageStatusAsync(
-        Guid packageId,
+        string packageId,
         bool isActive,
         Guid? userId,
         CancellationToken ct)
     {
-        var package = await db.MealPlanPricePackages.SingleOrDefaultAsync(x => x.Id == packageId, ct);
+        var normalizedId = NormalizePackageCode(packageId);
+        var package = await db.MealPlanPricePackages.SingleOrDefaultAsync(x => x.Code == normalizedId, ct);
         if (package is null)
             return AdminWriteResult.NotFound;
         package.IsActive = isActive;
@@ -1361,7 +1367,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
     private Task<bool> HasPriceOverlapAsync(
         UpsertMealPlanPriceRequest request,
         int durationDays,
-        Guid? packageId,
+        string? packageId,
         Guid? excludedId,
         CancellationToken ct)
     {
@@ -1369,7 +1375,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         return db.MealPlanPrices.AnyAsync(x =>
             (!excludedId.HasValue || x.Id != excludedId.Value)
             && x.MealPlanTemplateId == request.MealPlanTemplateId
-            && (packageId.HasValue
+            && (packageId != null
                 ? x.MealPlanPricePackageId == packageId
                 : x.MealPlanPricePackageId == null && x.DurationDays == durationDays)
             && x.MealsPerDay == request.MealsPerDay
@@ -1383,13 +1389,13 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         UpsertMealPlanPriceRequest request,
         CancellationToken ct)
     {
-        if (!request.MealPlanPricePackageId.HasValue)
+        if (string.IsNullOrWhiteSpace(request.MealPlanPricePackageId))
             return request.DurationDays is > 0
                 ? (MealPlanPriceWriteStatus.Success, request.DurationDays.Value)
                 : (MealPlanPriceWriteStatus.PackageDurationMismatch, 0);
 
         var package = await db.MealPlanPricePackages.AsNoTracking()
-            .SingleOrDefaultAsync(x => x.Id == request.MealPlanPricePackageId.Value, ct);
+            .SingleOrDefaultAsync(x => x.Code == NormalizePackageCode(request.MealPlanPricePackageId), ct);
         if (package is null)
             return (MealPlanPriceWriteStatus.PackageNotFound, 0);
         if (!package.IsActive)
@@ -1402,6 +1408,9 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
     private static string NormalizePackageCode(string code) =>
         string.Join('_', code.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries))
             .ToUpperInvariant();
+
+    private static string? NormalizePackageReference(string? code) =>
+        string.IsNullOrWhiteSpace(code) ? null : NormalizePackageCode(code);
 
     public async Task<IReadOnlyList<MealPlanTemplateDayResponse>?> GetTemplateDaysAsync(Guid templateId, CancellationToken ct)
     {

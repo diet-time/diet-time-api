@@ -91,6 +91,7 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
         b.Entity<MealPlanPricePackage>(e =>
         {
             e.ToTable("meal_plan_price_packages", "public");
+            e.HasKey(x => x.Code);
             e.Property(x => x.Code).HasColumnName("code").HasMaxLength(50).IsRequired();
             e.Property(x => x.NameEn).HasColumnName("name_en").HasMaxLength(100).IsRequired();
             e.Property(x => x.NameAr).HasColumnName("name_ar").HasMaxLength(100).IsRequired();
@@ -101,7 +102,6 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
             e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
             e.Property(x => x.CreatedBy).HasColumnName("created_by");
             e.Property(x => x.UpdatedBy).HasColumnName("updated_by");
-            e.HasIndex(x => x.Code).IsUnique().HasDatabaseName("ux_meal_plan_price_packages_code");
             e.ToTable(t =>
             {
                 t.HasCheckConstraint("ck_meal_plan_price_packages_duration", "duration_days > 0");
@@ -111,13 +111,13 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
         b.Entity<MealPlanPrice>(e =>
         {
             e.ToTable("meal_plan_prices");
-            e.Property(x => x.MealPlanPricePackageId).HasColumnName("meal_plan_price_package_id");
+            e.Property(x => x.MealPlanPricePackageId).HasColumnName("meal_plan_price_package_id").HasMaxLength(50);
             e.Property(x => x.Amount).HasPrecision(12, 2);
             e.Property(x => x.CurrencyCode).HasColumnType("char(3)");
             e.HasIndex(x => new { x.MealPlanTemplateId, x.DurationDays, x.MealsPerDay, x.SnacksPerDay, x.CurrencyCode }).HasDatabaseName("ix_meal_plan_prices_package");
             e.HasIndex(x => x.MealPlanPricePackageId).HasDatabaseName("ix_meal_plan_prices_price_package");
             e.HasOne(x => x.Plan).WithMany(x => x.Prices).HasForeignKey(x => x.MealPlanTemplateId).OnDelete(DeleteBehavior.Restrict);
-            e.HasOne(x => x.Package).WithMany(x => x.Prices).HasForeignKey(x => x.MealPlanPricePackageId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Package).WithMany(x => x.Prices).HasForeignKey(x => x.MealPlanPricePackageId).HasPrincipalKey(x => x.Code).OnDelete(DeleteBehavior.Restrict);
         });
     }
 

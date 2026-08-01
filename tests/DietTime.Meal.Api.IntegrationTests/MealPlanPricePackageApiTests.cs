@@ -18,8 +18,7 @@ public sealed class MealPlanPricePackageApiTests : IAsyncLifetime
     private ApiFactory? factory;
     private HttpClient? client;
     private Guid planId;
-    private Guid weekId;
-    private Guid inactiveId;
+    private const string WeekId = "WEEK";
 
     public async Task InitializeAsync()
     {
@@ -41,6 +40,22 @@ public sealed class MealPlanPricePackageApiTests : IAsyncLifetime
         client?.Dispose();
         if (factory is not null) await factory.DisposeAsync();
         if (postgres is not null) await postgres.DisposeAsync();
+    }
+
+    [Fact]
+    public void Package_model_uses_code_as_the_database_key()
+    {
+        var options = new DbContextOptionsBuilder<DietTimeDbContext>()
+            .UseNpgsql("Host=localhost;Database=model_only;Username=test;Password=test")
+            .UseSnakeCaseNamingConvention()
+            .Options;
+        using var db = new DietTimeDbContext(options);
+        var entityType = db.Model.FindEntityType(typeof(MealPlanPricePackage));
+
+        Assert.Equal(nameof(MealPlanPricePackage.Code), Assert.Single(entityType!.FindPrimaryKey()!.Properties).Name);
+        var sql = db.MealPlanPricePackages.Select(x => new { x.Code, x.NameEn }).ToQueryString();
+        Assert.Contains("m.code", sql);
+        Assert.DoesNotContain("m.id", sql);
     }
 
     [Fact]
@@ -118,9 +133,9 @@ public sealed class MealPlanPricePackageApiTests : IAsyncLifetime
     public async Task Referenced_package_allows_label_update_but_blocks_duration_change()
     {
         if (!enabled) return;
-        await CreatePackagePriceAsync(weekId, null, 300m, DateTimeOffset.UtcNow.AddDays(-1));
+        await CreatePackagePriceAsync(WeekId, null, 300m, DateTimeOffset.UtcNow.AddDays(-1));
 
-        var labels = await client!.PutAsJsonAsync($"/api/v1/admin/meal-plan-price-packages/{weekId}", new
+        var labels = await client!.PutAsJsonAsync($"/api/v1/admin/meal-plan-price-packages/{WeekId}", new
         {
             code = "WEEK",
             nameEn = "Updated Week",
@@ -131,7 +146,7 @@ public sealed class MealPlanPricePackageApiTests : IAsyncLifetime
         });
         Assert.Equal(HttpStatusCode.NoContent, labels.StatusCode);
 
-        var duration = await client!.PutAsJsonAsync($"/api/v1/admin/meal-plan-price-packages/{weekId}", new
+        var duration = await client!.PutAsJsonAsync($"/api/v1/admin/meal-plan-price-packages/{WeekId}", new
         {
             code = "WEEK",
             nameEn = "Updated Week",
@@ -148,19 +163,19 @@ public sealed class MealPlanPricePackageApiTests : IAsyncLifetime
     public async Task Deactivation_removes_lookup_item_but_preserves_historical_pricing()
     {
         if (!enabled) return;
-        var created = await CreatePackagePriceAsync(weekId, null, 300m, DateTimeOffset.UtcNow.AddDays(-1));
+        var created = await CreatePackagePriceAsync(WeekId, null, 300m, DateTimeOffset.UtcNow.AddDays(-1));
         var priceId = await ReadCreatedIdAsync(created);
         var status = await client!.PatchAsJsonAsync(
-            $"/api/v1/admin/meal-plan-price-packages/{weekId}/status", new { isActive = false });
+            $"/api/v1/admin/meal-plan-price-packages/{WeekId}/status", new { isActive = false });
         Assert.Equal(HttpStatusCode.NoContent, status.StatusCode);
 
         var lookup = await client!.GetStringAsync("/api/v1/admin/meal-plan-price-packages/lookup");
-        Assert.DoesNotContain(weekId.ToString(), lookup, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(WeekId, lookup, StringComparison.OrdinalIgnoreCase);
         var historical = await client.GetAsync($"/api/v1/admin/meal-plan-pricing/{priceId}");
         Assert.Equal(HttpStatusCode.OK, historical.StatusCode);
         Assert.Contains("WEEK", await historical.Content.ReadAsStringAsync());
 
-        var rejected = await CreatePackagePriceAsync(weekId, null, 350m, DateTimeOffset.UtcNow.AddMonths(1));
+        var rejected = await CreatePackagePriceAsync(WeekId, null, 350m, DateTimeOffset.UtcNow.AddMonths(1));
         Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
         Assert.Contains("package_inactive", await rejected.Content.ReadAsStringAsync());
     }
@@ -170,21 +185,21 @@ public sealed class MealPlanPricePackageApiTests : IAsyncLifetime
     {
         if (!enabled) return;
         var effectiveFrom = DateTimeOffset.UtcNow.AddDays(2);
-        var created = await CreatePackagePriceAsync(weekId, null, 300m, effectiveFrom);
+        var created = await CreatePackagePriceAsync(WeekId, null, 300m, effectiveFrom);
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
 
         using var list = JsonDocument.Parse(await client!.GetStringAsync(
-            $"/api/v1/admin/meal-plan-pricing?packageId={weekId}"));
+            $"/api/v1/admin/meal-plan-pricing?packageId={WeekId}"));
         var price = Assert.Single(list.RootElement.GetProperty("data").EnumerateArray());
         Assert.Equal(6, price.GetProperty("durationDays").GetInt32());
-        Assert.Equal(weekId, price.GetProperty("mealPlanPricePackageId").GetGuid());
+        Assert.Equal(WeekId, price.GetProperty("mealPlanPricePackageId").GetString());
         Assert.Equal("WEEK", price.GetProperty("packageCode").GetString());
 
-        var mismatch = await CreatePackagePriceAsync(weekId, 7, 400m, effectiveFrom.AddMonths(2));
+        var mismatch = await CreatePackagePriceAsync(WeekId, 7, 400m, effectiveFrom.AddMonths(2));
         Assert.Equal(HttpStatusCode.BadRequest, mismatch.StatusCode);
         Assert.Contains("package_duration_mismatch", await mismatch.Content.ReadAsStringAsync());
 
-        var overlap = await CreatePackagePriceAsync(weekId, null, 325m, effectiveFrom.AddHours(1));
+        var overlap = await CreatePackagePriceAsync(WeekId, null, 325m, effectiveFrom.AddHours(1));
         Assert.Equal(HttpStatusCode.Conflict, overlap.StatusCode);
 
         var legacy = await client.PostAsJsonAsync("/api/v1/admin/meal-plan-pricing", new
@@ -203,7 +218,7 @@ public sealed class MealPlanPricePackageApiTests : IAsyncLifetime
     }
 
     private Task<HttpResponseMessage> CreatePackagePriceAsync(
-        Guid packageId, int? durationDays, decimal amount, DateTimeOffset effectiveFrom) =>
+        string packageId, int? durationDays, decimal amount, DateTimeOffset effectiveFrom) =>
         client!.PostAsJsonAsync("/api/v1/admin/meal-plan-pricing", new
         {
             mealPlanTemplateId = planId,
@@ -231,8 +246,6 @@ public sealed class MealPlanPricePackageApiTests : IAsyncLifetime
         await db.Database.EnsureCreatedAsync();
         var now = DateTimeOffset.UtcNow;
         planId = Guid.NewGuid();
-        weekId = Guid.NewGuid();
-        inactiveId = Guid.NewGuid();
         db.MealPlanTemplates.Add(new()
         {
             Id = planId,
@@ -248,9 +261,9 @@ public sealed class MealPlanPricePackageApiTests : IAsyncLifetime
             Translations = [new() { LanguageCode = "en", Name = "Package Test", CreatedAt = now, UpdatedAt = now }]
         });
         db.MealPlanPricePackages.AddRange(
-            new() { Id = Guid.NewGuid(), Code = "DAY", NameEn = "One Day", NameAr = "يوم واحد", DurationDays = 1, DisplayOrder = 1, IsActive = true, CreatedAt = now, UpdatedAt = now },
-            new() { Id = weekId, Code = "WEEK", NameEn = "One Week", NameAr = "أسبوع واحد", DurationDays = 6, DisplayOrder = 2, IsActive = true, CreatedAt = now, UpdatedAt = now },
-            new() { Id = inactiveId, Code = "MONTH", NameEn = "One Month", NameAr = "شهر واحد", DurationDays = 24, DisplayOrder = 3, IsActive = false, CreatedAt = now, UpdatedAt = now });
+            new() { Code = "DAY", NameEn = "One Day", NameAr = "يوم واحد", DurationDays = 1, DisplayOrder = 1, IsActive = true, CreatedAt = now, UpdatedAt = now },
+            new() { Code = WeekId, NameEn = "One Week", NameAr = "أسبوع واحد", DurationDays = 6, DisplayOrder = 2, IsActive = true, CreatedAt = now, UpdatedAt = now },
+            new() { Code = "MONTH", NameEn = "One Month", NameAr = "شهر واحد", DurationDays = 24, DisplayOrder = 3, IsActive = false, CreatedAt = now, UpdatedAt = now });
         await db.SaveChangesAsync();
     }
 }

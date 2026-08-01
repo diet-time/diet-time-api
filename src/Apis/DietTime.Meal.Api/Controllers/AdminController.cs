@@ -223,7 +223,7 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
         [FromQuery] Guid? mealPlanTemplateId = null,
         [FromQuery] string? status = null,
         [FromQuery] string? currencyCode = null,
-        [FromQuery] Guid? packageId = null,
+        [FromQuery] string? packageId = null,
         [FromQuery] string? packageCode = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 25,
@@ -306,8 +306,8 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
     [HttpGet("meal-plan-price-packages/lookup")]
     public async Task<ActionResult<ApiResponse<IReadOnlyList<MealPlanPricePackageLookupResponse>>>> GetMealPlanPricePackageLookup(CancellationToken ct) =>
         Ok(ApiResponse<IReadOnlyList<MealPlanPricePackageLookupResponse>>.Ok(await admin.GetMealPlanPricePackageLookupAsync(ct)));
-    [HttpGet("meal-plan-price-packages/{packageId:guid}")]
-    public async Task<ActionResult<ApiResponse<MealPlanPricePackageResponse>>> GetMealPlanPricePackage(Guid packageId, CancellationToken ct)
+    [HttpGet("meal-plan-price-packages/{packageId}")]
+    public async Task<ActionResult<ApiResponse<MealPlanPricePackageResponse>>> GetMealPlanPricePackage(string packageId, CancellationToken ct)
     {
         var package = await admin.GetMealPlanPricePackageAsync(packageId, ct);
         return package is null ? PackageNotFound() : Ok(ApiResponse<MealPlanPricePackageResponse>.Ok(package));
@@ -318,20 +318,21 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
         var result = await admin.CreateMealPlanPricePackageAsync(request, UserId, ct);
         if (result.Result == MealPlanPricePackageWriteResult.DuplicateCode)
             return PackageCodeConflict();
-        var package = await admin.GetMealPlanPricePackageAsync(result.Id!.Value, ct);
+        var package = await admin.GetMealPlanPricePackageAsync(result.Id!, ct);
         return StatusCode(StatusCodes.Status201Created, ApiResponse<MealPlanPricePackageResponse>.Ok(package!));
     }
-    [HttpPut("meal-plan-price-packages/{packageId:guid}")]
-    public async Task<IActionResult> UpdateMealPlanPricePackage(Guid packageId, UpsertMealPlanPricePackageRequest request, CancellationToken ct) =>
+    [HttpPut("meal-plan-price-packages/{packageId}")]
+    public async Task<IActionResult> UpdateMealPlanPricePackage(string packageId, UpsertMealPlanPricePackageRequest request, CancellationToken ct) =>
         await admin.UpdateMealPlanPricePackageAsync(packageId, request, UserId, ct) switch
         {
             MealPlanPricePackageWriteResult.Success => NoContent(),
             MealPlanPricePackageWriteResult.NotFound => PackageNotFound(),
             MealPlanPricePackageWriteResult.DuplicateCode => PackageCodeConflict(),
+            MealPlanPricePackageWriteResult.IdentifierChange => BadRequest(new ApiResponse<object> { Errors = [new("package_identifier_change", "Package code is the identifier and cannot be changed.", "code")] }),
             _ => Conflict(new ApiResponse<object> { Errors = [new("package_duration_in_use", "Duration days cannot be changed because the package is referenced by pricing history.", "durationDays")] })
         };
-    [HttpPatch("meal-plan-price-packages/{packageId:guid}/status")]
-    public async Task<IActionResult> SetMealPlanPricePackageStatus(Guid packageId, SetMealPlanPricePackageStatusRequest request, CancellationToken ct) =>
+    [HttpPatch("meal-plan-price-packages/{packageId}/status")]
+    public async Task<IActionResult> SetMealPlanPricePackageStatus(string packageId, SetMealPlanPricePackageStatusRequest request, CancellationToken ct) =>
         await admin.SetMealPlanPricePackageStatusAsync(packageId, request.IsActive, UserId, ct) == AdminWriteResult.Success
             ? NoContent()
             : PackageNotFound();
@@ -346,7 +347,7 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
     {
         var errors = new List<ApiError>();
         if (request.MealPlanTemplateId == Guid.Empty) errors.Add(new("required", "Meal plan template is required.", "mealPlanTemplateId"));
-        if (!request.MealPlanPricePackageId.HasValue && request.DurationDays is not > 0) errors.Add(new("positive_number", "Duration days must be greater than zero when a package is not supplied.", "durationDays"));
+        if (string.IsNullOrWhiteSpace(request.MealPlanPricePackageId) && request.DurationDays is not > 0) errors.Add(new("positive_number", "Duration days must be greater than zero when a package is not supplied.", "durationDays"));
         if (request.DurationDays.HasValue && request.DurationDays <= 0) errors.Add(new("positive_number", "Duration days must be greater than zero.", "durationDays"));
         if (request.MealsPerDay <= 0) errors.Add(new("positive_number", "Meals per day must be greater than zero.", "mealsPerDay"));
         if (request.SnacksPerDay < 0) errors.Add(new("non_negative_number", "Snacks per day cannot be negative.", "snacksPerDay"));

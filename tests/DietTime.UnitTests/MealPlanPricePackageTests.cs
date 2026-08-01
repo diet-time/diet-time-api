@@ -51,7 +51,7 @@ public sealed class MealPlanPricePackageTests
         var legacy = new UpsertMealPlanPriceRequest(
             Guid.NewGuid(), 6, 3, 1, "QAR", 300m,
             DateTimeOffset.Parse("2026-08-01T00:00:00Z"), null, true);
-        var packageId = Guid.NewGuid();
+        const string packageId = "WEEK";
         var packaged = legacy with { DurationDays = null, MealPlanPricePackageId = packageId };
 
         Assert.Equal(6, legacy.DurationDays);

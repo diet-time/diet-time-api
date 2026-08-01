@@ -4,7 +4,7 @@ using DietTime.Domain;
 namespace DietTime.Application;
 
 public enum AdminWriteResult { Success, NotFound, Conflict }
-public enum MealPlanPricePackageWriteResult { Success, NotFound, DuplicateCode, DurationInUse }
+public enum MealPlanPricePackageWriteResult { Success, NotFound, DuplicateCode, DurationInUse, IdentifierChange }
 public enum MealPlanPriceWriteStatus
 {
     Success,
@@ -184,7 +184,7 @@ public interface IAdminMealService
     Task<VersionedUpdateResponse?> UpdatePlanAsync(Guid planId, CreatePlanRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<AdminPlanImageResponse?> AddPlanImageAsync(Guid planId, SaveMediaRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<bool> DeletePlanAsync(Guid planId, CancellationToken cancellationToken);
-    Task<PagedResult<AdminMealPlanPriceResponse>> GetMealPlanPricesAsync(string? search, Guid? mealPlanTemplateId, string? status, string? currencyCode, Guid? packageId, string? packageCode, int page, int pageSize, CancellationToken cancellationToken);
+    Task<PagedResult<AdminMealPlanPriceResponse>> GetMealPlanPricesAsync(string? search, Guid? mealPlanTemplateId, string? status, string? currencyCode, string? packageId, string? packageCode, int page, int pageSize, CancellationToken cancellationToken);
     Task<AdminMealPlanPriceResponse?> GetMealPlanPriceAsync(Guid priceId, CancellationToken cancellationToken);
     Task<AdminMealPlanPriceSummaryResponse> GetMealPlanPriceSummaryAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<string>> GetMealPlanPriceCurrenciesAsync(CancellationToken cancellationToken);
@@ -194,10 +194,10 @@ public interface IAdminMealService
     Task<AdminWriteResult> DeleteMealPlanPriceAsync(Guid priceId, CancellationToken cancellationToken);
     Task<PagedResult<MealPlanPricePackageResponse>> GetMealPlanPricePackagesAsync(string? search, bool? isActive, string? sortBy, string? sortDirection, int page, int pageSize, CancellationToken cancellationToken);
     Task<IReadOnlyList<MealPlanPricePackageLookupResponse>> GetMealPlanPricePackageLookupAsync(CancellationToken cancellationToken);
-    Task<MealPlanPricePackageResponse?> GetMealPlanPricePackageAsync(Guid packageId, CancellationToken cancellationToken);
-    Task<(MealPlanPricePackageWriteResult Result, Guid? Id)> CreateMealPlanPricePackageAsync(UpsertMealPlanPricePackageRequest request, Guid? userId, CancellationToken cancellationToken);
-    Task<MealPlanPricePackageWriteResult> UpdateMealPlanPricePackageAsync(Guid packageId, UpsertMealPlanPricePackageRequest request, Guid? userId, CancellationToken cancellationToken);
-    Task<AdminWriteResult> SetMealPlanPricePackageStatusAsync(Guid packageId, bool isActive, Guid? userId, CancellationToken cancellationToken);
+    Task<MealPlanPricePackageResponse?> GetMealPlanPricePackageAsync(string packageId, CancellationToken cancellationToken);
+    Task<(MealPlanPricePackageWriteResult Result, string? Id)> CreateMealPlanPricePackageAsync(UpsertMealPlanPricePackageRequest request, Guid? userId, CancellationToken cancellationToken);
+    Task<MealPlanPricePackageWriteResult> UpdateMealPlanPricePackageAsync(string packageId, UpsertMealPlanPricePackageRequest request, Guid? userId, CancellationToken cancellationToken);
+    Task<AdminWriteResult> SetMealPlanPricePackageStatusAsync(string packageId, bool isActive, Guid? userId, CancellationToken cancellationToken);
     Task<IReadOnlyList<MealPlanTemplateDayResponse>?> GetTemplateDaysAsync(Guid templateId, CancellationToken cancellationToken);
     Task<Guid?> CreateTemplateDayAsync(Guid templateId, UpsertMealPlanTemplateDayRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<bool> UpdateTemplateDayAsync(Guid templateId, Guid dayId, UpsertMealPlanTemplateDayRequest request, Guid? userId, CancellationToken cancellationToken);

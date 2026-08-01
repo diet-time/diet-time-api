@@ -414,7 +414,7 @@ public sealed record AdminMealPlanPriceResponse(
     bool IsActive,
     string Status,
     bool CanDelete,
-    Guid? MealPlanPricePackageId = null,
+    string? MealPlanPricePackageId = null,
     string? PackageCode = null,
     string? PackageNameEn = null,
     string? PackageNameAr = null);
@@ -429,10 +429,10 @@ public sealed record UpsertMealPlanPriceRequest(
     DateTimeOffset EffectiveFrom,
     DateTimeOffset? EffectiveUntil,
     bool IsActive,
-    Guid? MealPlanPricePackageId = null);
+    string? MealPlanPricePackageId = null);
 public sealed record SetMealPlanPriceStatusRequest(bool IsActive);
 public sealed record MealPlanPricePackageResponse(
-    Guid Id,
+    string Id,
     string Code,
     string NameEn,
     string NameAr,
@@ -442,7 +442,7 @@ public sealed record MealPlanPricePackageResponse(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 public sealed record MealPlanPricePackageLookupResponse(
-    Guid Id,
+    string Id,
     string Code,
     string Name,
     string NameEn,
