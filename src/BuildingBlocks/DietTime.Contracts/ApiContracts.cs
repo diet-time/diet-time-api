@@ -24,7 +24,12 @@ public sealed record PlanCategoryResponse(
     decimal? DailyCaloriesKcal,
     decimal? StartingPrice,
     string? CurrencyCode,
-    int? PriceDurationDays);
+    int? PriceDurationDays,
+    decimal? DisplayDailyPrice,
+    bool HasActivePrice,
+    Guid? PricingRecordId,
+    string? SourcePackageCode,
+    int? SourceDurationDays);
 public sealed record PlanPriceResponse(int DurationDays, int MealsPerDay, int SnacksPerDay, decimal Amount, string CurrencyCode);
 public sealed record MealPlanResponse(Guid Id, string Code, string Name, string? Description, string PlanType, int DurationDays, bool IsCustomizable, IReadOnlyList<PlanPriceResponse> Prices, IReadOnlyList<MealTypeResponse> SupportedMealTypes);
 public sealed record CalendarDayResponse(Guid TemplateDayId, DateOnly Date, MenuWeekday MenuWeekday, string DayShortName, string DayName, bool IsAvailable);

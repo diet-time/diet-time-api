@@ -27,15 +27,17 @@ public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService st
                     .ThenBy(m => m.DisplayOrder)
                     .Select(m => new { m.PublicUrl, m.ObjectKey, m.ThumbnailUrl, m.ThumbnailObjectKey })
                     .FirstOrDefault(),
-                Price = p.Prices
+                Prices = p.Prices
                     .Where(price =>
                         price.IsActive &&
                         price.EffectiveFrom <= now &&
                         (price.EffectiveUntil == null || price.EffectiveUntil > now))
-                    .OrderBy(price => price.Amount)
-                    .ThenBy(price => price.DurationDays)
-                    .Select(price => new { price.Amount, price.CurrencyCode, price.DurationDays })
-                    .FirstOrDefault()
+                    .Select(price => new PlanCardPriceCandidate(
+                        price.Id,
+                        price.Amount,
+                        price.CurrencyCode,
+                        price.DurationDays))
+                    .ToList()
             }).ToListAsync(ct);
 
         var planIds = rows.Select(row => row.Id).ToArray();
@@ -78,20 +80,46 @@ public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService st
                                 .CaloriesKcal)),
                     0));
 
-        return rows.Select(x => new PlanCategoryResponse(
-            x.Id,
-            x.Code,
-            x.Name,
-            x.Description,
-            x.PlanMedia is null
-                ? null
-                : Image(x.PlanMedia.ThumbnailUrl ?? x.PlanMedia.PublicUrl, x.PlanMedia.ThumbnailObjectKey ?? x.PlanMedia.ObjectKey, true),
-            false,
-            dailyCaloriesByPlan.GetValueOrDefault(x.Id),
-            x.Price?.Amount,
-            x.Price?.CurrencyCode.Trim(),
-            x.Price?.DurationDays)).ToArray();
+        return rows.Select(x =>
+        {
+            var price = SelectPlanCardPrice(x.Prices);
+            var dailyPrice = price is null
+                ? (decimal?)null
+                : decimal.Round(price.Amount / price.DurationDays, 4, MidpointRounding.AwayFromZero);
+            return new PlanCategoryResponse(
+                x.Id,
+                x.Code,
+                x.Name,
+                x.Description,
+                x.PlanMedia is null
+                    ? null
+                    : Image(x.PlanMedia.ThumbnailUrl ?? x.PlanMedia.PublicUrl, x.PlanMedia.ThumbnailObjectKey ?? x.PlanMedia.ObjectKey, true),
+                false,
+                dailyCaloriesByPlan.GetValueOrDefault(x.Id),
+                price?.Amount,
+                price?.CurrencyCode.Trim(),
+                price?.DurationDays,
+                dailyPrice,
+                price is not null,
+                price?.Id,
+                null,
+                price?.DurationDays);
+        }).ToArray();
     }
+
+    private static PlanCardPriceCandidate? SelectPlanCardPrice(
+        IEnumerable<PlanCardPriceCandidate> prices) => prices
+        .Where(price => price.DurationDays > 0)
+        .OrderBy(price => price.DurationDays == 1 ? 0 : 1)
+        .ThenBy(price => price.Amount / price.DurationDays)
+        .ThenBy(price => price.DurationDays)
+        .FirstOrDefault();
+
+    private sealed record PlanCardPriceCandidate(
+        Guid Id,
+        decimal Amount,
+        string CurrencyCode,
+        int DurationDays);
 
     public async Task<MealPlanResponse?> GetPlanAsync(Guid planId, string language, DateOnly today, CancellationToken ct)
     {
