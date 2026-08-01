@@ -113,6 +113,42 @@ public sealed class CustomerProfileApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Temporary_phone_reuses_the_same_user_and_profile()
+    {
+        if (!enabled) return;
+        client!.DefaultRequestHeaders.Remove("X-Development-User-Id");
+        client.DefaultRequestHeaders.Remove("X-Temporary-Customer-Phone");
+        client.DefaultRequestHeaders.Add(
+            "X-Temporary-Customer-Phone",
+            "+974 7445 2435");
+
+        var saved = await client.PutAsJsonAsync(
+            "/api/v1/customer/profile",
+            CompleteRequest());
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        using var savedJson = JsonDocument.Parse(
+            await saved.Content.ReadAsStringAsync());
+        var temporaryUserId = savedJson.RootElement
+            .GetProperty("data")
+            .GetProperty("userId")
+            .GetGuid();
+
+        var loaded = await client.GetAsync("/api/v1/customer/profile");
+        Assert.Equal(HttpStatusCode.OK, loaded.StatusCode);
+        using var loadedJson = JsonDocument.Parse(
+            await loaded.Content.ReadAsStringAsync());
+        Assert.Equal(
+            temporaryUserId,
+            loadedJson.RootElement.GetProperty("data").GetProperty("userId").GetGuid());
+
+        using var verificationScope = factory!.Services.CreateScope();
+        var verificationDb = verificationScope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
+        var user = await verificationDb.Users.SingleAsync(x => x.Id == temporaryUserId);
+        Assert.Equal("+97474452435", user.PhoneNumber);
+        Assert.Equal("mobile+97474452435@diettime.local", user.UserName);
+    }
+
+    [Fact]
     public async Task Updates_existing_children_in_place_and_empty_lists_remove_them()
     {
         if (!enabled) return;
