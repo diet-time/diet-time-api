@@ -294,7 +294,7 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
     {
         if (page < 1 || pageSize is < 1 or > 100)
             return BadRequest(new ApiResponse<object> { Errors = [new("invalid_pagination", "Page must be positive and pageSize must be between 1 and 100.")] });
-        var allowedSorts = new[] { "code", "nameEn", "nameAr", "durationDays", "displayOrder", "isActive", "createdAt", "updatedAt" };
+        var allowedSorts = new[] { "code", "nameEn", "nameAr", "durationDays", "displayOrder", "isActive" };
         if (!string.IsNullOrWhiteSpace(sortBy) && !allowedSorts.Contains(sortBy, StringComparer.OrdinalIgnoreCase))
             return BadRequest(new ApiResponse<object> { Errors = [new("invalid_sort", "The requested sort field is not supported.", "sortBy")] });
         if (!string.IsNullOrWhiteSpace(sortDirection) && !new[] { "asc", "desc" }.Contains(sortDirection, StringComparer.OrdinalIgnoreCase))

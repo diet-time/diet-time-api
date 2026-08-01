@@ -98,10 +98,6 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
             e.Property(x => x.DurationDays).HasColumnName("duration_days").IsRequired();
             e.Property(x => x.DisplayOrder).HasColumnName("display_order").IsRequired();
             e.Property(x => x.IsActive).HasColumnName("is_active").IsRequired();
-            e.Property(x => x.CreatedAt).HasColumnName("created_at");
-            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
-            e.Property(x => x.CreatedBy).HasColumnName("created_by");
-            e.Property(x => x.UpdatedBy).HasColumnName("updated_by");
             e.ToTable(t =>
             {
                 t.HasCheckConstraint("ck_meal_plan_price_packages_duration", "duration_days > 0");

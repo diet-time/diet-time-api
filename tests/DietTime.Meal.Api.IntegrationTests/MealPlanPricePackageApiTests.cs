@@ -56,6 +56,11 @@ public sealed class MealPlanPricePackageApiTests : IAsyncLifetime
         var sql = db.MealPlanPricePackages.Select(x => new { x.Code, x.NameEn }).ToQueryString();
         Assert.Contains("m.code", sql);
         Assert.DoesNotContain("m.id", sql);
+        var fullPackageSql = db.MealPlanPricePackages.ToQueryString();
+        Assert.DoesNotContain("created_at", fullPackageSql);
+        Assert.DoesNotContain("updated_at", fullPackageSql);
+        Assert.DoesNotContain("created_by", fullPackageSql);
+        Assert.DoesNotContain("updated_by", fullPackageSql);
         var pricingSql = db.MealPlanPrices.Select(price => new
         {
             price.Id,
@@ -271,9 +276,9 @@ public sealed class MealPlanPricePackageApiTests : IAsyncLifetime
             Translations = [new() { LanguageCode = "en", Name = "Package Test", CreatedAt = now, UpdatedAt = now }]
         });
         db.MealPlanPricePackages.AddRange(
-            new() { Code = "DAY", NameEn = "One Day", NameAr = "يوم واحد", DurationDays = 1, DisplayOrder = 1, IsActive = true, CreatedAt = now, UpdatedAt = now },
-            new() { Code = WeekId, NameEn = "One Week", NameAr = "أسبوع واحد", DurationDays = 6, DisplayOrder = 2, IsActive = true, CreatedAt = now, UpdatedAt = now },
-            new() { Code = "MONTH", NameEn = "One Month", NameAr = "شهر واحد", DurationDays = 24, DisplayOrder = 3, IsActive = false, CreatedAt = now, UpdatedAt = now });
+            new() { Code = "DAY", NameEn = "One Day", NameAr = "يوم واحد", DurationDays = 1, DisplayOrder = 1, IsActive = true },
+            new() { Code = WeekId, NameEn = "One Week", NameAr = "أسبوع واحد", DurationDays = 6, DisplayOrder = 2, IsActive = true },
+            new() { Code = "MONTH", NameEn = "One Month", NameAr = "شهر واحد", DurationDays = 24, DisplayOrder = 3, IsActive = false });
         await db.SaveChangesAsync();
     }
 }

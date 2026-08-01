@@ -439,8 +439,8 @@ public sealed record MealPlanPricePackageResponse(
     int DurationDays,
     int DisplayOrder,
     bool IsActive,
-    DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset? CreatedAt,
+    DateTimeOffset? UpdatedAt);
 public sealed record MealPlanPricePackageLookupResponse(
     string Id,
     string Code,

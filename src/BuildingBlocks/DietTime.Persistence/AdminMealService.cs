@@ -1261,10 +1261,6 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             ("displayorder", false) => query.OrderBy(x => x.DisplayOrder),
             ("isactive", true) => query.OrderByDescending(x => x.IsActive),
             ("isactive", false) => query.OrderBy(x => x.IsActive),
-            ("createdat", true) => query.OrderByDescending(x => x.CreatedAt),
-            ("createdat", false) => query.OrderBy(x => x.CreatedAt),
-            ("updatedat", true) => query.OrderByDescending(x => x.UpdatedAt),
-            ("updatedat", false) => query.OrderBy(x => x.UpdatedAt),
             _ => query.OrderBy(x => x.DisplayOrder)
         };
         if (string.IsNullOrWhiteSpace(sortBy))
@@ -1276,7 +1272,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         var rows = await ordered.Skip((page - 1) * pageSize).Take(pageSize)
             .Select(x => new MealPlanPricePackageResponse(
                 x.Code, x.Code, x.NameEn, x.NameAr, x.DurationDays, x.DisplayOrder,
-                x.IsActive, x.CreatedAt, x.UpdatedAt))
+                x.IsActive, null, null))
             .ToListAsync(ct);
         return new(rows, new(page, pageSize, count, (int)Math.Ceiling(count / (double)pageSize)));
     }
@@ -1296,7 +1292,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             .Where(x => x.Code == NormalizePackageCode(packageId))
             .Select(x => new MealPlanPricePackageResponse(
                 x.Code, x.Code, x.NameEn, x.NameAr, x.DurationDays, x.DisplayOrder,
-                x.IsActive, x.CreatedAt, x.UpdatedAt))
+                x.IsActive, null, null))
             .SingleOrDefaultAsync(ct);
 
     public async Task<(MealPlanPricePackageWriteResult Result, string? Id)> CreateMealPlanPricePackageAsync(
@@ -1307,7 +1303,6 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         var code = NormalizePackageCode(request.Code);
         if (await db.MealPlanPricePackages.AnyAsync(x => x.Code.ToUpper() == code, ct))
             return (MealPlanPricePackageWriteResult.DuplicateCode, null);
-        var now = clock.GetUtcNow();
         var package = new MealPlanPricePackage
         {
             Code = code,
@@ -1315,11 +1310,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             NameAr = request.NameAr.Trim(),
             DurationDays = request.DurationDays,
             DisplayOrder = request.DisplayOrder,
-            IsActive = request.IsActive,
-            CreatedAt = now,
-            UpdatedAt = now,
-            CreatedBy = userId,
-            UpdatedBy = userId
+            IsActive = request.IsActive
         };
         db.MealPlanPricePackages.Add(package);
         await db.SaveChangesAsync(ct);
@@ -1349,8 +1340,6 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         package.DurationDays = request.DurationDays;
         package.DisplayOrder = request.DisplayOrder;
         package.IsActive = request.IsActive;
-        package.UpdatedAt = clock.GetUtcNow();
-        package.UpdatedBy = userId;
         await db.SaveChangesAsync(ct);
         return MealPlanPricePackageWriteResult.Success;
     }
@@ -1366,8 +1355,6 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         if (package is null)
             return AdminWriteResult.NotFound;
         package.IsActive = isActive;
-        package.UpdatedAt = clock.GetUtcNow();
-        package.UpdatedBy = userId;
         await db.SaveChangesAsync(ct);
         return AdminWriteResult.Success;
     }
