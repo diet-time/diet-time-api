@@ -61,12 +61,9 @@ public sealed class MealPlanPricePackageTests
     }
 
     [Fact]
-    public void Package_entity_preserves_historical_price_navigation()
+    public void Pricing_entity_does_not_require_a_nonexistent_package_foreign_key()
     {
-        var package = new MealPlanPricePackage { Code = "WEEK", DurationDays = 6 };
-        package.Prices.Add(new MealPlanPrice { DurationDays = 6, Package = package });
-
-        Assert.Single(package.Prices);
-        Assert.Equal(6, package.Prices.Single().DurationDays);
+        Assert.Null(typeof(MealPlanPrice).GetProperty("MealPlanPricePackageId"));
+        Assert.Null(typeof(MealPlanPrice).GetProperty("Package"));
     }
 }

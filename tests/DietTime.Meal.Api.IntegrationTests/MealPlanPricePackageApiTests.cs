@@ -56,6 +56,16 @@ public sealed class MealPlanPricePackageApiTests : IAsyncLifetime
         var sql = db.MealPlanPricePackages.Select(x => new { x.Code, x.NameEn }).ToQueryString();
         Assert.Contains("m.code", sql);
         Assert.DoesNotContain("m.id", sql);
+        var pricingSql = db.MealPlanPrices.Select(price => new
+        {
+            price.Id,
+            PackageCode = db.MealPlanPricePackages
+                .Where(package => package.DurationDays == price.DurationDays)
+                .OrderBy(package => package.DisplayOrder)
+                .Select(package => package.Code)
+                .FirstOrDefault()
+        }).ToQueryString();
+        Assert.DoesNotContain("meal_plan_price_package_id", pricingSql);
     }
 
     [Fact]

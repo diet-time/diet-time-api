@@ -111,13 +111,10 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
         b.Entity<MealPlanPrice>(e =>
         {
             e.ToTable("meal_plan_prices");
-            e.Property(x => x.MealPlanPricePackageId).HasColumnName("meal_plan_price_package_id").HasMaxLength(50);
             e.Property(x => x.Amount).HasPrecision(12, 2);
             e.Property(x => x.CurrencyCode).HasColumnType("char(3)");
             e.HasIndex(x => new { x.MealPlanTemplateId, x.DurationDays, x.MealsPerDay, x.SnacksPerDay, x.CurrencyCode }).HasDatabaseName("ix_meal_plan_prices_package");
-            e.HasIndex(x => x.MealPlanPricePackageId).HasDatabaseName("ix_meal_plan_prices_price_package");
             e.HasOne(x => x.Plan).WithMany(x => x.Prices).HasForeignKey(x => x.MealPlanTemplateId).OnDelete(DeleteBehavior.Restrict);
-            e.HasOne(x => x.Package).WithMany(x => x.Prices).HasForeignKey(x => x.MealPlanPricePackageId).HasPrincipalKey(x => x.Code).OnDelete(DeleteBehavior.Restrict);
         });
     }
 

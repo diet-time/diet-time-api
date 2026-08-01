@@ -105,15 +105,12 @@ public sealed class MealPlanPricePackage
     public DateTimeOffset UpdatedAt { get; set; }
     public Guid? CreatedBy { get; set; }
     public Guid? UpdatedBy { get; set; }
-    public ICollection<MealPlanPrice> Prices { get; set; } = [];
 }
 
 public sealed class MealPlanPrice : Entity
 {
     public Guid MealPlanTemplateId { get; set; }
     public MealPlanTemplate Plan { get; set; } = null!;
-    public string? MealPlanPricePackageId { get; set; }
-    public MealPlanPricePackage? Package { get; set; }
     public int DurationDays { get; set; }
     public int MealsPerDay { get; set; }
     public int SnacksPerDay { get; set; }
