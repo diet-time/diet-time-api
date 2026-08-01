@@ -37,6 +37,7 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
     public DbSet<MealPlanTemplateSlotTranslation> MealPlanTemplateSlotTranslations => Set<MealPlanTemplateSlotTranslation>();
     public DbSet<MealPlanSlotOption> MealPlanSlotOptions => Set<MealPlanSlotOption>();
     public DbSet<MealPlanPrice> MealPlanPrices => Set<MealPlanPrice>();
+    public DbSet<MealPlanPricePackage> MealPlanPricePackages => Set<MealPlanPricePackage>();
     public DbSet<CustomerProfile> CustomerProfiles => Set<CustomerProfile>();
     public DbSet<CustomerNutritionTarget> CustomerNutritionTargets => Set<CustomerNutritionTarget>();
     public DbSet<CustomerProfilePreference> CustomerProfilePreferences => Set<CustomerProfilePreference>();
@@ -87,7 +88,37 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
         b.Entity<MealPlanTemplateSlot>(e => { e.ToTable("meal_plan_template_slots"); e.Property(x => x.RowVersion).IsConcurrencyToken(); e.HasIndex(x => new { x.MealPlanTemplateDayId, x.MealTypeId }).IsUnique(); e.HasOne(x => x.Day).WithMany(x => x.Slots).HasForeignKey(x => x.MealPlanTemplateDayId).OnDelete(DeleteBehavior.Cascade); e.HasOne(x => x.MealType).WithMany().HasForeignKey(x => x.MealTypeId).OnDelete(DeleteBehavior.Restrict); });
         Translation<MealPlanTemplateSlotTranslation>(b, "meal_plan_template_slot_translations", 10); b.Entity<MealPlanTemplateSlotTranslation>(e => { e.HasIndex(x => new { x.MealPlanTemplateSlotId, x.LanguageCode }).IsUnique(); e.HasOne(x => x.Slot).WithMany(x => x.Translations).HasForeignKey(x => x.MealPlanTemplateSlotId).OnDelete(DeleteBehavior.Cascade); });
         b.Entity<MealPlanSlotOption>(e => { e.ToTable("meal_plan_slot_options"); e.Property(x => x.AdditionalPrice).HasPrecision(12, 2); e.HasIndex(x => x.MealPlanTemplateSlotId).HasDatabaseName("ix_meal_plan_slot_options_slot"); e.HasIndex(x => x.MealItemId).HasDatabaseName("ix_meal_plan_slot_options_meal"); e.HasOne(x => x.Slot).WithMany(x => x.Options).HasForeignKey(x => x.MealPlanTemplateSlotId).OnDelete(DeleteBehavior.Cascade); e.HasOne(x => x.MealItem).WithMany().HasForeignKey(x => x.MealItemId).OnDelete(DeleteBehavior.Restrict); });
-        b.Entity<MealPlanPrice>(e => { e.ToTable("meal_plan_prices"); e.Property(x => x.Amount).HasPrecision(12, 2); e.Property(x => x.CurrencyCode).HasColumnType("char(3)"); e.HasIndex(x => new { x.MealPlanTemplateId, x.DurationDays, x.MealsPerDay, x.SnacksPerDay, x.CurrencyCode }).HasDatabaseName("ix_meal_plan_prices_package"); e.HasOne(x => x.Plan).WithMany(x => x.Prices).HasForeignKey(x => x.MealPlanTemplateId).OnDelete(DeleteBehavior.Restrict); });
+        b.Entity<MealPlanPricePackage>(e =>
+        {
+            e.ToTable("meal_plan_price_packages", "public");
+            e.Property(x => x.Code).HasColumnName("code").HasMaxLength(50).IsRequired();
+            e.Property(x => x.NameEn).HasColumnName("name_en").HasMaxLength(100).IsRequired();
+            e.Property(x => x.NameAr).HasColumnName("name_ar").HasMaxLength(100).IsRequired();
+            e.Property(x => x.DurationDays).HasColumnName("duration_days").IsRequired();
+            e.Property(x => x.DisplayOrder).HasColumnName("display_order").IsRequired();
+            e.Property(x => x.IsActive).HasColumnName("is_active").IsRequired();
+            e.Property(x => x.CreatedAt).HasColumnName("created_at");
+            e.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+            e.Property(x => x.CreatedBy).HasColumnName("created_by");
+            e.Property(x => x.UpdatedBy).HasColumnName("updated_by");
+            e.HasIndex(x => x.Code).IsUnique().HasDatabaseName("ux_meal_plan_price_packages_code");
+            e.ToTable(t =>
+            {
+                t.HasCheckConstraint("ck_meal_plan_price_packages_duration", "duration_days > 0");
+                t.HasCheckConstraint("ck_meal_plan_price_packages_display_order", "display_order >= 0");
+            });
+        });
+        b.Entity<MealPlanPrice>(e =>
+        {
+            e.ToTable("meal_plan_prices");
+            e.Property(x => x.MealPlanPricePackageId).HasColumnName("meal_plan_price_package_id");
+            e.Property(x => x.Amount).HasPrecision(12, 2);
+            e.Property(x => x.CurrencyCode).HasColumnType("char(3)");
+            e.HasIndex(x => new { x.MealPlanTemplateId, x.DurationDays, x.MealsPerDay, x.SnacksPerDay, x.CurrencyCode }).HasDatabaseName("ix_meal_plan_prices_package");
+            e.HasIndex(x => x.MealPlanPricePackageId).HasDatabaseName("ix_meal_plan_prices_price_package");
+            e.HasOne(x => x.Plan).WithMany(x => x.Prices).HasForeignKey(x => x.MealPlanTemplateId).OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(x => x.Package).WithMany(x => x.Prices).HasForeignKey(x => x.MealPlanPricePackageId).OnDelete(DeleteBehavior.Restrict);
+        });
     }
 
     private static void Translation<T>(ModelBuilder b, string table, int languageLength) where T : Translation

@@ -413,19 +413,50 @@ public sealed record AdminMealPlanPriceResponse(
     DateTimeOffset? EffectiveUntil,
     bool IsActive,
     string Status,
-    bool CanDelete);
+    bool CanDelete,
+    Guid? MealPlanPricePackageId = null,
+    string? PackageCode = null,
+    string? PackageNameEn = null,
+    string? PackageNameAr = null);
 public sealed record AdminMealPlanPriceSummaryResponse(int Active, int Scheduled, int Expired, int Inactive);
 public sealed record UpsertMealPlanPriceRequest(
     Guid MealPlanTemplateId,
-    int DurationDays,
+    int? DurationDays,
     int MealsPerDay,
     int SnacksPerDay,
     string CurrencyCode,
     decimal Amount,
     DateTimeOffset EffectiveFrom,
     DateTimeOffset? EffectiveUntil,
-    bool IsActive);
+    bool IsActive,
+    Guid? MealPlanPricePackageId = null);
 public sealed record SetMealPlanPriceStatusRequest(bool IsActive);
+public sealed record MealPlanPricePackageResponse(
+    Guid Id,
+    string Code,
+    string NameEn,
+    string NameAr,
+    int DurationDays,
+    int DisplayOrder,
+    bool IsActive,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+public sealed record MealPlanPricePackageLookupResponse(
+    Guid Id,
+    string Code,
+    string Name,
+    string NameEn,
+    string NameAr,
+    int DurationDays,
+    int DisplayOrder);
+public sealed record UpsertMealPlanPricePackageRequest(
+    string Code,
+    string NameEn,
+    string NameAr,
+    int DurationDays,
+    int DisplayOrder,
+    bool IsActive);
+public sealed record SetMealPlanPricePackageStatusRequest(bool IsActive);
 public sealed record UpsertPlanOptionRequest(Guid MealItemId, decimal AdditionalPrice, bool IsDefault, bool IsAvailable, int DisplayOrder);
 public sealed record UpsertPlanSlotRequest(Guid MealTypeId, int DisplayOrder, int MinimumSelection, int MaximumSelection, bool IsRequired, TimeOnly? SelectionCutoffTime, bool AllowsPaidUpgrade, IReadOnlyList<UpsertPlanOptionRequest> Options);
 public sealed record UpsertPlanDayRequest(MenuWeekday? MenuWeekday, int DisplayOrder, bool IsActive, IReadOnlyList<UpsertPlanSlotRequest> Slots);

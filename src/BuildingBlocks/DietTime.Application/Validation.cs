@@ -241,3 +241,20 @@ public sealed class UpsertMealPlanTemplateDayRequestValidator : AbstractValidato
         RuleFor(x => x.DisplayOrder).GreaterThan(0);
     }
 }
+
+public sealed class UpsertMealPlanPricePackageRequestValidator
+    : AbstractValidator<UpsertMealPlanPricePackageRequest>
+{
+    public UpsertMealPlanPricePackageRequestValidator()
+    {
+        RuleFor(x => x.Code)
+            .NotEmpty()
+            .MaximumLength(50)
+            .Matches("^[\\p{L}\\p{N}_ -]+$")
+            .WithMessage("Code may contain letters, numbers, spaces, underscores, and hyphens.");
+        RuleFor(x => x.NameEn).NotEmpty().MaximumLength(100);
+        RuleFor(x => x.NameAr).NotEmpty().MaximumLength(100);
+        RuleFor(x => x.DurationDays).GreaterThan(0);
+        RuleFor(x => x.DisplayOrder).GreaterThanOrEqualTo(0);
+    }
+}
