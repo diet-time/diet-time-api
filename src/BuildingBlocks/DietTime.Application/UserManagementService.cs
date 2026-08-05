@@ -40,9 +40,6 @@ public interface IMenuService
     Task<PagedResult<MenuResponse>> GetAllAsync(int page, int pageSize, int? menuLevel = null, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<MenuResponse>> GetMainMenusAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<MenuResponse>> GetSubMenusByParentAsync(Guid parentMenuId, CancellationToken cancellationToken);
-    Task<Guid> CreateAsync(CreateMenuRequest request, string? createdBy, CancellationToken cancellationToken);
-    Task<bool> UpdateAsync(Guid id, UpdateMenuRequest request, string? modifiedBy, CancellationToken cancellationToken);
-    Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken);
 }
 
 public interface IRoleMenuMappingService
@@ -58,6 +55,18 @@ public interface IRoleMenuMappingService
 public interface IUserMenuService
 {
     Task<IReadOnlyList<MenuResponse>> GetMenusByUserIdAsync(Guid userId, CancellationToken cancellationToken);
+}
+
+public interface IAccessControlService
+{
+    Task<IReadOnlyList<ScreenPermissionResponse>> GetScreensAsync(CancellationToken cancellationToken);
+    Task<IReadOnlyList<AccessRoleResponse>> GetRolesAsync(CancellationToken cancellationToken);
+    Task<Guid> CreateRoleAsync(SaveAccessRoleRequest request, string actor, CancellationToken cancellationToken);
+    Task<bool> UpdateRoleAsync(Guid roleId, SaveAccessRoleRequest request, string actor, CancellationToken cancellationToken);
+    Task<IReadOnlyList<AccessUserResponse>> GetUsersAsync(CancellationToken cancellationToken);
+    Task<Guid> CreateUserAsync(CreateAccessUserRequest request, string actor, CancellationToken cancellationToken);
+    Task<bool> UpdateUserAsync(Guid profileId, UpdateAccessUserRequest request, string actor, CancellationToken cancellationToken);
+    Task<IReadOnlyList<ScreenPermissionResponse>> GetUserScreensAsync(Guid userId, CancellationToken cancellationToken);
 }
 
 public interface IPasswordService

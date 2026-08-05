@@ -3,6 +3,7 @@ using DietTime.Application;
 using DietTime.Contracts;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace DietTime.Meal.Api.Controllers;
 
@@ -57,7 +58,7 @@ public sealed class UserProfilesController(IUserProfileService service, ILogger<
         [FromBody] CreateUserProfileRequest request,
         CancellationToken cancellationToken = default)
     {
-        var userId = User.FindFirst("sub")?.Value;
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
         var result = await service.CreateAsync(request, userId, cancellationToken);
         return CreatedAtAction(nameof(GetById), new { id = result }, result);
     }
@@ -73,7 +74,7 @@ public sealed class UserProfilesController(IUserProfileService service, ILogger<
         [FromBody] UpdateUserProfileRequest request,
         CancellationToken cancellationToken = default)
     {
-        var userId = User.FindFirst("sub")?.Value;
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
         var result = await service.UpdateAsync(id, request, userId, cancellationToken);
         if (!result)
@@ -151,7 +152,7 @@ public sealed class CustomersController(ICustomerService service, ILogger<Custom
         [FromBody] CreateCustomerRequest request,
         CancellationToken cancellationToken = default)
     {
-        var userId = User.FindFirst("sub")?.Value;
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
         var result = await service.CreateAsync(request, userId, cancellationToken);
         return CreatedAtAction(nameof(GetById), new { id = result }, result);
@@ -168,7 +169,7 @@ public sealed class CustomersController(ICustomerService service, ILogger<Custom
         [FromBody] UpdateCustomerRequest request,
         CancellationToken cancellationToken = default)
     {
-        var userId = User.FindFirst("sub")?.Value;
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
         var result = await service.UpdateAsync(id, request, userId, cancellationToken);
         if (!result)
@@ -206,7 +207,7 @@ public sealed class CustomersController(ICustomerService service, ILogger<Custom
         CancellationToken cancellationToken = default)
     {
         // This would need proper model binding - simplified for now
-        var userId = User.FindFirst("sub")?.Value;
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
         var createdBy = userId != null ? Guid.Parse(userId) : (Guid?)null;
 
         // Implementation would parse the request and call service.CreateWithUserAsync
@@ -264,7 +265,7 @@ public sealed class RolesController(IApplicationRoleService service, ILogger<Rol
         [FromBody] CreateApplicationRoleRequest request,
         CancellationToken cancellationToken = default)
     {
-        var userId = User.FindFirst("sub")?.Value;
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
         var result = await service.CreateAsync(request, userId, cancellationToken);
         return CreatedAtAction(nameof(GetById), new { id = result }, result);
@@ -281,7 +282,7 @@ public sealed class RolesController(IApplicationRoleService service, ILogger<Rol
         [FromBody] UpdateApplicationRoleRequest request,
         CancellationToken cancellationToken = default)
     {
-        var userId = User.FindFirst("sub")?.Value;
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
         var modifiedBy = userId != null ? Guid.Parse(userId) : (Guid?)null;
 
         var result = await service.UpdateAsync(id, request, userId, cancellationToken);
@@ -378,58 +379,6 @@ public sealed class MenusController(IMenuService service, ILogger<MenusControlle
         return Ok(ApiResponse<IReadOnlyList<MenuResponse>>.Ok(result));
     }
 
-    /// <summary>
-    /// Create a new menu
-    /// </summary>
-    [HttpPost]
-    [ProducesResponseType(typeof(Guid), StatusCodes.Status201Created)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> Create(
-        [FromBody] CreateMenuRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        var userId = User.FindFirst("sub")?.Value;
-
-        var result = await service.CreateAsync(request, userId, cancellationToken);
-        return CreatedAtAction(nameof(GetById), new { id = result }, result);
-    }
-
-    /// <summary>
-    /// Update an existing menu
-    /// </summary>
-    [HttpPut("{id}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Update(
-        Guid id,
-        [FromBody] UpdateMenuRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        var userId = User.FindFirst("sub")?.Value;
-
-        var result = await service.UpdateAsync(id, request, userId, cancellationToken);
-        if (!result)
-            return NotFound(new { message = "Menu not found" });
-
-        return NoContent();
-    }
-
-    /// <summary>
-    /// Delete a menu
-    /// </summary>
-    [HttpDelete("{id}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Delete(
-        Guid id,
-        CancellationToken cancellationToken = default)
-    {
-        var result = await service.DeleteAsync(id, cancellationToken);
-        if (!result)
-            return NotFound(new { message = "Menu not found" });
-
-        return NoContent();
-    }
 }
 
 [ApiController]
@@ -525,7 +474,7 @@ public sealed class UserMenusController(IUserMenuService service, ILogger<UserMe
         [FromQuery] int? menuLevel = null,
         CancellationToken cancellationToken = default)
     {
-        var userId = User.FindFirst("sub")?.Value;
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (userId == null)
             return Unauthorized();
 

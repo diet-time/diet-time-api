@@ -333,6 +333,17 @@ public sealed class ApplicationRoleService(
 
     public async Task<Guid> CreateAsync(CreateApplicationRoleRequest request, string? createdBy, CancellationToken cancellationToken)
     {
+        var identityRole = await roleManager.FindByNameAsync(request.RoleName);
+        var identityRoleCreated = false;
+        if (identityRole == null)
+        {
+            identityRole = new IdentityRole<Guid>(request.RoleName);
+            var identityResult = await roleManager.CreateAsync(identityRole);
+            if (!identityResult.Succeeded)
+                throw new InvalidOperationException(string.Join(" ", identityResult.Errors.Select(x => x.Description)));
+            identityRoleCreated = true;
+        }
+
         var role = new ApplicationRole
         {
             Id = Guid.NewGuid(),
@@ -344,8 +355,16 @@ public sealed class ApplicationRoleService(
             UpdatedAt = clock.GetUtcNow()
         };
 
-        db.ApplicationRoles.Add(role);
-        await db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            db.ApplicationRoles.Add(role);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            if (identityRoleCreated) await roleManager.DeleteAsync(identityRole);
+            throw;
+        }
 
         return role.Id;
     }
@@ -354,6 +373,21 @@ public sealed class ApplicationRoleService(
     {
         var role = await db.ApplicationRoles.FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
         if (role == null) return false;
+
+        var identityRole = await roleManager.FindByNameAsync(role.RoleName);
+        if (identityRole == null)
+        {
+            var createResult = await roleManager.CreateAsync(new IdentityRole<Guid>(request.RoleName));
+            if (!createResult.Succeeded)
+                throw new InvalidOperationException(string.Join(" ", createResult.Errors.Select(x => x.Description)));
+        }
+        else if (!string.Equals(role.RoleName, request.RoleName, StringComparison.OrdinalIgnoreCase))
+        {
+            identityRole.Name = request.RoleName;
+            var updateResult = await roleManager.UpdateAsync(identityRole);
+            if (!updateResult.Succeeded)
+                throw new InvalidOperationException(string.Join(" ", updateResult.Errors.Select(x => x.Description)));
+        }
 
         role.RoleName = request.RoleName;
         role.Description = request.Description;
@@ -372,6 +406,14 @@ public sealed class ApplicationRoleService(
         var role = await db.ApplicationRoles.FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
         if (role == null) return false;
 
+        var identityRole = await roleManager.FindByNameAsync(role.RoleName);
+        if (identityRole != null)
+        {
+            var identityResult = await roleManager.DeleteAsync(identityRole);
+            if (!identityResult.Succeeded)
+                throw new InvalidOperationException(string.Join(" ", identityResult.Errors.Select(x => x.Description)));
+        }
+
         db.ApplicationRoles.Remove(role);
         await db.SaveChangesAsync(cancellationToken);
 
@@ -386,6 +428,12 @@ public sealed class ApplicationRoleService(
         var role = await db.ApplicationRoles
             .FirstOrDefaultAsync(r => r.Id == roleId, cancellationToken);
         if (role == null) return false;
+
+        if (await roleManager.FindByNameAsync(role.RoleName) == null)
+        {
+            var createResult = await roleManager.CreateAsync(new IdentityRole<Guid>(role.RoleName));
+            if (!createResult.Succeeded) return false;
+        }
 
         var result = await userManager.AddToRoleAsync(user, role.RoleName);
         return result.Succeeded;
@@ -416,7 +464,7 @@ public sealed class ApplicationRoleService(
     }
 }
 
-public sealed class MenuService(DietTimeDbContext db, TimeProvider clock) : IMenuService
+public sealed class MenuService(DietTimeDbContext db) : IMenuService
 {
     public async Task<MenuResponse?> GetByIdAsync(Guid id, CancellationToken cancellationToken)
     {
@@ -464,63 +512,6 @@ public sealed class MenuService(DietTimeDbContext db, TimeProvider clock) : IMen
         // For flat menu structure, this method returns empty list
         // The UI will handle grouping of sub-menus by main menu code
         return await Task.FromResult(new List<MenuResponse>());
-    }
-
-    public async Task<Guid> CreateAsync(CreateMenuRequest request, string? createdBy, CancellationToken cancellationToken)
-    {
-        var menu = new Menu
-        {
-            Id = Guid.NewGuid(),
-            MainMenuCode = request.MainMenuCode,
-            MainMenuName = request.MainMenuName,
-            SubMenuCode = request.SubMenuCode,
-            SubMenuName = request.SubMenuName,
-            RouteUrl = request.RouteUrl,
-            Icon = request.Icon,
-            DisplayOrder = request.DisplayOrder,
-            IsActive = request.IsActive,
-            CreatedBy = createdBy ?? "SYSTEM",
-            CreatedAt = clock.GetUtcNow(),
-            UpdatedAt = clock.GetUtcNow()
-        };
-
-        db.Menus.Add(menu);
-        await db.SaveChangesAsync(cancellationToken);
-
-        return menu.Id;
-    }
-
-    public async Task<bool> UpdateAsync(Guid id, UpdateMenuRequest request, string? modifiedBy, CancellationToken cancellationToken)
-    {
-        var menu = await db.Menus.FirstOrDefaultAsync(m => m.Id == id, cancellationToken);
-        if (menu == null) return false;
-
-        menu.MainMenuCode = request.MainMenuCode;
-        menu.MainMenuName = request.MainMenuName;
-        menu.SubMenuCode = request.SubMenuCode;
-        menu.SubMenuName = request.SubMenuName;
-        menu.RouteUrl = request.RouteUrl;
-        menu.Icon = request.Icon;
-        menu.DisplayOrder = request.DisplayOrder;
-        menu.IsActive = request.IsActive;
-        menu.UpdatedBy = modifiedBy;
-        menu.UpdatedAt = clock.GetUtcNow();
-
-        db.Menus.Update(menu);
-        await db.SaveChangesAsync(cancellationToken);
-
-        return true;
-    }
-
-    public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken)
-    {
-        var menu = await db.Menus.FirstOrDefaultAsync(m => m.Id == id, cancellationToken);
-        if (menu == null) return false;
-
-        db.Menus.Remove(menu);
-        await db.SaveChangesAsync(cancellationToken);
-
-        return true;
     }
 
     private static MenuResponse MapToResponse(Menu menu)
@@ -585,12 +576,12 @@ public sealed class RoleMenuMappingService(DietTimeDbContext db) : IRoleMenuMapp
 
         return menus.Select(m => new MenuResponse(
             m.Id,
-            m.MainMenuName,
             m.MainMenuCode,
+            m.MainMenuName,
+            m.SubMenuCode,
             m.SubMenuName,
-            m.SubMenuName,
-            m.Icon,
             m.RouteUrl,
+            m.Icon,
             m.DisplayOrder,
             m.IsActive,
             m.CreatedBy,
@@ -687,12 +678,12 @@ public sealed class UserMenuService(DietTimeDbContext db, UserManager<Applicatio
 
         return menus.Select(m => new MenuResponse(
             m.Id,
-            m.MainMenuName,
             m.MainMenuCode,
+            m.MainMenuName,
             m.SubMenuCode,
             m.SubMenuName,
-            m.Icon,
             m.RouteUrl,
+            m.Icon,
             m.DisplayOrder,
             m.IsActive,
             m.CreatedBy,

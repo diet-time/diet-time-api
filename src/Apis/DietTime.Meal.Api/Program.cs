@@ -76,9 +76,10 @@ builder.Services.AddAuthentication(options =>
 {
     if (builder.Environment.IsDevelopment())
     {
-        // Use development handler in development mode for flexibility
-        options.DefaultScheme = DevelopmentAuthenticationHandler.SchemeName;
-        options.DefaultChallengeScheme = DevelopmentAuthenticationHandler.SchemeName;
+        // Real UI sessions send JWTs. Keep the development identity only as a
+        // fallback for local requests that do not include a bearer token.
+        options.DefaultScheme = "DevelopmentOrJwt";
+        options.DefaultChallengeScheme = "DevelopmentOrJwt";
     }
     else
     {
@@ -86,6 +87,13 @@ builder.Services.AddAuthentication(options =>
         options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
         options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
     }
+})
+.AddPolicyScheme("DevelopmentOrJwt", "Development JWT selector", options =>
+{
+    options.ForwardDefaultSelector = context =>
+        context.Request.Headers.Authorization.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+            ? JwtBearerDefaults.AuthenticationScheme
+            : DevelopmentAuthenticationHandler.SchemeName;
 })
 .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
 {
@@ -117,7 +125,7 @@ builder.Services.AddSingleton<IAmazonS3>(services =>
         AuthenticationRegion = storage.Region
     });
 });
-builder.Services.AddSingleton(TimeProvider.System); builder.Services.AddMemoryCache(); builder.Services.AddScoped<ILanguageResolver, LanguageResolver>(); builder.Services.AddScoped<IStorageUrlService, StorageUrlService>(); builder.Services.AddScoped<IMealQueryService, MealQueryService>(); builder.Services.AddScoped<IGuestHomeService, GuestHomeService>(); builder.Services.AddScoped<IMealSelectionService, MealSelectionService>(); builder.Services.AddScoped<IAdminMealService, AdminMealService>(); builder.Services.AddScoped<ITemplateMenuReader>(services => (AdminMealService)services.GetRequiredService<IAdminMealService>()); builder.Services.AddScoped<IOperationalCalendarService, DefaultOperationalCalendarService>(); builder.Services.AddScoped<IDeliverySchedulingService, DeliverySchedulingService>(); builder.Services.AddScoped<IAuthService, AuthService>(); builder.Services.AddScoped<IUserProfileService, UserProfileService>(); builder.Services.AddScoped<ICustomerService, CustomerService>(); builder.Services.AddScoped<IApplicationRoleService, ApplicationRoleService>(); builder.Services.AddScoped<IMenuService, MenuService>(); builder.Services.AddScoped<IRoleMenuMappingService, RoleMenuMappingService>(); builder.Services.AddScoped<IUserMenuService, UserMenuService>(); builder.Services.AddScoped<IPasswordService, PasswordService>(); builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddSingleton(TimeProvider.System); builder.Services.AddMemoryCache(); builder.Services.AddScoped<ILanguageResolver, LanguageResolver>(); builder.Services.AddScoped<IStorageUrlService, StorageUrlService>(); builder.Services.AddScoped<IMealQueryService, MealQueryService>(); builder.Services.AddScoped<IGuestHomeService, GuestHomeService>(); builder.Services.AddScoped<IMealSelectionService, MealSelectionService>(); builder.Services.AddScoped<IAdminMealService, AdminMealService>(); builder.Services.AddScoped<ITemplateMenuReader>(services => (AdminMealService)services.GetRequiredService<IAdminMealService>()); builder.Services.AddScoped<IOperationalCalendarService, DefaultOperationalCalendarService>(); builder.Services.AddScoped<IDeliverySchedulingService, DeliverySchedulingService>(); builder.Services.AddScoped<IAuthService, AuthService>(); builder.Services.AddScoped<IUserProfileService, UserProfileService>(); builder.Services.AddScoped<ICustomerService, CustomerService>(); builder.Services.AddScoped<IApplicationRoleService, ApplicationRoleService>(); builder.Services.AddScoped<IMenuService, MenuService>(); builder.Services.AddScoped<IRoleMenuMappingService, RoleMenuMappingService>(); builder.Services.AddScoped<IUserMenuService, UserMenuService>(); builder.Services.AddScoped<IAccessControlService, AccessControlService>(); builder.Services.AddScoped<IPasswordService, PasswordService>(); builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddValidatorsFromAssemblyContaining<MealSelectionRequestValidator>(); builder.Services.AddFluentValidationAutoValidation();
 
 builder.Services.AddControllers().AddJsonOptions(o => { o.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull; o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(new UpperCaseJsonNamingPolicy())); });

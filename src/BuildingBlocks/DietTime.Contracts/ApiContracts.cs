@@ -396,6 +396,64 @@ public sealed record RoleMenusResponse(
     string RoleName,
     IReadOnlyList<MenuResponse> Menus);
 
+public sealed record ScreenPermissionResponse(
+    Guid ScreenId,
+    string GroupCode,
+    string GroupName,
+    string ScreenCode,
+    string ScreenName,
+    string? RouteUrl,
+    string? Icon,
+    int DisplayOrder,
+    bool IsActive,
+    bool CanRead,
+    bool CanWrite);
+
+public sealed record ScreenPermissionRequest(Guid ScreenId, bool CanRead, bool CanWrite);
+
+public sealed record AccessRoleResponse(
+    Guid Id,
+    string RoleName,
+    string? Description,
+    bool IsActive,
+    IReadOnlyList<ScreenPermissionResponse> Screens);
+
+public sealed record SaveAccessRoleRequest(
+    string RoleName,
+    string? Description,
+    bool IsActive,
+    IReadOnlyList<ScreenPermissionRequest> Screens);
+
+public sealed record AccessUserResponse(
+    Guid ProfileId,
+    Guid UserId,
+    string Email,
+    string FirstName,
+    string LastName,
+    string? Mobile,
+    string Status,
+    bool IsActive,
+    IReadOnlyList<Guid> RoleIds,
+    IReadOnlyList<string> RoleNames);
+
+public sealed record CreateAccessUserRequest(
+    string Email,
+    string FirstName,
+    string LastName,
+    string? Mobile,
+    string Password,
+    bool IsActive,
+    IReadOnlyList<Guid> RoleIds);
+
+public sealed record UpdateAccessUserRequest(
+    string Email,
+    string FirstName,
+    string LastName,
+    string? Mobile,
+    string? Password,
+    bool IsActive,
+    IReadOnlyList<Guid> RoleIds);
+
 // Password management DTOs
 
 public sealed record RequestPasswordResetRequest(

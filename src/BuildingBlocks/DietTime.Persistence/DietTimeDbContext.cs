@@ -152,6 +152,8 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
         b.Entity<RoleMenuMapping>(e =>
         {
             e.ToTable("role_menu_mappings");
+            e.Property(x => x.CanRead).HasDefaultValue(true);
+            e.Property(x => x.CanWrite).HasDefaultValue(false);
             e.HasIndex(x => new { x.RoleId, x.MenuId }).IsUnique();
             e.HasOne(x => x.Role).WithMany(x => x.MenuMappings).HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(x => x.Menu).WithMany(x => x.RoleMappings).HasForeignKey(x => x.MenuId).OnDelete(DeleteBehavior.Cascade);

@@ -167,6 +167,8 @@ public sealed class RoleMenuMapping : Entity
     public ApplicationRole Role { get; set; } = null!;
     public Guid MenuId { get; set; }
     public Menu Menu { get; set; } = null!;
+    public bool CanRead { get; set; } = true;
+    public bool CanWrite { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
 }
 
