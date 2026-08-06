@@ -1,5 +1,6 @@
 using Asp.Versioning;
 using System.Security.Claims;
+using System.Text.RegularExpressions;
 using DietTime.Application;
 using DietTime.Contracts;
 using DietTime.Domain;
@@ -7,6 +8,7 @@ using DietTime.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
 namespace DietTime.Meal.Api.Controllers;
@@ -58,6 +60,45 @@ public class AuthenticationController(
             return Unauthorized(new ProblemDetails { Title = "Authentication Failed", Detail = "Invalid email or password" });
         SetRefreshCookie(session);
         return Ok(ApiResponse<AuthSessionResponse>.Ok(session));
+    }
+
+    /// <summary>
+    /// Login with a phone OTP, creating a customer account on first use.
+    /// </summary>
+    [HttpPost("phone-otp")]
+    [AllowAnonymous]
+    [EnableRateLimiting("phone-otp")]
+    [ProducesResponseType(typeof(ApiResponse<AuthSessionResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> PhoneOtp(
+        [FromBody] PhoneOtpLoginRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.PhoneNumber) ||
+            !Regex.IsMatch(request.PhoneNumber.Trim(), @"^\+[1-9]\d{7,14}$"))
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Validation Error",
+                Detail = "Phone number must use E.164 format, for example +97455555555."
+            });
+        if (string.IsNullOrWhiteSpace(request.Otp))
+            return BadRequest(new ProblemDetails { Title = "Validation Error", Detail = "OTP is required." });
+
+        var result = await authService.LoginWithPhoneOtpAsync(request, cancellationToken);
+        if (result.Status == PhoneOtpAuthStatus.Disabled)
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new ProblemDetails
+            {
+                Title = "Phone login unavailable",
+                Detail = "Phone OTP login is not configured."
+            });
+        if (result.Status == PhoneOtpAuthStatus.InvalidOtp)
+            return Unauthorized(new ProblemDetails { Title = "Authentication Failed", Detail = "Invalid OTP." });
+        if (result.Status == PhoneOtpAuthStatus.Conflict || result.Session is null)
+            return Conflict(new ProblemDetails { Title = "Login failed", Detail = "A user with this phone number already exists." });
+
+        SetRefreshCookie(result.Session);
+        return Ok(ApiResponse<AuthSessionResponse>.Ok(result.Session));
     }
 
     /// <summary>

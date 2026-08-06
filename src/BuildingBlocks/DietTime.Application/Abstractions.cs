@@ -103,7 +103,15 @@ public interface IAuthService
 {
     Task<AuthSessionResponse?> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken);
     Task<AuthSessionResponse?> LoginAsync(LoginRequest request, CancellationToken cancellationToken);
+    Task<PhoneOtpAuthResult> LoginWithPhoneOtpAsync(PhoneOtpLoginRequest request, CancellationToken cancellationToken);
     Task<AuthSessionResponse?> RefreshAsync(string refreshToken, CancellationToken cancellationToken);
     Task RevokeAsync(string refreshToken, CancellationToken cancellationToken);
     Task<AuthUserResponse?> GetUserAsync(Guid userId, CancellationToken cancellationToken);
 }
+public interface IPhoneOtpVerifier
+{
+    Task<PhoneOtpVerificationStatus> VerifyAsync(string phoneNumber, string otp, CancellationToken cancellationToken);
+}
+public enum PhoneOtpVerificationStatus { Valid, Invalid, Disabled }
+public enum PhoneOtpAuthStatus { Success, InvalidOtp, Disabled, Conflict }
+public sealed record PhoneOtpAuthResult(PhoneOtpAuthStatus Status, AuthSessionResponse? Session = null);

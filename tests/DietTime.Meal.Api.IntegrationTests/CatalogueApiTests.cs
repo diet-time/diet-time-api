@@ -161,6 +161,30 @@ public sealed class CatalogueApiTests : IAsyncLifetime
     [Theory] [InlineData("/api/v1/guest/home?language=fr")] [InlineData("/api/v1/guest/home?planCode=not%20valid")] [InlineData("/api/v1/guest/meal-plans/CLASSIC/menu")] [InlineData("/api/v1/guest/meal-plans/CLASSIC/menu?date=2026-07-23&language=fr")] public async Task Guest_endpoints_reject_invalid_parameters(string path) { if (!enabled) return; Assert.Equal(HttpStatusCode.BadRequest, (await client!.GetAsync(path)).StatusCode); }
     [Theory] [InlineData("/api/v1/guest/home?date=2026-07-24")] [InlineData("/api/v1/guest/meal-plans/CLASSIC/menu?date=2026-07-24")] [InlineData("/api/v1/guest/meal-plans/UNKNOWN/menu?date=2026-07-23")] public async Task Guest_endpoints_return_404_when_menu_does_not_exist(string path) { if (!enabled) return; Assert.Equal(HttpStatusCode.NotFound, (await client!.GetAsync(path)).StatusCode); }
 
+    [Fact]
+    public async Task Phone_otp_creates_user_once_and_returns_same_user_on_later_login()
+    {
+        if (!enabled) return;
+        var phone = $"+9745{Random.Shared.Next(1000000, 9999999)}";
+        var request = new { phoneNumber = phone, otp = "123456", firstName = "Test", lastName = "User" };
+
+        var firstResponse = await client!.PostAsJsonAsync("/api/v1/auth/phone-otp", request);
+        var secondResponse = await client!.PostAsJsonAsync("/api/v1/auth/phone-otp", request);
+
+        Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, secondResponse.StatusCode);
+        using var firstJson = System.Text.Json.JsonDocument.Parse(await firstResponse.Content.ReadAsStringAsync());
+        using var secondJson = System.Text.Json.JsonDocument.Parse(await secondResponse.Content.ReadAsStringAsync());
+        var firstUserId = firstJson.RootElement.GetProperty("data").GetProperty("user").GetProperty("id").GetGuid();
+        var secondUserId = secondJson.RootElement.GetProperty("data").GetProperty("user").GetProperty("id").GetGuid();
+        Assert.Equal(firstUserId, secondUserId);
+
+        using var scope = factory!.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
+        Assert.Equal(1, await db.Users.CountAsync(x => x.PhoneNumber == phone));
+        Assert.Equal(1, await db.UserProfiles.CountAsync(x => x.UserId == firstUserId && x.Mobile == phone));
+    }
+
     private async Task SeedAsync()
     {
         using var scope = factory!.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>(); await db.Database.EnsureCreatedAsync(); var now = DateTimeOffset.UtcNow;
@@ -178,5 +202,5 @@ public sealed class CatalogueApiTests : IAsyncLifetime
 
 internal sealed class ApiFactory(string connectionString) : WebApplicationFactory<Program>
 {
-    protected override void ConfigureWebHost(IWebHostBuilder builder) => builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?> { ["DTDBCONNECTION"] = connectionString, ["ConnectionStrings:DefaultConnection"] = connectionString, ["Jwt:Issuer"] = "DietTime.Tests", ["Jwt:Audience"] = "DietTime.Tests", ["Jwt:Key"] = "test-only-key-at-least-thirty-two-characters-long", ["Storage:PublicBaseUrl"] = "https://cdn.test", ["Storage:BucketName"] = "test", ["Storage:ServiceUrl"] = "http://localhost:9000", ["Storage:AccessKey"] = "test", ["Storage:SecretKey"] = "test" }));
+    protected override void ConfigureWebHost(IWebHostBuilder builder) => builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?> { ["DTDBCONNECTION"] = connectionString, ["ConnectionStrings:DefaultConnection"] = connectionString, ["Jwt:Issuer"] = "DietTime.Tests", ["Jwt:Audience"] = "DietTime.Tests", ["Jwt:Key"] = "test-only-key-at-least-thirty-two-characters-long", ["PhoneOtp:Enabled"] = "true", ["PhoneOtp:TestCode"] = "123456", ["Storage:PublicBaseUrl"] = "https://cdn.test", ["Storage:BucketName"] = "test", ["Storage:ServiceUrl"] = "http://localhost:9000", ["Storage:AccessKey"] = "test", ["Storage:SecretKey"] = "test" }));
 }

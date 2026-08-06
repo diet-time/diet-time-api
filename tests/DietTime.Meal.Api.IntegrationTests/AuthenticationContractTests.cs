@@ -32,9 +32,21 @@ public sealed class AuthenticationContractTests
         Assert.Equal(routes.Length, routes.Distinct(StringComparer.OrdinalIgnoreCase).Count());
         Assert.Contains(routes, route => route.EndsWith("/register", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(routes, route => route.EndsWith("/login", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(routes, route => route.EndsWith("/phone-otp", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(routes, route => route.EndsWith("/refresh", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(routes, route => route.EndsWith("/logout", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(routes, route => route.EndsWith("/me", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Phone_otp_contract_supports_first_use_profile_details()
+    {
+        var request = new PhoneOtpLoginRequest("+97455555555", "123456", "Test", "User");
+
+        Assert.Equal("+97455555555", request.PhoneNumber);
+        Assert.Equal("123456", request.Otp);
+        Assert.Equal("Test", request.FirstName);
+        Assert.Equal("User", request.LastName);
     }
 
     [Fact]

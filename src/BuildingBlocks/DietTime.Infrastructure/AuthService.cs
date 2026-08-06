@@ -13,7 +13,12 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace DietTime.Infrastructure;
 
-public sealed class AuthService(UserManager<ApplicationUser> users, DietTimeDbContext db, IOptions<JwtOptions> options, TimeProvider clock) : IAuthService
+public sealed class AuthService(
+    UserManager<ApplicationUser> users,
+    DietTimeDbContext db,
+    IOptions<JwtOptions> options,
+    TimeProvider clock,
+    IPhoneOtpVerifier phoneOtpVerifier) : IAuthService
 {
     private readonly JwtOptions jwt = options.Value;
     public async Task<AuthSessionResponse?> RegisterAsync(RegisterRequest request, CancellationToken ct)
@@ -45,6 +50,49 @@ public sealed class AuthService(UserManager<ApplicationUser> users, DietTimeDbCo
         var user = await users.FindByEmailAsync(request.Email.Trim());
         if (user is null || !await users.CheckPasswordAsync(user, request.Password)) return null;
         return await IssueAsync(user, ct);
+    }
+
+    public async Task<PhoneOtpAuthResult> LoginWithPhoneOtpAsync(PhoneOtpLoginRequest request, CancellationToken ct)
+    {
+        var phoneNumber = request.PhoneNumber.Trim();
+        var verification = await phoneOtpVerifier.VerifyAsync(phoneNumber, request.Otp, ct);
+        if (verification == PhoneOtpVerificationStatus.Disabled)
+            return new(PhoneOtpAuthStatus.Disabled);
+        if (verification != PhoneOtpVerificationStatus.Valid)
+            return new(PhoneOtpAuthStatus.InvalidOtp);
+
+        var user = await db.Users.SingleOrDefaultAsync(x => x.PhoneNumber == phoneNumber, ct);
+        if (user is not null)
+            return new(PhoneOtpAuthStatus.Success, await IssueAsync(user, ct));
+
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        user = new ApplicationUser
+        {
+            UserName = phoneNumber,
+            PhoneNumber = phoneNumber,
+            PhoneNumberConfirmed = true
+        };
+        var created = await users.CreateAsync(user);
+        if (!created.Succeeded)
+            return new(PhoneOtpAuthStatus.Conflict);
+
+        var now = clock.GetUtcNow();
+        db.UserProfiles.Add(new UserProfile
+        {
+            UserId = user.Id,
+            FirstName = request.FirstName?.Trim() ?? "",
+            LastName = request.LastName?.Trim() ?? "",
+            Mobile = phoneNumber,
+            Status = "ACTIVE",
+            IsActive = true,
+            IsCustomer = true,
+            CreatedAt = now,
+            ModifiedAt = now
+        });
+        await db.SaveChangesAsync(ct);
+        var session = await IssueAsync(user, ct);
+        await transaction.CommitAsync(ct);
+        return new(PhoneOtpAuthStatus.Success, session);
     }
 
     public async Task<AuthSessionResponse?> RefreshAsync(string refreshToken, CancellationToken ct)
@@ -102,6 +150,8 @@ public sealed class AuthService(UserManager<ApplicationUser> users, DietTimeDbCo
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
         claims.AddRange(authUser.Roles.Select(role => new Claim(ClaimTypes.Role, role)));
+        if (!string.IsNullOrWhiteSpace(user.PhoneNumber))
+            claims.Add(new Claim(ClaimTypes.MobilePhone, user.PhoneNumber));
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.Key));
         var token = new JwtSecurityToken(
@@ -136,8 +186,8 @@ public sealed class AuthService(UserManager<ApplicationUser> users, DietTimeDbCo
         var roles = await users.GetRolesAsync(user);
         var name = profile?.FullName;
         if (string.IsNullOrWhiteSpace(name))
-            name = user.Email?.Split('@')[0] ?? "Diet Time User";
-        return new(user.Id, user.Email ?? "", name, roles.ToArray());
+            name = user.Email?.Split('@')[0] ?? user.PhoneNumber ?? "Diet Time User";
+        return new(user.Id, user.Email ?? "", name, roles.ToArray(), user.PhoneNumber);
     }
 
     private async Task RevokeAllActiveAsync(Guid userId, DateTimeOffset now, CancellationToken ct)

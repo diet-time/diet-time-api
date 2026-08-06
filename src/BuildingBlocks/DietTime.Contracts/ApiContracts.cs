@@ -248,9 +248,10 @@ public sealed record CreatePlanSlotRequest(Guid MealTypeId, int DisplayOrder, in
 public sealed record CreateSlotOptionRequest(Guid MealItemId, decimal AdditionalPrice, bool IsDefault, bool IsAvailable, int DisplayOrder);
 public sealed record RegisterRequest(string Email, string Password, string? FirstName = null, string? LastName = null);
 public sealed record LoginRequest(string Email, string Password);
+public sealed record PhoneOtpLoginRequest(string PhoneNumber, string Otp, string? FirstName = null, string? LastName = null);
 public sealed record RefreshRequest(string? RefreshToken = null);
 public sealed record LogoutRequest(string? RefreshToken = null);
-public sealed record AuthUserResponse(Guid Id, string Email, string Name, IReadOnlyList<string> Roles);
+public sealed record AuthUserResponse(Guid Id, string Email, string Name, IReadOnlyList<string> Roles, string? PhoneNumber = null);
 public sealed record AuthSessionResponse(
     string AccessToken,
     DateTimeOffset AccessTokenExpiresAt,
