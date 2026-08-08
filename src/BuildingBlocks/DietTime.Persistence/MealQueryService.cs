@@ -123,7 +123,8 @@ public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService st
 
     public async Task<MealPlanResponse?> GetPlanAsync(Guid planId, string language, DateOnly today, CancellationToken ct)
     {
-        var plan = await db.MealPlanTemplates.AsNoTracking().Where(p => p.Id == planId && p.IsActive && p.IsPublished && (p.ValidFrom == null || p.ValidFrom <= today) && (p.ValidUntil == null || p.ValidUntil >= today))
+        var plan = await db.MealPlanTemplates.AsNoTracking()
+            .Where(p => p.Id == planId && p.IsActive && p.IsPublished && (p.ValidFrom == null || p.ValidFrom <= today) && (p.ValidUntil == null || p.ValidUntil >= today))
             .Select(p => new
             {
                 p.Id,
@@ -132,11 +133,76 @@ public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService st
                 p.DurationDays,
                 p.IsCustomizable,
                 Name = p.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault() ?? p.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? p.Translations.Select(t => t.Name).FirstOrDefault() ?? p.Code,
-                Description = p.Translations.Where(t => t.LanguageCode == language).Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault() ?? p.Translations.Where(t => t.LanguageCode == "en").Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault() ?? p.Translations.Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault(),
-                Prices = p.Prices.Where(x => x.IsActive).OrderBy(x => x.Amount).Select(x => new PlanPriceResponse(x.DurationDays, x.MealsPerDay, x.SnacksPerDay, x.Amount, x.CurrencyCode.Trim())).ToList(),
-                Types = p.Days.SelectMany(d => d.Slots).Where(s => s.IsActive).Select(s => new { s.MealType.Id, s.MealType.Code, s.MealType.DisplayOrder, Name = s.MealType.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault() ?? s.MealType.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? s.MealType.Translations.Select(t => t.Name).FirstOrDefault() ?? s.MealType.Code }).Distinct().ToList()
-            }).SingleOrDefaultAsync(ct);
-        return plan is null ? null : new MealPlanResponse(plan.Id, plan.Code, plan.Name, plan.Description, plan.PlanType, plan.DurationDays, plan.IsCustomizable, plan.Prices, plan.Types.OrderBy(x => x.DisplayOrder).Select(x => new MealTypeResponse(x.Id, x.Code, x.Name, x.DisplayOrder)).ToArray());
+                Description = p.Translations.Where(t => t.LanguageCode == language).Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault() ?? p.Translations.Where(t => t.LanguageCode == "en").Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault() ?? p.Translations.Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault()
+            })
+            .SingleOrDefaultAsync(ct);
+
+        if (plan is null) return null;
+
+        var prices = await db.MealPlanPrices.AsNoTracking()
+            .Where(price => price.MealPlanTemplateId == plan.Id && price.IsActive)
+            .OrderBy(price => price.Amount)
+            .Select(price => new PlanPriceResponse(
+                price.DurationDays,
+                price.MealsPerDay,
+                price.SnacksPerDay,
+                price.Amount,
+                price.CurrencyCode.Trim(),
+                price.Translations
+                    .Where(translation => translation.LanguageCode == language)
+                    .Select(translation => translation.Name)
+                    .FirstOrDefault()
+                    ?? price.Translations
+                        .Where(translation => translation.LanguageCode == "en")
+                        .Select(translation => translation.Name)
+                        .FirstOrDefault(),
+                price.Translations
+                    .Where(translation => translation.LanguageCode == language)
+                    .Select(translation => translation.Description)
+                    .FirstOrDefault()
+                    ?? price.Translations
+                        .Where(translation => translation.LanguageCode == "en")
+                        .Select(translation => translation.Description)
+                        .FirstOrDefault()))
+            .ToListAsync(ct);
+
+        var typeRows = await db.MealPlanTemplateSlots.AsNoTracking()
+            .Where(slot => slot.Day.MealPlanTemplateId == plan.Id && slot.IsActive)
+            .Select(slot => new
+            {
+                slot.MealType.Id,
+                slot.MealType.Code,
+                slot.MealType.DisplayOrder,
+                Name = slot.MealType.Translations
+                    .Where(t => t.LanguageCode == language)
+                    .Select(t => t.Name)
+                    .FirstOrDefault()
+                    ?? slot.MealType.Translations
+                        .Where(t => t.LanguageCode == "en")
+                        .Select(t => t.Name)
+                        .FirstOrDefault()
+                    ?? slot.MealType.Translations.Select(t => t.Name).FirstOrDefault()
+                    ?? slot.MealType.Code
+            })
+            .ToListAsync(ct);
+
+        var types = typeRows
+            .GroupBy(type => type.Id)
+            .Select(group => group.First())
+            .OrderBy(type => type.DisplayOrder)
+            .Select(type => new MealTypeResponse(type.Id, type.Code, type.Name, type.DisplayOrder))
+            .ToArray();
+
+        return new MealPlanResponse(
+            plan.Id,
+            plan.Code,
+            plan.Name,
+            plan.Description,
+            plan.PlanType,
+            plan.DurationDays,
+            plan.IsCustomizable,
+            prices,
+            types);
     }
 
     public async Task<IReadOnlyList<CalendarDayResponse>?> GetCalendarAsync(Guid planId, DateOnly startDate, int numberOfDays, string language, CancellationToken ct)

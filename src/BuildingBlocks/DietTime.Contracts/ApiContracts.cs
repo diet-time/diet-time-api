@@ -29,8 +29,57 @@ public sealed record PlanCategoryResponse(
     Guid? PricingRecordId,
     string? SourcePackageCode,
     int? SourceDurationDays);
-public sealed record PlanPriceResponse(int DurationDays, int MealsPerDay, int SnacksPerDay, decimal Amount, string CurrencyCode);
+public sealed record PlanPriceResponse(
+    int DurationDays,
+    int MealsPerDay,
+    int SnacksPerDay,
+    decimal Amount,
+    string CurrencyCode,
+    string? Name = null,
+    string? Description = null);
 public sealed record MealPlanResponse(Guid Id, string Code, string Name, string? Description, string PlanType, int DurationDays, bool IsCustomizable, IReadOnlyList<PlanPriceResponse> Prices, IReadOnlyList<MealTypeResponse> SupportedMealTypes);
+public sealed record MealPlanPurchasePlanResponse(
+    Guid Id,
+    string Code,
+    string Name,
+    string? ShortDescription,
+    string? ImageUrl,
+    decimal? EstimatedCaloriesPerDay);
+public sealed record MealPlanPurchasePackageResponse(
+    Guid PriceId,
+    string PackageId,
+    string PackageCode,
+    string PackageName,
+    int ServiceDays,
+    int DisplayOrder,
+    string CurrencyCode,
+    decimal Amount,
+    decimal PricePerServiceDay,
+    string? Name = null,
+    string? Description = null);
+public sealed record MealPlanMealConfigurationResponse(
+    int MealsPerDay,
+    int SnacksPerDay,
+    string DisplayName,
+    string IncludedText,
+    IReadOnlyList<MealPlanPurchasePackageResponse> Packages);
+public sealed record MealPlanPurchaseOptionsResponse(
+    MealPlanPurchasePlanResponse Plan,
+    IReadOnlyList<MealPlanMealConfigurationResponse> MealConfigurations,
+    bool HasRecordedAllergens);
+public sealed record ValidateMealPlanSelectionRequest(
+    Guid MealPlanTemplateId,
+    Guid MealPlanPriceId);
+public sealed record MealPlanSelectionValidationResponse(
+    bool IsValid,
+    Guid MealPlanTemplateId,
+    Guid MealPlanPriceId,
+    int MealsPerDay,
+    int SnacksPerDay,
+    int ServiceDays,
+    string CurrencyCode,
+    decimal Amount,
+    decimal PricePerServiceDay);
 public sealed record CalendarDayResponse(Guid TemplateDayId, DateOnly Date, MenuWeekday MenuWeekday, string DayShortName, string DayName, bool IsAvailable);
 public sealed record MealTypeResponse(Guid? Id, string Code, string Name, int DisplayOrder);
 public sealed record MealCardResponse(Guid SlotOptionId, Guid SlotId, Guid MealItemId, MealTypeResponse MealType, string Name, string? ShortDescription, string? ThumbnailUrl, decimal? CaloriesKcal, decimal? ProteinGrams, decimal? CarbohydratesGrams, decimal? FatGrams, decimal AdditionalPrice, string CurrencyCode, bool IsDefault, bool IsAvailable, IReadOnlyList<string> AllergenCodes);
@@ -321,7 +370,16 @@ public sealed record AdminMealPlanPriceResponse(
     string? MealPlanPricePackageId = null,
     string? PackageCode = null,
     string? PackageNameEn = null,
-    string? PackageNameAr = null);
+    string? PackageNameAr = null,
+    IReadOnlyList<AdminMealPlanPriceTranslationResponse>? Translations = null);
+public sealed record AdminMealPlanPriceTranslationResponse(
+    string LanguageCode,
+    string Name,
+    string? Description);
+public sealed record UpsertMealPlanPriceTranslationRequest(
+    string LanguageCode,
+    string Name,
+    string? Description = null);
 public sealed record AdminMealPlanPriceSummaryResponse(int Active, int Scheduled, int Expired, int Inactive);
 public sealed record UpsertMealPlanPriceRequest(
     Guid MealPlanTemplateId,
@@ -333,7 +391,8 @@ public sealed record UpsertMealPlanPriceRequest(
     DateTimeOffset EffectiveFrom,
     DateTimeOffset? EffectiveUntil,
     bool IsActive,
-    string? MealPlanPricePackageId = null);
+    string? MealPlanPricePackageId = null,
+    IReadOnlyList<UpsertMealPlanPriceTranslationRequest>? Translations = null);
 public sealed record SetMealPlanPriceStatusRequest(bool IsActive);
 public sealed record MealPlanPricePackageResponse(
     string Id,
@@ -373,7 +432,228 @@ public sealed record MealPlanTemplateDayDetailResponse(Guid Id, Guid TemplateId,
 public sealed record TemplateDayErrorResponse(string Code, string Message);
 public sealed record CreatePlanSlotRequest(Guid MealTypeId, int DisplayOrder, int MinimumSelection, int MaximumSelection, bool IsRequired, TimeOnly? SelectionCutoffTime, bool AllowsPaidUpgrade);
 public sealed record CreateSlotOptionRequest(Guid MealItemId, decimal AdditionalPrice, bool IsDefault, bool IsAvailable, int DisplayOrder);
-public sealed record RegisterRequest(string Email, string Password);
+public sealed record RegisterRequest(string Email, string Password, string? FirstName = null, string? LastName = null);
 public sealed record LoginRequest(string Email, string Password);
-public sealed record RefreshRequest(string RefreshToken);
-public sealed record TokenResponse(string AccessToken, string RefreshToken, DateTimeOffset ExpiresAt);
+public sealed record PhoneOtpLoginRequest(string PhoneNumber, string Otp, string? FirstName = null, string? LastName = null);
+public sealed record RefreshRequest(string? RefreshToken = null);
+public sealed record LogoutRequest(string? RefreshToken = null);
+public sealed record AuthUserResponse(Guid Id, string Email, string Name, IReadOnlyList<string> Roles, string? PhoneNumber = null);
+public sealed record AuthSessionResponse(
+    string AccessToken,
+    DateTimeOffset AccessTokenExpiresAt,
+    string RefreshToken,
+    DateTimeOffset RefreshTokenExpiresAt,
+    AuthUserResponse User);
+
+// User Management DTOs
+public sealed record UserProfileResponse(
+    Guid Id,
+    Guid UserId,
+    string FirstName,
+    string LastName,
+    string FullName,
+    string Email,
+    string? Mobile,
+    string Status,
+    bool IsActive,
+    bool IsCustomer,
+    Guid? CustomerId,
+    string? CreatedBy,
+    DateTimeOffset CreatedAt,
+    string? ModifiedBy,
+    DateTimeOffset ModifiedAt);
+
+public sealed record CreateUserProfileRequest(
+    string Email,
+    string FirstName,
+    string LastName,
+    string? Mobile,
+    string Password,
+    string Status = "ACTIVE",
+    bool IsActive = true);
+
+public sealed record UpdateUserProfileRequest(
+    string FirstName,
+    string LastName,
+    string? Mobile,
+    string Status,
+    bool IsActive);
+
+public sealed record CustomerResponse(
+    Guid Id,
+    string CustomerName,
+    int? Age,
+    string? Mobile,
+    string? Email,
+    string Status,
+    bool IsActive,
+    decimal? Weight,
+    decimal? Height,
+    decimal? BMI,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public sealed record CreateCustomerRequest(
+    string CustomerName,
+    int? Age,
+    string? Mobile,
+    string? Email,
+    decimal? Weight,
+    decimal? Height,
+    string Status = "ACTIVE",
+    bool IsActive = true);
+
+public sealed record UpdateCustomerRequest(
+    string CustomerName,
+    int? Age,
+    string? Mobile,
+    string? Email,
+    decimal? Weight,
+    decimal? Height,
+    string Status,
+    bool IsActive);
+
+public sealed record ApplicationRoleResponse(
+    Guid Id,
+    string RoleName,
+    string? Description,
+    bool IsActive,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public sealed record CreateApplicationRoleRequest(
+    string RoleName,
+    string? Description,
+    bool IsActive = true);
+
+public sealed record UpdateApplicationRoleRequest(
+    string RoleName,
+    string? Description,
+    bool IsActive);
+
+public sealed record MenuResponse(
+    Guid Id,
+    string MainMenuCode,
+    string MainMenuName,
+    string SubMenuCode,
+    string SubMenuName,
+    string? RouteUrl,
+    string? Icon,
+    int DisplayOrder,
+    bool IsActive,
+    string? CreatedBy,
+    DateTimeOffset CreatedAt,
+    string? UpdatedBy,
+    DateTimeOffset UpdatedAt);
+
+public sealed record CreateMenuRequest(
+    string MainMenuCode,
+    string MainMenuName,
+    string SubMenuCode,
+    string SubMenuName,
+    string? RouteUrl,
+    string? Icon,
+    int DisplayOrder,
+    bool IsActive = true);
+
+public sealed record UpdateMenuRequest(
+    string MainMenuCode,
+    string MainMenuName,
+    string SubMenuCode,
+    string SubMenuName,
+    string? RouteUrl,
+    string? Icon,
+    int DisplayOrder,
+    bool IsActive);
+
+public sealed record RoleMenuMappingResponse(
+    Guid Id,
+    Guid RoleId,
+    string RoleName,
+    Guid MenuId,
+    string MenuName,
+    DateTimeOffset CreatedAt);
+
+public sealed record CreateRoleMenuMappingRequest(
+    Guid RoleId,
+    Guid MenuId);
+
+public sealed record RoleMenusResponse(
+    Guid RoleId,
+    string RoleName,
+    IReadOnlyList<MenuResponse> Menus);
+
+public sealed record ScreenPermissionResponse(
+    Guid ScreenId,
+    string GroupCode,
+    string GroupName,
+    string ScreenCode,
+    string ScreenName,
+    string? RouteUrl,
+    string? Icon,
+    int DisplayOrder,
+    bool IsActive,
+    bool CanRead,
+    bool CanWrite);
+
+public sealed record ScreenPermissionRequest(Guid ScreenId, bool CanRead, bool CanWrite);
+
+public sealed record AccessRoleResponse(
+    Guid Id,
+    string RoleName,
+    string? Description,
+    bool IsActive,
+    IReadOnlyList<ScreenPermissionResponse> Screens);
+
+public sealed record SaveAccessRoleRequest(
+    string RoleName,
+    string? Description,
+    bool IsActive,
+    IReadOnlyList<ScreenPermissionRequest> Screens);
+
+public sealed record AccessUserResponse(
+    Guid ProfileId,
+    Guid UserId,
+    string Email,
+    string FirstName,
+    string LastName,
+    string? Mobile,
+    string Status,
+    bool IsActive,
+    IReadOnlyList<Guid> RoleIds,
+    IReadOnlyList<string> RoleNames);
+
+public sealed record CreateAccessUserRequest(
+    string Email,
+    string FirstName,
+    string LastName,
+    string? Mobile,
+    string Password,
+    bool IsActive,
+    IReadOnlyList<Guid> RoleIds);
+
+public sealed record UpdateAccessUserRequest(
+    string Email,
+    string FirstName,
+    string LastName,
+    string? Mobile,
+    string? Password,
+    bool IsActive,
+    IReadOnlyList<Guid> RoleIds);
+
+// Password management DTOs
+
+public sealed record RequestPasswordResetRequest(
+    string Email);
+
+public sealed record RequestPasswordResetResponse(
+    string Message,
+    bool Success);
+
+public sealed record SetPasswordRequest(
+    string ResetToken,
+    string NewPassword);
+
+public sealed record SetPasswordResponse(
+    string Message,
+    bool Success);

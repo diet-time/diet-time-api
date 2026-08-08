@@ -46,6 +46,35 @@ public sealed record CustomerProfileUpsertResult(
     public bool IsSuccess => Profile is not null && InvalidAllergenIds.Count == 0;
 }
 
+public enum MealPlanSelectionValidationStatus
+{
+    Valid,
+    PriceNotFound,
+    WrongPlan,
+    PriceInactive,
+    PriceNotEffective,
+    PriceExpired,
+    PricePackageNotFound,
+    PricePackageInactive
+}
+
+public sealed record MealPlanSelectionValidationResult(
+    MealPlanSelectionValidationStatus Status,
+    MealPlanSelectionValidationResponse? Selection = null);
+
+public interface ICustomerMealPlanPurchaseService
+{
+    Task<MealPlanPurchaseOptionsResponse?> GetPurchaseOptionsAsync(
+        string mealPlanCodeOrId,
+        Guid userId,
+        string language,
+        CancellationToken cancellationToken);
+
+    Task<MealPlanSelectionValidationResult> ValidateSelectionAsync(
+        ValidateMealPlanSelectionRequest request,
+        CancellationToken cancellationToken);
+}
+
 public interface ICustomerProfileService
 {
     Task<CustomerProfileResponse?> GetAsync(Guid userId, CancellationToken cancellationToken);
@@ -156,7 +185,17 @@ public interface IDeliverySchedulingService
 }
 public interface IAuthService
 {
-    Task<TokenResponse?> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken);
-    Task<TokenResponse?> LoginAsync(LoginRequest request, CancellationToken cancellationToken);
-    Task<TokenResponse?> RefreshAsync(RefreshRequest request, CancellationToken cancellationToken);
+    Task<AuthSessionResponse?> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken);
+    Task<AuthSessionResponse?> LoginAsync(LoginRequest request, CancellationToken cancellationToken);
+    Task<PhoneOtpAuthResult> LoginWithPhoneOtpAsync(PhoneOtpLoginRequest request, CancellationToken cancellationToken);
+    Task<AuthSessionResponse?> RefreshAsync(string refreshToken, CancellationToken cancellationToken);
+    Task RevokeAsync(string refreshToken, CancellationToken cancellationToken);
+    Task<AuthUserResponse?> GetUserAsync(Guid userId, CancellationToken cancellationToken);
 }
+public interface IPhoneOtpVerifier
+{
+    Task<PhoneOtpVerificationStatus> VerifyAsync(string phoneNumber, string otp, CancellationToken cancellationToken);
+}
+public enum PhoneOtpVerificationStatus { Valid, Invalid, Disabled }
+public enum PhoneOtpAuthStatus { Success, InvalidOtp, Disabled, Conflict }
+public sealed record PhoneOtpAuthResult(PhoneOtpAuthStatus Status, AuthSessionResponse? Session = null);

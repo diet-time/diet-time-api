@@ -102,7 +102,7 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
     [HttpPost("meals/{mealId:guid}/media/upload"), Consumes("multipart/form-data")]
     public async Task<ActionResult<ApiResponse<AdminMediaResponse>>> UploadMealMedia(
         Guid mealId,
-        [FromForm] IFormFile file,
+        IFormFile file,
         [FromForm] string? mediaType = MealMediaTypes.MealItem,
         [FromForm] string? altTextEn = null,
         [FromForm] bool isPrimary = false,
@@ -182,7 +182,7 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
     [HttpPost("meal-plans/{planId:guid}/image/upload"), Consumes("multipart/form-data")]
     public async Task<ActionResult<ApiResponse<AdminPlanImageResponse>>> UploadPlanImage(
         Guid planId,
-        [FromForm] IFormFile file,
+        IFormFile file,
         [FromForm] string? imageType = MealMediaTypes.MealPlan,
         CancellationToken ct = default)
     {
@@ -355,6 +355,27 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
         if (request.Amount <= 0) errors.Add(new("positive_amount", "Amount must be greater than zero.", "amount"));
         if (request.EffectiveFrom == default) errors.Add(new("required", "Effective from is required.", "effectiveFrom"));
         if (request.EffectiveUntil.HasValue && request.EffectiveUntil < request.EffectiveFrom) errors.Add(new("invalid_period", "Effective until cannot be earlier than effective from.", "effectiveUntil"));
+        var translations = request.Translations ?? [];
+        var duplicateLanguages = translations
+            .Where(translation => !string.IsNullOrWhiteSpace(translation.LanguageCode))
+            .GroupBy(translation => translation.LanguageCode.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .ToArray();
+        if (duplicateLanguages.Length > 0)
+            errors.Add(new("duplicate_language", "Only one price translation is allowed per language.", "translations"));
+        foreach (var translation in translations)
+        {
+            var code = translation.LanguageCode?.Trim().ToLowerInvariant();
+            if (code is not ("en" or "ar"))
+                errors.Add(new("invalid_language", "Price translation language must be 'en' or 'ar'.", "translations.languageCode"));
+            if (string.IsNullOrWhiteSpace(translation.Name))
+                errors.Add(new("required", "Price translation name is required.", "translations.name"));
+            else if (translation.Name.Trim().Length > 150)
+                errors.Add(new("max_length", "Price translation name cannot exceed 150 characters.", "translations.name"));
+            if (translation.Description?.Trim().Length > 500)
+                errors.Add(new("max_length", "Price translation description cannot exceed 500 characters.", "translations.description"));
+        }
         return errors;
     }
 

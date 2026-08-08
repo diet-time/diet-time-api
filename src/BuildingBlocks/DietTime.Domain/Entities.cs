@@ -119,6 +119,15 @@ public sealed class MealPlanPrice : Entity
     public DateTimeOffset UpdatedAt { get; set; }
     public Guid? CreatedBy { get; set; }
     public Guid? UpdatedBy { get; set; }
+    public ICollection<MealPlanPriceTranslation> Translations { get; set; } = [];
+}
+
+public sealed class MealPlanPriceTranslation : Translation
+{
+    public Guid MealPlanPriceId { get; set; }
+    public MealPlanPrice Price { get; set; } = null!;
+    public string Name { get; set; } = "";
+    public string? Description { get; set; }
 }
 
 public sealed class CustomerProfile : Entity
@@ -195,4 +204,94 @@ public sealed class CustomerProfileAllergen : Entity
     public DateTimeOffset UpdatedAt { get; set; }
     public Guid? CreatedBy { get; set; }
     public Guid? UpdatedBy { get; set; }
+}
+
+// User Management Entities
+public sealed class Customer : Entity
+{
+    public string CustomerName { get; set; } = "";
+    public int? Age { get; set; }
+    public string? Mobile { get; set; }
+    public string? Email { get; set; }
+    public string Status { get; set; } = "ACTIVE"; // ACTIVE, INACTIVE, SUSPENDED
+    public bool IsActive { get; set; } = true;
+    public decimal? Weight { get; set; }
+    public decimal? Height { get; set; }
+    public decimal? BMI { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public string CreatedBy { get; set; } = "SYSTEM";
+    public string? UpdatedBy { get; set; }
+}
+
+public sealed class UserProfile : Entity
+{
+    public Guid UserId { get; set; }
+    public string FirstName { get; set; } = "";
+    public string LastName { get; set; } = "";
+    public string Status { get; set; } = "ACTIVE"; // ACTIVE, INACTIVE, SUSPENDED
+    public bool IsActive { get; set; } = true;
+    public bool IsCustomer { get; set; } = false;
+    public Guid? CustomerId { get; set; }
+    public Customer? Customer { get; set; }
+    public string? Mobile { get; set; }
+    public string CreatedBy { get; set; } = "SYSTEM";
+    public DateTimeOffset CreatedAt { get; set; }
+    public string? ModifiedBy { get; set; }
+    public DateTimeOffset? ModifiedAt { get; set; }
+
+    public string FullName => $"{FirstName} {LastName}".Trim();
+}
+
+public sealed class ApplicationRole : Entity
+{
+    public string RoleName { get; set; } = "";
+    public string? Description { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public string CreatedBy { get; set; } = "SYSTEM";
+    public string? UpdatedBy { get; set; }
+    public ICollection<RoleMenuMapping> MenuMappings { get; set; } = [];
+}
+
+public sealed class Menu : Entity
+{
+    public string MainMenuCode { get; set; } = "";
+    public string MainMenuName { get; set; } = "";
+    public string SubMenuCode { get; set; } = "";
+    public string SubMenuName { get; set; } = "";
+    public string? RouteUrl { get; set; }
+    public string? Icon { get; set; }
+    public int DisplayOrder { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public string CreatedBy { get; set; } = "SYSTEM";
+    public string? UpdatedBy { get; set; }
+    public ICollection<RoleMenuMapping> RoleMappings { get; set; } = [];
+}
+
+public sealed class RoleMenuMapping : Entity
+{
+    public Guid RoleId { get; set; }
+    public ApplicationRole Role { get; set; } = null!;
+    public Guid MenuId { get; set; }
+    public Menu Menu { get; set; } = null!;
+    public bool CanRead { get; set; } = true;
+    public bool CanWrite { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+public sealed class UserAttribute : Entity
+{
+    public Guid UserId { get; set; }
+    public string Key { get; set; } = "";
+    public string Value { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+
+    // Common keys
+    public const string PasswordKey = "PWD";
+    public const string PasswordGenerationKey = "PWDGEN";
 }

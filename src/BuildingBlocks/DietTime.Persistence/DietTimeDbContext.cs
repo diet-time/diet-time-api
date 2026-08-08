@@ -37,19 +37,26 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
     public DbSet<MealPlanTemplateSlotTranslation> MealPlanTemplateSlotTranslations => Set<MealPlanTemplateSlotTranslation>();
     public DbSet<MealPlanSlotOption> MealPlanSlotOptions => Set<MealPlanSlotOption>();
     public DbSet<MealPlanPrice> MealPlanPrices => Set<MealPlanPrice>();
+    public DbSet<MealPlanPriceTranslation> MealPlanPriceTranslations => Set<MealPlanPriceTranslation>();
     public DbSet<MealPlanPricePackage> MealPlanPricePackages => Set<MealPlanPricePackage>();
     public DbSet<CustomerProfile> CustomerProfiles => Set<CustomerProfile>();
     public DbSet<CustomerNutritionTarget> CustomerNutritionTargets => Set<CustomerNutritionTarget>();
     public DbSet<CustomerProfilePreference> CustomerProfilePreferences => Set<CustomerProfilePreference>();
     public DbSet<CustomerProfileAllergen> CustomerProfileAllergens => Set<CustomerProfileAllergen>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<Customer> Customers => Set<Customer>();
+    public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
+    public DbSet<ApplicationRole> ApplicationRoles => Set<ApplicationRole>();
+    public DbSet<Menu> Menus => Set<Menu>();
+    public DbSet<RoleMenuMapping> RoleMenuMappings => Set<RoleMenuMapping>();
+    public DbSet<UserAttribute> UserAttributes => Set<UserAttribute>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
         base.OnModelCreating(b);
-        b.Entity<ApplicationUser>().ToTable("users", "public");
+        b.Entity<ApplicationUser>().HasIndex(x => x.PhoneNumber).IsUnique().HasFilter("phone_number IS NOT NULL").HasDatabaseName("PhoneNumberIndex");
         b.Entity<RefreshToken>(e => { e.ToTable("refresh_tokens"); e.Property(x => x.TokenHash).HasMaxLength(64); e.HasIndex(x => x.TokenHash).IsUnique(); e.HasIndex(x => x.UserId); e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade); });
-        ConfigureLookups(b); ConfigureMeals(b); ConfigurePlans(b);
+        ConfigureLookups(b); ConfigureMeals(b); ConfigurePlans(b); ConfigureUserManagement(b);
         b.ApplyConfiguration(new CustomerProfileConfiguration());
         b.ApplyConfiguration(new CustomerNutritionTargetConfiguration());
         b.ApplyConfiguration(new CustomerProfilePreferenceConfiguration());
@@ -112,10 +119,108 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
             e.HasIndex(x => new { x.MealPlanTemplateId, x.DurationDays, x.MealsPerDay, x.SnacksPerDay, x.CurrencyCode }).HasDatabaseName("ix_meal_plan_prices_package");
             e.HasOne(x => x.Plan).WithMany(x => x.Prices).HasForeignKey(x => x.MealPlanTemplateId).OnDelete(DeleteBehavior.Restrict);
         });
+        Translation<MealPlanPriceTranslation>(b, "meal_plan_price_translations", 10);
+        b.Entity<MealPlanPriceTranslation>(e =>
+        {
+            e.ToTable("meal_plan_price_translations", "public");
+            e.Property(x => x.Name).HasMaxLength(150);
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.HasIndex(x => new { x.MealPlanPriceId, x.LanguageCode })
+                .IsUnique()
+                .HasDatabaseName("uq_meal_plan_price_translations_language");
+            e.HasIndex(x => x.MealPlanPriceId)
+                .HasDatabaseName("ix_meal_plan_price_translations_price_id");
+            e.HasIndex(x => x.LanguageCode)
+                .HasDatabaseName("ix_meal_plan_price_translations_language_code");
+            e.HasOne(x => x.Price)
+                .WithMany(x => x.Translations)
+                .HasForeignKey(x => x.MealPlanPriceId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
     }
 
     private static void Translation<T>(ModelBuilder b, string table, int languageLength) where T : Translation
     {
         b.Entity<T>(e => { e.ToTable(table); e.Property(x => x.LanguageCode).HasMaxLength(languageLength); });
+    }
+
+    private static void ConfigureUserManagement(ModelBuilder b)
+    {
+        b.Entity<Customer>(e =>
+        {
+            e.ToTable("customers");
+            e.Property(x => x.CustomerName).HasMaxLength(200);
+            e.Property(x => x.Mobile).HasMaxLength(20);
+            e.Property(x => x.Email).HasMaxLength(256);
+            e.Property(x => x.Status).HasMaxLength(30);
+            e.Property(x => x.CreatedBy).HasMaxLength(256);
+            e.Property(x => x.UpdatedBy).HasMaxLength(256);
+            e.Property(x => x.Weight).HasPrecision(8, 2);
+            e.Property(x => x.Height).HasPrecision(8, 2);
+            e.Property(x => x.BMI).HasPrecision(5, 2);
+            e.HasIndex(x => x.Email).IsUnique();
+            e.HasIndex(x => x.Status);
+        });
+
+        b.Entity<UserProfile>(e =>
+        {
+            e.ToTable("user_profiles");
+            e.Property(x => x.FirstName).HasMaxLength(100);
+            e.Property(x => x.LastName).HasMaxLength(100);
+            e.Property(x => x.Status).HasMaxLength(30);
+            e.Property(x => x.Mobile).HasMaxLength(20);
+            e.Property(x => x.CreatedBy).HasMaxLength(256);
+            e.Property(x => x.ModifiedBy).HasMaxLength(256);
+            e.HasIndex(x => x.UserId).IsUnique();
+            e.HasIndex(x => x.CustomerId);
+            e.HasIndex(x => x.Status);
+            e.HasOne(x => x.Customer).WithMany().HasForeignKey(x => x.CustomerId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        b.Entity<ApplicationRole>(e =>
+        {
+            e.ToTable("application_roles");
+            e.Property(x => x.RoleName).HasMaxLength(100);
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.Property(x => x.CreatedBy).HasMaxLength(256);
+            e.Property(x => x.UpdatedBy).HasMaxLength(256);
+            e.HasIndex(x => x.RoleName).IsUnique();
+            e.HasIndex(x => x.IsActive);
+        });
+
+        b.Entity<Menu>(e =>
+        {
+            e.ToTable("menus");
+            e.Property(x => x.MainMenuCode).HasMaxLength(100);
+            e.Property(x => x.MainMenuName).HasMaxLength(200);
+            e.Property(x => x.SubMenuCode).HasMaxLength(100);
+            e.Property(x => x.SubMenuName).HasMaxLength(200);
+            e.Property(x => x.RouteUrl).HasMaxLength(500);
+            e.Property(x => x.Icon).HasMaxLength(100);
+            e.Property(x => x.CreatedBy).HasMaxLength(256);
+            e.Property(x => x.UpdatedBy).HasMaxLength(256);
+            e.HasIndex(x => new { x.MainMenuCode, x.SubMenuCode }).IsUnique().HasDatabaseName("ux_menus_main_sub_code");
+            e.HasIndex(x => x.MainMenuCode).HasDatabaseName("ix_menus_main_code");
+            e.HasIndex(x => x.IsActive);
+        });
+
+        b.Entity<RoleMenuMapping>(e =>
+        {
+            e.ToTable("role_menu_mappings");
+            e.Property(x => x.CanRead).HasDefaultValue(true);
+            e.Property(x => x.CanWrite).HasDefaultValue(false);
+            e.HasIndex(x => new { x.RoleId, x.MenuId }).IsUnique();
+            e.HasOne(x => x.Role).WithMany(x => x.MenuMappings).HasForeignKey(x => x.RoleId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Menu).WithMany(x => x.RoleMappings).HasForeignKey(x => x.MenuId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<UserAttribute>(e =>
+        {
+            e.ToTable("user_attributes");
+            e.Property(x => x.Key).HasMaxLength(100);
+            e.Property(x => x.Value).HasMaxLength(2000);
+            e.HasIndex(x => new { x.UserId, x.Key }).IsUnique().HasDatabaseName("ux_user_attributes_user_key");
+            e.HasIndex(x => x.UserId).HasDatabaseName("ix_user_attributes_user");
+        });
     }
 }

@@ -20,6 +20,7 @@ public sealed class SecurityHeadersMiddleware(RequestDelegate next, IHostEnviron
         "script-src 'self' 'unsafe-inline'; " +
         "style-src 'self' 'unsafe-inline'; " +
         "img-src 'self' data:; " +
+        "font-src 'self' data:; " +
         "connect-src 'self'; " +
         "frame-ancestors 'none'";
 
