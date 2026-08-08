@@ -14,6 +14,7 @@ public sealed class GuestHomeService(
     IStorageUrlService storage) : IGuestHomeService
 {
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(10);
+    private const int GuestCalendarLeadTimeDays = 2;
 
     public async Task<GuestHomeResponse?> GetAsync(
         GuestHomeQuery request,
@@ -25,9 +26,10 @@ public sealed class GuestHomeService(
             ? null
             : request.PlanCode.Trim().ToUpperInvariant();
         var businessDate = DateOnly.FromDateTime(now.UtcDateTime);
-        var requestedDate = request.Date ?? businessDate;
+        var calendarStart = businessDate.AddDays(GuestCalendarLeadTimeDays);
+        var requestedDate = request.Date ?? calendarStart;
         var cacheKey =
-            $"guest-home-summary:{cacheVersion.Current}:{language}:{requestedDate:yyyy-MM-dd}:{planCode ?? "-"}";
+            $"guest-home-summary:{cacheVersion.Current}:{language}:{businessDate:yyyy-MM-dd}:{requestedDate:yyyy-MM-dd}:{planCode ?? "-"}";
 
         if (cache.TryGetValue(cacheKey, out GuestHomeResponse? cached))
             return cached;
@@ -71,9 +73,6 @@ public sealed class GuestHomeService(
             return null;
 
         var culture = CultureInfo.GetCultureInfo(language == "ar" ? "ar-QA" : "en-US");
-        var daysSinceSaturday =
-            ((int)selectedDate.DayOfWeek - (int)DayOfWeek.Saturday + 7) % 7;
-        var calendarStart = selectedDate.AddDays(-daysSinceSaturday);
         var weeklyCalendar = Enumerable.Range(0, 7)
             .Select(offset => calendarStart.AddDays(offset))
             .Select(date => new GuestCalendarDayResponse(
@@ -98,7 +97,9 @@ public sealed class GuestHomeService(
                 slot.Day.MenuWeekday == selectedWeekday &&
                 slot.IsActive &&
                 slot.MealType.IsActive)
-            .OrderBy(slot => slot.DisplayOrder)
+            .OrderBy(slot => slot.MealType.DisplayOrder)
+            .ThenBy(slot => slot.DisplayOrder)
+            .ThenBy(slot => slot.Id)
             .Select(slot => new SlotRow(
                 slot.Day.MealPlanTemplateId,
                 slot.Id,
@@ -133,6 +134,9 @@ public sealed class GuestHomeService(
                 plan.Id == selectedPlan.Id,
                 slotRows
                     .Where(slot => slot.PlanId == plan.Id)
+                    .OrderBy(slot => slot.MealTimeDisplayOrder)
+                    .ThenBy(slot => slot.DisplayOrder)
+                    .ThenBy(slot => slot.Id)
                     .Select(ToSlotResponse)
                     .ToArray()))
                 .ToArray(),
@@ -186,6 +190,41 @@ public sealed class GuestHomeService(
             BuildSlots(mealRows));
         cache.Set(cacheKey, response, CacheDuration);
         return response;
+    }
+
+    public async Task<IReadOnlyList<GuestAllergenLookupResponse>> GetAllergensAsync(
+        string language,
+        CancellationToken ct)
+    {
+        var normalizedLanguage = language.Trim().ToLowerInvariant();
+        var cacheKey = $"guest-allergens:{cacheVersion.Current}:{normalizedLanguage}";
+
+        if (cache.TryGetValue(cacheKey, out IReadOnlyList<GuestAllergenLookupResponse>? cached) &&
+            cached is not null)
+        {
+            return cached;
+        }
+
+        var allergens = await db.Allergens.AsNoTracking()
+            .Where(allergen => allergen.IsActive)
+            .OrderBy(allergen => allergen.Code)
+            .Select(allergen => new GuestAllergenLookupResponse(
+                allergen.Id,
+                allergen.Code,
+                allergen.Translations
+                    .Where(translation => translation.LanguageCode.ToLower() == normalizedLanguage)
+                    .Select(translation => translation.Name)
+                    .FirstOrDefault()
+                    ?? allergen.Translations
+                        .Where(translation => translation.LanguageCode.ToLower() == "en")
+                        .Select(translation => translation.Name)
+                        .FirstOrDefault()
+                    ?? allergen.Translations.Select(translation => translation.Name).FirstOrDefault()
+                    ?? allergen.Code))
+            .ToArrayAsync(ct);
+
+        cache.Set(cacheKey, allergens, CacheDuration);
+        return allergens;
     }
 
     private IQueryable<PlanRow> ActivePlans(

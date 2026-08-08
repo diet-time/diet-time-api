@@ -93,7 +93,109 @@ public sealed class MealPlanTemplateDay : Entity { public Guid MealPlanTemplateI
 public sealed class MealPlanTemplateSlot : Entity { public Guid MealPlanTemplateDayId { get; set; } public MealPlanTemplateDay Day { get; set; } = null!; public Guid MealTypeId { get; set; } public MealType MealType { get; set; } = null!; public int DisplayOrder { get; set; } public int MinimumSelection { get; set; } public int MaximumSelection { get; set; } public bool IsRequired { get; set; } public TimeOnly? SelectionCutoffTime { get; set; } public bool AllowsPaidUpgrade { get; set; } public bool IsActive { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } public long RowVersion { get; set; } public ICollection<MealPlanTemplateSlotTranslation> Translations { get; set; } = []; public ICollection<MealPlanSlotOption> Options { get; set; } = []; }
 public sealed class MealPlanTemplateSlotTranslation : Translation { public Guid MealPlanTemplateSlotId { get; set; } public MealPlanTemplateSlot Slot { get; set; } = null!; public string? Title { get; set; } public string? Instruction { get; set; } }
 public sealed class MealPlanSlotOption : Entity { public Guid MealPlanTemplateSlotId { get; set; } public MealPlanTemplateSlot Slot { get; set; } = null!; public Guid MealItemId { get; set; } public MealItem MealItem { get; set; } = null!; public decimal AdditionalPrice { get; set; } public bool IsDefault { get; set; } public bool IsAvailable { get; set; } public int DisplayOrder { get; set; } public DateTimeOffset? AvailableFrom { get; set; } public DateTimeOffset? AvailableUntil { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } }
-public sealed class MealPlanPrice : Entity { public Guid MealPlanTemplateId { get; set; } public MealPlanTemplate Plan { get; set; } = null!; public int DurationDays { get; set; } public int MealsPerDay { get; set; } public int SnacksPerDay { get; set; } public string CurrencyCode { get; set; } = "QAR"; public decimal Amount { get; set; } public DateTimeOffset EffectiveFrom { get; set; } public DateTimeOffset? EffectiveUntil { get; set; } public bool IsActive { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } }
+public sealed class MealPlanPricePackage
+{
+    public string Code { get; set; } = "";
+    public string NameEn { get; set; } = "";
+    public string NameAr { get; set; } = "";
+    public int DurationDays { get; set; }
+    public int DisplayOrder { get; set; }
+    public bool IsActive { get; set; } = true;
+}
+
+public sealed class MealPlanPrice : Entity
+{
+    public Guid MealPlanTemplateId { get; set; }
+    public MealPlanTemplate Plan { get; set; } = null!;
+    public int DurationDays { get; set; }
+    public int MealsPerDay { get; set; }
+    public int SnacksPerDay { get; set; }
+    public string CurrencyCode { get; set; } = "QAR";
+    public decimal Amount { get; set; }
+    public DateTimeOffset EffectiveFrom { get; set; }
+    public DateTimeOffset? EffectiveUntil { get; set; }
+    public bool IsActive { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public Guid? UpdatedBy { get; set; }
+}
+
+public sealed class CustomerProfile : Entity
+{
+    public Guid? UserId { get; set; }
+    public string? PreferredName { get; set; }
+    public string? GenderCode { get; set; }
+    public DateOnly? DateOfBirth { get; set; }
+    public decimal? HeightCm { get; set; }
+    public decimal? WeightKg { get; set; }
+    public decimal? Bmi { get; set; }
+    public string? BmiCategoryCode { get; set; }
+    public string? GoalCode { get; set; }
+    public string? DailyRoutineCode { get; set; }
+    public string? ActivityLevelCode { get; set; }
+    public string PreferredLanguage { get; set; } = "en";
+    public string OnboardingStatus { get; set; } = "NOT_STARTED";
+    public DateTimeOffset? OnboardingCompletedAt { get; set; }
+    public bool AllergensConfirmed { get; set; }
+    public bool PreferencesConfirmed { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public Guid? UpdatedBy { get; set; }
+    public long RowVersion { get; set; }
+    public ICollection<CustomerNutritionTarget> NutritionTargets { get; set; } = [];
+    public ICollection<CustomerProfilePreference> Preferences { get; set; } = [];
+    public ICollection<CustomerProfileAllergen> Allergens { get; set; } = [];
+}
+
+public sealed class CustomerNutritionTarget : Entity
+{
+    public Guid CustomerProfileId { get; set; }
+    public CustomerProfile CustomerProfile { get; set; } = null!;
+    public int? DailyCaloriesKcal { get; set; }
+    public decimal? DailyProteinG { get; set; }
+    public decimal? DailyCarbohydratesG { get; set; }
+    public decimal? DailyFatG { get; set; }
+    public decimal? DailyFiberG { get; set; }
+    public int? DailyWaterMl { get; set; }
+    public string? CalculationMethod { get; set; }
+    public string? CalculationVersion { get; set; }
+    public DateTimeOffset CalculatedAt { get; set; }
+    public bool IsCurrent { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public Guid? UpdatedBy { get; set; }
+    public long RowVersion { get; set; }
+}
+
+public sealed class CustomerProfilePreference : Entity
+{
+    public Guid CustomerProfileId { get; set; }
+    public CustomerProfile CustomerProfile { get; set; } = null!;
+    public string PreferenceCode { get; set; } = "";
+    public string? PreferenceType { get; set; }
+    public int PreferencePriority { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+public sealed class CustomerProfileAllergen : Entity
+{
+    public Guid CustomerProfileId { get; set; }
+    public CustomerProfile CustomerProfile { get; set; } = null!;
+    public Guid AllergenId { get; set; }
+    public Allergen Allergen { get; set; } = null!;
+    public string? SeverityCode { get; set; }
+    public bool MedicallyConfirmed { get; set; }
+    public string? Notes { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public Guid? UpdatedBy { get; set; }
+}
 
 // User Management Entities
 public sealed class Customer : Entity

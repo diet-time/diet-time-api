@@ -223,6 +223,8 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
         [FromQuery] Guid? mealPlanTemplateId = null,
         [FromQuery] string? status = null,
         [FromQuery] string? currencyCode = null,
+        [FromQuery] string? packageId = null,
+        [FromQuery] string? packageCode = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 25,
         CancellationToken ct = default)
@@ -231,7 +233,7 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
         var allowedStatuses = new[] { "ACTIVE", "SCHEDULED", "EXPIRED", "INACTIVE" };
         if (!string.IsNullOrWhiteSpace(status) && !allowedStatuses.Contains(status.Trim().ToUpperInvariant()))
             return BadRequest(new ApiResponse<object> { Errors = [new("invalid_status", "Status must be Active, Scheduled, Expired, or Inactive.", "status")] });
-        var rows = await admin.GetMealPlanPricesAsync(search, mealPlanTemplateId, status, currencyCode, page, pageSize, ct);
+        var rows = await admin.GetMealPlanPricesAsync(search, mealPlanTemplateId, status, currencyCode, packageId, packageCode, page, pageSize, ct);
         return Ok(ApiResponse<IReadOnlyList<AdminMealPlanPriceResponse>>.Ok(rows.Items, rows.Meta));
     }
     [HttpGet("meal-plan-pricing/summary")]
@@ -247,26 +249,21 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
         return price is null ? NotFound() : Ok(ApiResponse<AdminMealPlanPriceResponse>.Ok(price));
     }
     [HttpPost("meal-plan-pricing")]
-    public async Task<ActionResult<ApiResponse<object>>> CreateMealPlanPrice(UpsertMealPlanPriceRequest request, CancellationToken ct)
+    public async Task<IActionResult> CreateMealPlanPrice(UpsertMealPlanPriceRequest request, CancellationToken ct)
     {
         var errors = ValidateMealPlanPrice(request);
         if (errors.Count > 0) return BadRequest(new ApiResponse<object> { Errors = errors });
-        var id = await admin.CreateMealPlanPriceAsync(request, UserId, ct);
-        return id is null
-            ? PricingConflict()
-            : StatusCode(StatusCodes.Status201Created, ApiResponse<object>.Ok(new { id }));
+        var result = await admin.CreateMealPlanPriceAsync(request, UserId, ct);
+        return MealPlanPriceWriteResponse(result, created: true);
     }
     [HttpPut("meal-plan-pricing/{priceId:guid}")]
     public async Task<IActionResult> UpdateMealPlanPrice(Guid priceId, UpsertMealPlanPriceRequest request, CancellationToken ct)
     {
         var errors = ValidateMealPlanPrice(request);
         if (errors.Count > 0) return BadRequest(new ApiResponse<object> { Errors = errors });
-        return await admin.UpdateMealPlanPriceAsync(priceId, request, UserId, ct) switch
-        {
-            AdminWriteResult.Success => NoContent(),
-            AdminWriteResult.NotFound => NotFound(),
-            _ => PricingConflict()
-        };
+        return MealPlanPriceWriteResponse(
+            await admin.UpdateMealPlanPriceAsync(priceId, request, UserId, ct),
+            created: false);
     }
     [HttpPatch("meal-plan-pricing/{priceId:guid}/status")]
     public async Task<IActionResult> SetMealPlanPriceStatus(Guid priceId, SetMealPlanPriceStatusRequest request, CancellationToken ct) =>
@@ -284,6 +281,61 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
             AdminWriteResult.NotFound => NotFound(),
             _ => Conflict(new ApiResponse<object> { Errors = [new("pricing_delete_not_permitted", "Only inactive future pricing records can be deleted. Deactivate historical records instead.")] })
         };
+    /// <summary>Lists the data-driven meal-plan price packages.</summary>
+    [HttpGet("meal-plan-price-packages")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<MealPlanPricePackageResponse>>>> GetMealPlanPricePackages(
+        [FromQuery] string? search = null,
+        [FromQuery] bool? isActive = null,
+        [FromQuery] string? sortBy = null,
+        [FromQuery] string? sortDirection = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 25,
+        CancellationToken ct = default)
+    {
+        if (page < 1 || pageSize is < 1 or > 100)
+            return BadRequest(new ApiResponse<object> { Errors = [new("invalid_pagination", "Page must be positive and pageSize must be between 1 and 100.")] });
+        var allowedSorts = new[] { "code", "nameEn", "nameAr", "durationDays", "displayOrder", "isActive" };
+        if (!string.IsNullOrWhiteSpace(sortBy) && !allowedSorts.Contains(sortBy, StringComparer.OrdinalIgnoreCase))
+            return BadRequest(new ApiResponse<object> { Errors = [new("invalid_sort", "The requested sort field is not supported.", "sortBy")] });
+        if (!string.IsNullOrWhiteSpace(sortDirection) && !new[] { "asc", "desc" }.Contains(sortDirection, StringComparer.OrdinalIgnoreCase))
+            return BadRequest(new ApiResponse<object> { Errors = [new("invalid_sort_direction", "Sort direction must be asc or desc.", "sortDirection")] });
+        var rows = await admin.GetMealPlanPricePackagesAsync(search, isActive, sortBy, sortDirection, page, pageSize, ct);
+        return Ok(ApiResponse<IReadOnlyList<MealPlanPricePackageResponse>>.Ok(rows.Items, rows.Meta));
+    }
+    /// <summary>Lists active packages for pricing editors.</summary>
+    [HttpGet("meal-plan-price-packages/lookup")]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<MealPlanPricePackageLookupResponse>>>> GetMealPlanPricePackageLookup(CancellationToken ct) =>
+        Ok(ApiResponse<IReadOnlyList<MealPlanPricePackageLookupResponse>>.Ok(await admin.GetMealPlanPricePackageLookupAsync(ct)));
+    [HttpGet("meal-plan-price-packages/{packageId}")]
+    public async Task<ActionResult<ApiResponse<MealPlanPricePackageResponse>>> GetMealPlanPricePackage(string packageId, CancellationToken ct)
+    {
+        var package = await admin.GetMealPlanPricePackageAsync(packageId, ct);
+        return package is null ? PackageNotFound() : Ok(ApiResponse<MealPlanPricePackageResponse>.Ok(package));
+    }
+    [HttpPost("meal-plan-price-packages")]
+    public async Task<IActionResult> CreateMealPlanPricePackage(UpsertMealPlanPricePackageRequest request, CancellationToken ct)
+    {
+        var result = await admin.CreateMealPlanPricePackageAsync(request, UserId, ct);
+        if (result.Result == MealPlanPricePackageWriteResult.DuplicateCode)
+            return PackageCodeConflict();
+        var package = await admin.GetMealPlanPricePackageAsync(result.Id!, ct);
+        return StatusCode(StatusCodes.Status201Created, ApiResponse<MealPlanPricePackageResponse>.Ok(package!));
+    }
+    [HttpPut("meal-plan-price-packages/{packageId}")]
+    public async Task<IActionResult> UpdateMealPlanPricePackage(string packageId, UpsertMealPlanPricePackageRequest request, CancellationToken ct) =>
+        await admin.UpdateMealPlanPricePackageAsync(packageId, request, UserId, ct) switch
+        {
+            MealPlanPricePackageWriteResult.Success => NoContent(),
+            MealPlanPricePackageWriteResult.NotFound => PackageNotFound(),
+            MealPlanPricePackageWriteResult.DuplicateCode => PackageCodeConflict(),
+            MealPlanPricePackageWriteResult.IdentifierChange => BadRequest(new ApiResponse<object> { Errors = [new("package_identifier_change", "Package code is the identifier and cannot be changed.", "code")] }),
+            _ => Conflict(new ApiResponse<object> { Errors = [new("package_duration_in_use", "Duration days cannot be changed because the package is referenced by pricing history.", "durationDays")] })
+        };
+    [HttpPatch("meal-plan-price-packages/{packageId}/status")]
+    public async Task<IActionResult> SetMealPlanPricePackageStatus(string packageId, SetMealPlanPricePackageStatusRequest request, CancellationToken ct) =>
+        await admin.SetMealPlanPricePackageStatusAsync(packageId, request.IsActive, UserId, ct) == AdminWriteResult.Success
+            ? NoContent()
+            : PackageNotFound();
     [HttpPost("meal-plan-days/{dayId:guid}/slots")] public async Task<ActionResult<ApiResponse<object>>> Slot(Guid dayId, CreatePlanSlotRequest request, CancellationToken ct) { var id = await admin.AddPlanSlotAsync(dayId, request, UserId, ct); return id is null ? NotFound() : Ok(ApiResponse<object>.Ok(new { id })); }
     [HttpPost("meal-plan-slots/{slotId:guid}/options")] public async Task<ActionResult<ApiResponse<object>>> Option(Guid slotId, CreateSlotOptionRequest request, CancellationToken ct) { var id = await admin.AddSlotOptionAsync(slotId, request, UserId, ct); return id is null ? NotFound() : Ok(ApiResponse<object>.Ok(new { id })); }
     [HttpDelete("meal-plan-slots/{slotId:guid}/options/{optionId:guid}")] public async Task<IActionResult> DeleteOption(Guid slotId, Guid optionId, CancellationToken ct) => await admin.DeleteSlotOptionAsync(slotId, optionId, ct) ? NoContent() : NotFound();
@@ -295,7 +347,8 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
     {
         var errors = new List<ApiError>();
         if (request.MealPlanTemplateId == Guid.Empty) errors.Add(new("required", "Meal plan template is required.", "mealPlanTemplateId"));
-        if (request.DurationDays <= 0) errors.Add(new("positive_number", "Duration days must be greater than zero.", "durationDays"));
+        if (string.IsNullOrWhiteSpace(request.MealPlanPricePackageId) && request.DurationDays is not > 0) errors.Add(new("positive_number", "Duration days must be greater than zero when a package is not supplied.", "durationDays"));
+        if (request.DurationDays.HasValue && request.DurationDays <= 0) errors.Add(new("positive_number", "Duration days must be greater than zero.", "durationDays"));
         if (request.MealsPerDay <= 0) errors.Add(new("positive_number", "Meals per day must be greater than zero.", "mealsPerDay"));
         if (request.SnacksPerDay < 0) errors.Add(new("non_negative_number", "Snacks per day cannot be negative.", "snacksPerDay"));
         if (string.IsNullOrWhiteSpace(request.CurrencyCode) || request.CurrencyCode.Trim().Length != 3) errors.Add(new("invalid_currency", "Currency must be a 3-letter code.", "currencyCode"));
@@ -304,6 +357,23 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
         if (request.EffectiveUntil.HasValue && request.EffectiveUntil < request.EffectiveFrom) errors.Add(new("invalid_period", "Effective until cannot be earlier than effective from.", "effectiveUntil"));
         return errors;
     }
+
+    private IActionResult MealPlanPriceWriteResponse(MealPlanPriceWriteResult result, bool created) => result.Status switch
+    {
+        MealPlanPriceWriteStatus.Success when created => StatusCode(StatusCodes.Status201Created, ApiResponse<object>.Ok(new { id = result.Id })),
+        MealPlanPriceWriteStatus.Success => NoContent(),
+        MealPlanPriceWriteStatus.NotFound => NotFound(new ApiResponse<object> { Errors = [new("meal_plan_not_found", "The meal plan template was not found.", "mealPlanTemplateId")] }),
+        MealPlanPriceWriteStatus.PackageNotFound => BadRequest(new ApiResponse<object> { Errors = [new("package_not_found", "The selected meal-plan price package was not found.", "mealPlanPricePackageId")] }),
+        MealPlanPriceWriteStatus.PackageInactive => BadRequest(new ApiResponse<object> { Errors = [new("package_inactive", "The selected meal-plan price package is inactive.", "mealPlanPricePackageId")] }),
+        MealPlanPriceWriteStatus.PackageDurationMismatch => BadRequest(new ApiResponse<object> { Errors = [new("package_duration_mismatch", "Duration days must match the selected package duration.", "durationDays")] }),
+        _ => PricingConflict()
+    };
+
+    private NotFoundObjectResult PackageNotFound() =>
+        NotFound(new ApiResponse<object> { Errors = [new("package_not_found", "The meal-plan price package was not found.")] });
+
+    private ConflictObjectResult PackageCodeConflict() =>
+        Conflict(new ApiResponse<object> { Errors = [new("duplicate_package_code", "A meal-plan price package with this code already exists.", "code")] });
 
     private async Task TryDeleteObjectAsync(string objectKey)
     {

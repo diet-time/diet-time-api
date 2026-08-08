@@ -7,6 +7,7 @@ public sealed class GuestHomeValidationTests
 {
     private readonly GuestHomeQueryValidator validator = new();
     private readonly GuestMenuQueryValidator menuValidator = new();
+    private readonly GuestAllergensQueryValidator allergensValidator = new();
 
     [Fact]
     public void Accepts_supported_defaults()
@@ -30,5 +31,13 @@ public sealed class GuestHomeValidationTests
         Assert.False(menuValidator.Validate(new GuestMenuQuery(new DateOnly(2026, 7, 23), "fr")).IsValid);
         Assert.False(menuValidator.Validate(new GuestMenuQuery(default)).IsValid);
         Assert.True(menuValidator.Validate(new GuestMenuQuery(new DateOnly(2026, 7, 23))).IsValid);
+    }
+
+    [Fact]
+    public void Allergens_require_a_supported_language()
+    {
+        Assert.True(allergensValidator.Validate(new GuestAllergensQuery()).IsValid);
+        Assert.True(allergensValidator.Validate(new GuestAllergensQuery("ar")).IsValid);
+        Assert.False(allergensValidator.Validate(new GuestAllergensQuery("fr")).IsValid);
     }
 }

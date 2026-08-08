@@ -13,7 +13,22 @@ public sealed record ApiError(string Code, string Message, string? Field = null)
 public sealed record PaginationMeta(int Page, int PageSize, int TotalCount, int TotalPages);
 public sealed record PagedResult<T>(IReadOnlyList<T> Items, PaginationMeta Meta);
 
-public sealed record PlanCategoryResponse(Guid Id, string Code, string Name, string? Description, string? ImageUrl, bool IsSelected);
+public sealed record PlanCategoryResponse(
+    Guid Id,
+    string Code,
+    string Name,
+    string? Description,
+    string? ImageUrl,
+    bool IsSelected,
+    decimal? DailyCaloriesKcal,
+    decimal? StartingPrice,
+    string? CurrencyCode,
+    int? PriceDurationDays,
+    decimal? DisplayDailyPrice,
+    bool HasActivePrice,
+    Guid? PricingRecordId,
+    string? SourcePackageCode,
+    int? SourceDurationDays);
 public sealed record PlanPriceResponse(int DurationDays, int MealsPerDay, int SnacksPerDay, decimal Amount, string CurrencyCode);
 public sealed record MealPlanResponse(Guid Id, string Code, string Name, string? Description, string PlanType, int DurationDays, bool IsCustomizable, IReadOnlyList<PlanPriceResponse> Prices, IReadOnlyList<MealTypeResponse> SupportedMealTypes);
 public sealed record CalendarDayResponse(Guid TemplateDayId, DateOnly Date, MenuWeekday MenuWeekday, string DayShortName, string DayName, bool IsAvailable);
@@ -28,6 +43,8 @@ public sealed record GuestHomeQuery(
 public sealed record GuestMenuQuery(
     DateOnly Date,
     string Language = "en");
+public sealed record GuestAllergensQuery(string Language = "en");
+public sealed record GuestAllergenLookupResponse(Guid Id, string Code, string Name);
 public sealed record GuestPlanSummaryResponse(
     Guid Id,
     string Code,
@@ -93,6 +110,82 @@ public sealed record MealSelectionRequest(Guid PlanId, Guid TemplateDayId, IRead
 public sealed record MealSelectionItemRequest(Guid SlotId, Guid SlotOptionId, Guid MealItemId);
 public sealed record MealSelectionValidationResponse(bool IsValid, decimal TotalAdditionalPrice, string CurrencyCode, IReadOnlyList<string> Warnings);
 
+public sealed class UpsertCustomerProfileRequest
+{
+    private List<CustomerPreferenceRequest> preferences = [];
+    private List<CustomerAllergenRequest> allergens = [];
+
+    public string? GenderCode { get; init; }
+    public DateOnly? DateOfBirth { get; init; }
+    public decimal? HeightCm { get; init; }
+    public decimal? WeightKg { get; init; }
+    public string? GoalCode { get; init; }
+    public string? DailyRoutineCode { get; init; }
+    public string? ActivityLevelCode { get; init; }
+    public string PreferredLanguage { get; init; } = "en";
+    public string OnboardingStatus { get; init; } = "IN_PROGRESS";
+    public List<CustomerPreferenceRequest> Preferences { get => preferences; init => preferences = value ?? []; }
+    public List<CustomerAllergenRequest> Allergens { get => allergens; init => allergens = value ?? []; }
+}
+
+public sealed record CustomerPreferenceRequest(
+    string PreferenceCode,
+    string? PreferenceType,
+    int PreferencePriority);
+public sealed record CustomerAllergenRequest(
+    Guid AllergenId,
+    string? SeverityCode,
+    bool MedicallyConfirmed,
+    string? Notes);
+public sealed record UpdateCustomerPreferredNameRequest(string PreferredName);
+public sealed record CustomerNutritionTargetResponse(
+    int? DailyCaloriesKcal,
+    decimal? DailyProteinG,
+    decimal? DailyCarbohydratesG,
+    decimal? DailyFatG,
+    decimal? DailyFiberG,
+    int? DailyWaterMl,
+    string? CalculationMethod,
+    string? CalculationVersion,
+    DateTimeOffset CalculatedAt);
+public sealed record CustomerPreferenceResponse(
+    Guid Id,
+    string PreferenceCode,
+    string? PreferenceType,
+    int PreferencePriority);
+public sealed record CustomerAllergenResponse(
+    Guid Id,
+    Guid AllergenId,
+    string AllergenCode,
+    string? AllergenName,
+    string? SeverityCode,
+    bool MedicallyConfirmed,
+    string? Notes);
+public sealed record CustomerProfileResponse(
+    Guid Id,
+    Guid UserId,
+    string? PreferredName,
+    string? GenderCode,
+    DateOnly? DateOfBirth,
+    int? Age,
+    decimal? HeightCm,
+    decimal? WeightKg,
+    decimal? Bmi,
+    string? BmiCategoryCode,
+    string? GoalCode,
+    string? DailyRoutineCode,
+    string? ActivityLevelCode,
+    string PreferredLanguage,
+    string OnboardingStatus,
+    DateTimeOffset? OnboardingCompletedAt,
+    bool IsActive,
+    CustomerNutritionTargetResponse? NutritionTarget,
+    IReadOnlyList<CustomerPreferenceResponse> Preferences,
+    IReadOnlyList<CustomerAllergenResponse> Allergens,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt,
+    long RowVersion);
+
 public sealed record ChangeMealStatusRequest(string Status);
 public sealed record AdminMealSummaryResponse(
     Guid Id,
@@ -100,6 +193,9 @@ public sealed record AdminMealSummaryResponse(
     string Status,
     bool IsAvailable,
     string Name,
+    string? NameAr,
+    DateTimeOffset? AvailableFrom,
+    DateTimeOffset? AvailableUntil,
     CategoryResponse Category,
     NutritionResponse? Nutrition,
     MoneyResponse? Price,
@@ -181,7 +277,7 @@ public sealed record AdminNutritionRequest(decimal? ServingQuantity, string? Ser
 public sealed record AdminIngredientLinkRequest(Guid IngredientId, decimal? Quantity, string? Unit, bool IsOptional, bool CanBeRemoved, bool CanBeReplaced, bool IsPrimaryIngredient, int DisplayOrder);
 public sealed record AdminAllergenLinkRequest(Guid AllergenId, string Level);
 public sealed record AdminPriceRequest(string PriceType, string CurrencyCode, decimal Amount, DateTimeOffset EffectiveFrom, DateTimeOffset? EffectiveUntil, bool IsActive);
-public sealed record UpsertMealRequest(string Sku, Guid CategoryId, int? PreparationTimeMinutes, bool IsVegetarian, bool IsVegan, bool IsGlutenFree, bool IsDairyFree, bool IsAvailable, DateTimeOffset? AvailableFrom, DateTimeOffset? AvailableUntil, IReadOnlyList<AdminTranslationRequest> Translations, AdminNutritionRequest? Nutrition, IReadOnlyList<AdminIngredientLinkRequest>? Ingredients = null, IReadOnlyList<AdminAllergenLinkRequest>? Allergens = null, IReadOnlyList<AdminPriceRequest>? Prices = null, string? Status = null, bool? IsSpicy = null, short? SpiceLevel = null);
+public sealed record UpsertMealRequest(string Sku, Guid CategoryId, int? PreparationTimeMinutes, bool IsVegetarian, bool IsVegan, bool IsGlutenFree, bool IsDairyFree, bool IsAvailable, DateTimeOffset? AvailableFrom, DateTimeOffset? AvailableUntil, IReadOnlyList<AdminTranslationRequest> Translations, AdminNutritionRequest? Nutrition, IReadOnlyList<AdminIngredientLinkRequest>? Ingredients = null, IReadOnlyList<AdminAllergenLinkRequest>? Allergens = null, IReadOnlyList<AdminPriceRequest>? Prices = null, string? Status = null, bool? IsSpicy = null, short? SpiceLevel = null, bool? IsNutFree = null);
 public sealed record SaveMediaRequest(string ObjectKey, string? PublicUrl, string ContentType, string MediaType, bool IsPrimary, int DisplayOrder, string? AltTextEn);
 public sealed record SaveThumbnailRequest(string ObjectKey, string? PublicUrl);
 public sealed record AdminThumbnailUpdateResponse(AdminMediaResponse Media, string? PreviousObjectKey);
@@ -221,19 +317,50 @@ public sealed record AdminMealPlanPriceResponse(
     DateTimeOffset? EffectiveUntil,
     bool IsActive,
     string Status,
-    bool CanDelete);
+    bool CanDelete,
+    string? MealPlanPricePackageId = null,
+    string? PackageCode = null,
+    string? PackageNameEn = null,
+    string? PackageNameAr = null);
 public sealed record AdminMealPlanPriceSummaryResponse(int Active, int Scheduled, int Expired, int Inactive);
 public sealed record UpsertMealPlanPriceRequest(
     Guid MealPlanTemplateId,
-    int DurationDays,
+    int? DurationDays,
     int MealsPerDay,
     int SnacksPerDay,
     string CurrencyCode,
     decimal Amount,
     DateTimeOffset EffectiveFrom,
     DateTimeOffset? EffectiveUntil,
-    bool IsActive);
+    bool IsActive,
+    string? MealPlanPricePackageId = null);
 public sealed record SetMealPlanPriceStatusRequest(bool IsActive);
+public sealed record MealPlanPricePackageResponse(
+    string Id,
+    string Code,
+    string NameEn,
+    string NameAr,
+    int DurationDays,
+    int DisplayOrder,
+    bool IsActive,
+    DateTimeOffset? CreatedAt,
+    DateTimeOffset? UpdatedAt);
+public sealed record MealPlanPricePackageLookupResponse(
+    string Id,
+    string Code,
+    string Name,
+    string NameEn,
+    string NameAr,
+    int DurationDays,
+    int DisplayOrder);
+public sealed record UpsertMealPlanPricePackageRequest(
+    string Code,
+    string NameEn,
+    string NameAr,
+    int DurationDays,
+    int DisplayOrder,
+    bool IsActive);
+public sealed record SetMealPlanPricePackageStatusRequest(bool IsActive);
 public sealed record UpsertPlanOptionRequest(Guid MealItemId, decimal AdditionalPrice, bool IsDefault, bool IsAvailable, int DisplayOrder);
 public sealed record UpsertPlanSlotRequest(Guid MealTypeId, int DisplayOrder, int MinimumSelection, int MaximumSelection, bool IsRequired, TimeOnly? SelectionCutoffTime, bool AllowsPaidUpgrade, IReadOnlyList<UpsertPlanOptionRequest> Options);
 public sealed record UpsertPlanDayRequest(MenuWeekday? MenuWeekday, int DisplayOrder, bool IsActive, IReadOnlyList<UpsertPlanSlotRequest> Slots);

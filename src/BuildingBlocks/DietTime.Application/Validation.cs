@@ -40,6 +40,85 @@ public sealed class GuestMenuQueryValidator : AbstractValidator<GuestMenuQuery>
     }
 }
 
+public sealed class GuestAllergensQueryValidator : AbstractValidator<GuestAllergensQuery>
+{
+    public GuestAllergensQueryValidator()
+    {
+        RuleFor(x => x.Language)
+            .NotEmpty()
+            .Must(x => x is not null && (x.Equals("en", StringComparison.OrdinalIgnoreCase) || x.Equals("ar", StringComparison.OrdinalIgnoreCase)))
+            .WithMessage("Language must be either 'en' or 'ar'.");
+    }
+}
+
+public sealed class UpsertCustomerProfileRequestValidator : AbstractValidator<UpsertCustomerProfileRequest>
+{
+    public UpsertCustomerProfileRequestValidator(TimeProvider clock)
+    {
+        var today = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
+
+        RuleFor(x => x.HeightCm).InclusiveBetween(50m, 300m).When(x => x.HeightCm.HasValue);
+        RuleFor(x => x.WeightKg).InclusiveBetween(15m, 500m).When(x => x.WeightKg.HasValue);
+        RuleFor(x => x.PreferredLanguage).NotEmpty().MaximumLength(10);
+        RuleFor(x => x.OnboardingStatus).NotEmpty().MaximumLength(30);
+        RuleFor(x => x.GenderCode).MaximumLength(30);
+        RuleFor(x => x.GoalCode).MaximumLength(50);
+        RuleFor(x => x.DailyRoutineCode).MaximumLength(50);
+        RuleFor(x => x.ActivityLevelCode).MaximumLength(50);
+        RuleFor(x => x.DateOfBirth)
+            .Must(value => value is null || value <= today)
+            .WithMessage("Date of birth cannot be in the future.")
+            .Must(value => value is null || value >= today.AddYears(-120))
+            .WithMessage("Date of birth cannot represent an age older than 120 years.");
+
+        RuleForEach(x => x.Preferences).ChildRules(preference =>
+        {
+            preference.RuleFor(x => x.PreferenceCode).NotEmpty().MaximumLength(50);
+            preference.RuleFor(x => x.PreferenceType).MaximumLength(30);
+            preference.RuleFor(x => x.PreferencePriority).InclusiveBetween(1, 5);
+        });
+        RuleFor(x => x.Preferences)
+            .Must(items => items
+                .Select(item => item.PreferenceCode?.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count() == items.Count)
+            .WithMessage("Duplicate preference codes are not allowed.");
+
+        RuleForEach(x => x.Allergens).ChildRules(allergen =>
+        {
+            allergen.RuleFor(x => x.AllergenId).NotEmpty();
+            allergen.RuleFor(x => x.SeverityCode).MaximumLength(30);
+            allergen.RuleFor(x => x.Notes).MaximumLength(500);
+        });
+        RuleFor(x => x.Allergens)
+            .Must(items => items.Select(item => item.AllergenId).Distinct().Count() == items.Count)
+            .WithMessage("Duplicate allergen IDs are not allowed.");
+
+        When(
+            x => string.Equals(x.OnboardingStatus, "COMPLETED", StringComparison.OrdinalIgnoreCase),
+            () =>
+            {
+                RuleFor(x => x.GenderCode).NotEmpty();
+                RuleFor(x => x.DateOfBirth).NotNull();
+                RuleFor(x => x.HeightCm).NotNull();
+                RuleFor(x => x.WeightKg).NotNull();
+                RuleFor(x => x.GoalCode).NotEmpty();
+                RuleFor(x => x.DailyRoutineCode).NotEmpty();
+                RuleFor(x => x.ActivityLevelCode).NotEmpty();
+                RuleFor(x => x.PreferredLanguage).NotEmpty();
+            });
+    }
+}
+
+public sealed class UpdateCustomerPreferredNameRequestValidator
+    : AbstractValidator<UpdateCustomerPreferredNameRequest>
+{
+    public UpdateCustomerPreferredNameRequestValidator()
+    {
+        RuleFor(x => x.PreferredName).NotEmpty().MaximumLength(100);
+    }
+}
+
 public sealed class UpsertAllergenRequestValidator : AbstractValidator<UpsertAllergenRequest>
 {
     public UpsertAllergenRequestValidator()
@@ -101,5 +180,22 @@ public sealed class UpsertMealPlanTemplateDayRequestValidator : AbstractValidato
     {
         RuleFor(x => x.MenuWeekday).NotNull().IsInEnum();
         RuleFor(x => x.DisplayOrder).GreaterThan(0);
+    }
+}
+
+public sealed class UpsertMealPlanPricePackageRequestValidator
+    : AbstractValidator<UpsertMealPlanPricePackageRequest>
+{
+    public UpsertMealPlanPricePackageRequestValidator()
+    {
+        RuleFor(x => x.Code)
+            .NotEmpty()
+            .MaximumLength(50)
+            .Matches("^[\\p{L}\\p{N}_ -]+$")
+            .WithMessage("Code may contain letters, numbers, spaces, underscores, and hyphens.");
+        RuleFor(x => x.NameEn).NotEmpty().MaximumLength(100);
+        RuleFor(x => x.NameAr).NotEmpty().MaximumLength(100);
+        RuleFor(x => x.DurationDays).GreaterThan(0);
+        RuleFor(x => x.DisplayOrder).GreaterThanOrEqualTo(0);
     }
 }
