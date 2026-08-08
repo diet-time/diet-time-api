@@ -141,6 +141,10 @@ builder.Services.AddScoped<IOperationalCalendarService, DefaultOperationalCalend
 builder.Services.AddScoped<IDeliverySchedulingService, DeliverySchedulingService>(); 
 builder.Services.AddScoped<IPhoneOtpVerifier, TestPhoneOtpVerifier>(); 
 builder.Services.AddScoped<IAuthService, AuthService>(); 
+builder.Services.AddSingleton<ICustomerNutritionCalculator>(services =>
+    new CustomerNutritionCalculator(
+        services.GetRequiredService<IOptions<CustomerNutritionOptions>>().Value));
+builder.Services.AddScoped<ICustomerProfileService, CustomerProfileService>();
 builder.Services.AddScoped<IUserProfileService, UserProfileService>(); 
 builder.Services.AddScoped<ICustomerService, CustomerService>(); 
 builder.Services.AddScoped<IApplicationRoleService, ApplicationRoleService>(); 
