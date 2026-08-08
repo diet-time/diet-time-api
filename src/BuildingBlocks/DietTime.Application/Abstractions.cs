@@ -46,6 +46,35 @@ public sealed record CustomerProfileUpsertResult(
     public bool IsSuccess => Profile is not null && InvalidAllergenIds.Count == 0;
 }
 
+public enum MealPlanSelectionValidationStatus
+{
+    Valid,
+    PriceNotFound,
+    WrongPlan,
+    PriceInactive,
+    PriceNotEffective,
+    PriceExpired,
+    PricePackageNotFound,
+    PricePackageInactive
+}
+
+public sealed record MealPlanSelectionValidationResult(
+    MealPlanSelectionValidationStatus Status,
+    MealPlanSelectionValidationResponse? Selection = null);
+
+public interface ICustomerMealPlanPurchaseService
+{
+    Task<MealPlanPurchaseOptionsResponse?> GetPurchaseOptionsAsync(
+        string mealPlanCodeOrId,
+        Guid userId,
+        string language,
+        CancellationToken cancellationToken);
+
+    Task<MealPlanSelectionValidationResult> ValidateSelectionAsync(
+        ValidateMealPlanSelectionRequest request,
+        CancellationToken cancellationToken);
+}
+
 public interface ICustomerProfileService
 {
     Task<CustomerProfileResponse?> GetAsync(Guid userId, CancellationToken cancellationToken);

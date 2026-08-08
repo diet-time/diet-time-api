@@ -1,16 +1,55 @@
 using System.Reflection;
 using System.Net;
+using DietTime.Application;
 using DietTime.Contracts;
+using DietTime.Meal.Api.Controllers;
 using DietTime.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 namespace DietTime.Meal.Api.IntegrationTests;
 
 public sealed class AuthenticationContractTests
 {
+    [Fact]
+    public void Customer_purchase_contract_exposes_routes_without_recommendation_fields()
+    {
+        var route = Assert.Single(typeof(CustomerMealPlansController)
+            .GetCustomAttributes<Microsoft.AspNetCore.Mvc.RouteAttribute>());
+        Assert.Equal("api/v{version:apiVersion}/customer/meal-plans", route.Template);
+
+        var actions = typeof(CustomerMealPlansController).GetMethods(BindingFlags.Instance | BindingFlags.Public);
+        Assert.Contains(actions, method => method.GetCustomAttributes<HttpGetAttribute>()
+            .Any(attribute => attribute.Template == "{mealPlanCode}/purchase-options"));
+        Assert.Contains(actions, method => method.GetCustomAttributes<HttpPostAttribute>()
+            .Any(attribute => attribute.Template == "validate-selection"));
+
+        var responseProperties = typeof(MealPlanPurchaseOptionsResponse)
+            .Assembly
+            .GetTypes()
+            .Where(type => type.Name.StartsWith("MealPlanPurchase", StringComparison.Ordinal)
+                || type == typeof(MealPlanMealConfigurationResponse))
+            .SelectMany(type => type.GetProperties())
+            .Select(property => property.Name)
+            .ToArray();
+        Assert.DoesNotContain(responseProperties, property =>
+            property.Contains("recommend", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Customer_purchase_service_is_registered()
+    {
+        using var factory = new ApiFactory(
+            "Host=localhost;Database=registration_check;Username=postgres;Password=unused");
+        using var scope = factory.Services.CreateScope();
+
+        Assert.IsType<CustomerMealPlanPurchaseService>(
+            scope.ServiceProvider.GetRequiredService<ICustomerMealPlanPurchaseService>());
+    }
+
     [Fact]
     public void Authentication_routes_are_unique_and_complete()
     {

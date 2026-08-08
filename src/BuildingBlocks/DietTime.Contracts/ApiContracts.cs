@@ -31,6 +31,46 @@ public sealed record PlanCategoryResponse(
     int? SourceDurationDays);
 public sealed record PlanPriceResponse(int DurationDays, int MealsPerDay, int SnacksPerDay, decimal Amount, string CurrencyCode);
 public sealed record MealPlanResponse(Guid Id, string Code, string Name, string? Description, string PlanType, int DurationDays, bool IsCustomizable, IReadOnlyList<PlanPriceResponse> Prices, IReadOnlyList<MealTypeResponse> SupportedMealTypes);
+public sealed record MealPlanPurchasePlanResponse(
+    Guid Id,
+    string Code,
+    string Name,
+    string? ShortDescription,
+    string? ImageUrl,
+    decimal? EstimatedCaloriesPerDay);
+public sealed record MealPlanPurchasePackageResponse(
+    Guid PriceId,
+    string PackageId,
+    string PackageCode,
+    string PackageName,
+    int ServiceDays,
+    int DisplayOrder,
+    string CurrencyCode,
+    decimal Amount,
+    decimal PricePerServiceDay);
+public sealed record MealPlanMealConfigurationResponse(
+    int MealsPerDay,
+    int SnacksPerDay,
+    string DisplayName,
+    string IncludedText,
+    IReadOnlyList<MealPlanPurchasePackageResponse> Packages);
+public sealed record MealPlanPurchaseOptionsResponse(
+    MealPlanPurchasePlanResponse Plan,
+    IReadOnlyList<MealPlanMealConfigurationResponse> MealConfigurations,
+    bool HasRecordedAllergens);
+public sealed record ValidateMealPlanSelectionRequest(
+    Guid MealPlanTemplateId,
+    Guid MealPlanPriceId);
+public sealed record MealPlanSelectionValidationResponse(
+    bool IsValid,
+    Guid MealPlanTemplateId,
+    Guid MealPlanPriceId,
+    int MealsPerDay,
+    int SnacksPerDay,
+    int ServiceDays,
+    string CurrencyCode,
+    decimal Amount,
+    decimal PricePerServiceDay);
 public sealed record CalendarDayResponse(Guid TemplateDayId, DateOnly Date, MenuWeekday MenuWeekday, string DayShortName, string DayName, bool IsAvailable);
 public sealed record MealTypeResponse(Guid? Id, string Code, string Name, int DisplayOrder);
 public sealed record MealCardResponse(Guid SlotOptionId, Guid SlotId, Guid MealItemId, MealTypeResponse MealType, string Name, string? ShortDescription, string? ThumbnailUrl, decimal? CaloriesKcal, decimal? ProteinGrams, decimal? CarbohydratesGrams, decimal? FatGrams, decimal AdditionalPrice, string CurrencyCode, bool IsDefault, bool IsAvailable, IReadOnlyList<string> AllergenCodes);
