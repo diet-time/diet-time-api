@@ -74,6 +74,28 @@ public sealed class MealPlanPricePackageApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public void Price_translation_model_matches_the_existing_public_table()
+    {
+        var options = new DbContextOptionsBuilder<DietTimeDbContext>()
+            .UseNpgsql("Host=localhost;Database=model_only;Username=test;Password=test")
+            .UseSnakeCaseNamingConvention()
+            .Options;
+        using var db = new DietTimeDbContext(options);
+        var entityType = db.Model.FindEntityType(typeof(MealPlanPriceTranslation));
+
+        Assert.NotNull(entityType);
+        Assert.Equal("meal_plan_price_translations", entityType.GetTableName());
+        Assert.Equal("public", entityType.GetSchema());
+        Assert.Contains(entityType.GetIndexes(), index => index.IsUnique
+            && index.Properties.Select(property => property.Name)
+                .SequenceEqual([nameof(MealPlanPriceTranslation.MealPlanPriceId), nameof(MealPlanPriceTranslation.LanguageCode)]));
+        var sql = db.MealPlanPriceTranslations
+            .Select(translation => new { translation.MealPlanPriceId, translation.LanguageCode, translation.Name, translation.Description })
+            .ToQueryString();
+        Assert.Contains("meal_plan_price_translations", sql);
+    }
+
+    [Fact]
     public void Package_endpoints_retain_admin_authorization_metadata()
     {
         var authorize = Assert.Single(typeof(AdminController).GetCustomAttributes(typeof(AuthorizeAttribute), true));
@@ -230,6 +252,38 @@ public sealed class MealPlanPricePackageApiTests : IAsyncLifetime
             isActive = true
         });
         Assert.Equal(HttpStatusCode.Created, legacy.StatusCode);
+    }
+
+    [Fact]
+    public async Task Pricing_admin_create_and_detail_round_trip_translations()
+    {
+        if (!enabled) return;
+        var http = client!;
+        var created = await http.PostAsJsonAsync("/api/v1/admin/meal-plan-pricing", new
+        {
+            mealPlanTemplateId = planId,
+            mealPlanPricePackageId = WeekId,
+            mealsPerDay = 2,
+            snacksPerDay = 1,
+            currencyCode = "QAR",
+            amount = 420m,
+            effectiveFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            effectiveUntil = (DateTimeOffset?)null,
+            isActive = true,
+            translations = new[]
+            {
+                new { languageCode = "en", name = "Two meals and a snack", description = "Weekly package" },
+                new { languageCode = "ar", name = "Arabic price name", description = "Arabic price description" }
+            }
+        });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var priceId = await ReadCreatedIdAsync(created);
+
+        using var detail = JsonDocument.Parse(await http.GetStringAsync($"/api/v1/admin/meal-plan-pricing/{priceId}"));
+        var translations = detail.RootElement.GetProperty("data").GetProperty("translations").EnumerateArray().ToArray();
+        Assert.Equal(2, translations.Length);
+        Assert.Contains(translations, translation => translation.GetProperty("languageCode").GetString() == "en"
+            && translation.GetProperty("name").GetString() == "Two meals and a snack");
     }
 
     private Task<HttpResponseMessage> CreatePackagePriceAsync(

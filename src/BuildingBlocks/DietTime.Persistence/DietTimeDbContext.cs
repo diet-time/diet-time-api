@@ -37,6 +37,7 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
     public DbSet<MealPlanTemplateSlotTranslation> MealPlanTemplateSlotTranslations => Set<MealPlanTemplateSlotTranslation>();
     public DbSet<MealPlanSlotOption> MealPlanSlotOptions => Set<MealPlanSlotOption>();
     public DbSet<MealPlanPrice> MealPlanPrices => Set<MealPlanPrice>();
+    public DbSet<MealPlanPriceTranslation> MealPlanPriceTranslations => Set<MealPlanPriceTranslation>();
     public DbSet<MealPlanPricePackage> MealPlanPricePackages => Set<MealPlanPricePackage>();
     public DbSet<CustomerProfile> CustomerProfiles => Set<CustomerProfile>();
     public DbSet<CustomerNutritionTarget> CustomerNutritionTargets => Set<CustomerNutritionTarget>();
@@ -117,6 +118,24 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
             e.Property(x => x.CurrencyCode).HasColumnType("char(3)");
             e.HasIndex(x => new { x.MealPlanTemplateId, x.DurationDays, x.MealsPerDay, x.SnacksPerDay, x.CurrencyCode }).HasDatabaseName("ix_meal_plan_prices_package");
             e.HasOne(x => x.Plan).WithMany(x => x.Prices).HasForeignKey(x => x.MealPlanTemplateId).OnDelete(DeleteBehavior.Restrict);
+        });
+        Translation<MealPlanPriceTranslation>(b, "meal_plan_price_translations", 10);
+        b.Entity<MealPlanPriceTranslation>(e =>
+        {
+            e.ToTable("meal_plan_price_translations", "public");
+            e.Property(x => x.Name).HasMaxLength(150);
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.HasIndex(x => new { x.MealPlanPriceId, x.LanguageCode })
+                .IsUnique()
+                .HasDatabaseName("uq_meal_plan_price_translations_language");
+            e.HasIndex(x => x.MealPlanPriceId)
+                .HasDatabaseName("ix_meal_plan_price_translations_price_id");
+            e.HasIndex(x => x.LanguageCode)
+                .HasDatabaseName("ix_meal_plan_price_translations_language_code");
+            e.HasOne(x => x.Price)
+                .WithMany(x => x.Translations)
+                .HasForeignKey(x => x.MealPlanPriceId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 

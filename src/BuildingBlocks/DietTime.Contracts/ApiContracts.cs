@@ -29,7 +29,14 @@ public sealed record PlanCategoryResponse(
     Guid? PricingRecordId,
     string? SourcePackageCode,
     int? SourceDurationDays);
-public sealed record PlanPriceResponse(int DurationDays, int MealsPerDay, int SnacksPerDay, decimal Amount, string CurrencyCode);
+public sealed record PlanPriceResponse(
+    int DurationDays,
+    int MealsPerDay,
+    int SnacksPerDay,
+    decimal Amount,
+    string CurrencyCode,
+    string? Name = null,
+    string? Description = null);
 public sealed record MealPlanResponse(Guid Id, string Code, string Name, string? Description, string PlanType, int DurationDays, bool IsCustomizable, IReadOnlyList<PlanPriceResponse> Prices, IReadOnlyList<MealTypeResponse> SupportedMealTypes);
 public sealed record MealPlanPurchasePlanResponse(
     Guid Id,
@@ -47,7 +54,9 @@ public sealed record MealPlanPurchasePackageResponse(
     int DisplayOrder,
     string CurrencyCode,
     decimal Amount,
-    decimal PricePerServiceDay);
+    decimal PricePerServiceDay,
+    string? Name = null,
+    string? Description = null);
 public sealed record MealPlanMealConfigurationResponse(
     int MealsPerDay,
     int SnacksPerDay,
@@ -361,7 +370,16 @@ public sealed record AdminMealPlanPriceResponse(
     string? MealPlanPricePackageId = null,
     string? PackageCode = null,
     string? PackageNameEn = null,
-    string? PackageNameAr = null);
+    string? PackageNameAr = null,
+    IReadOnlyList<AdminMealPlanPriceTranslationResponse>? Translations = null);
+public sealed record AdminMealPlanPriceTranslationResponse(
+    string LanguageCode,
+    string Name,
+    string? Description);
+public sealed record UpsertMealPlanPriceTranslationRequest(
+    string LanguageCode,
+    string Name,
+    string? Description = null);
 public sealed record AdminMealPlanPriceSummaryResponse(int Active, int Scheduled, int Expired, int Inactive);
 public sealed record UpsertMealPlanPriceRequest(
     Guid MealPlanTemplateId,
@@ -373,7 +391,8 @@ public sealed record UpsertMealPlanPriceRequest(
     DateTimeOffset EffectiveFrom,
     DateTimeOffset? EffectiveUntil,
     bool IsActive,
-    string? MealPlanPricePackageId = null);
+    string? MealPlanPricePackageId = null,
+    IReadOnlyList<UpsertMealPlanPriceTranslationRequest>? Translations = null);
 public sealed record SetMealPlanPriceStatusRequest(bool IsActive);
 public sealed record MealPlanPricePackageResponse(
     string Id,

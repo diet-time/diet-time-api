@@ -992,6 +992,8 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             var term = search.Trim();
             query = query.Where(x => EF.Functions.ILike(x.Plan.Code, $"%{term}%")
                 || x.Plan.Translations.Any(t => EF.Functions.ILike(t.Name, $"%{term}%"))
+                || x.Translations.Any(t => EF.Functions.ILike(t.Name, $"%{term}%")
+                    || (t.Description != null && EF.Functions.ILike(t.Description, $"%{term}%")))
                 || db.MealPlanPricePackages.Any(package =>
                     package.DurationDays == x.DurationDays
                     && (EF.Functions.ILike(package.Code, $"%{term}%")
@@ -1067,16 +1069,40 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
                 db.MealPlanPricePackages.Where(package => package.DurationDays == x.DurationDays)
                     .OrderBy(package => package.DisplayOrder).Select(package => package.NameEn).FirstOrDefault(),
                 db.MealPlanPricePackages.Where(package => package.DurationDays == x.DurationDays)
-                    .OrderBy(package => package.DisplayOrder).Select(package => package.NameAr).FirstOrDefault()))
+                    .OrderBy(package => package.DisplayOrder).Select(package => package.NameAr).FirstOrDefault(),
+                null))
             .ToListAsync(ct);
+
+        var priceIds = rows.Select(row => row.Id).ToArray();
+        var translations = await db.MealPlanPriceTranslations.AsNoTracking()
+            .Where(translation => priceIds.Contains(translation.MealPlanPriceId))
+            .OrderBy(translation => translation.LanguageCode)
+            .Select(translation => new
+            {
+                translation.MealPlanPriceId,
+                Value = new AdminMealPlanPriceTranslationResponse(
+                    translation.LanguageCode,
+                    translation.Name,
+                    translation.Description)
+            })
+            .ToListAsync(ct);
+        rows = rows
+            .Select(row => row with
+            {
+                Translations = translations
+                    .Where(translation => translation.MealPlanPriceId == row.Id)
+                    .Select(translation => translation.Value)
+                    .ToArray()
+            })
+            .ToList();
 
         return new(rows, new(page, pageSize, count, (int)Math.Ceiling(count / (double)pageSize)));
     }
 
-    public Task<AdminMealPlanPriceResponse?> GetMealPlanPriceAsync(Guid priceId, CancellationToken ct)
+    public async Task<AdminMealPlanPriceResponse?> GetMealPlanPriceAsync(Guid priceId, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
-        return db.MealPlanPrices.AsNoTracking()
+        var price = await db.MealPlanPrices.AsNoTracking()
             .Where(x => x.Id == priceId)
             .Select(x => new AdminMealPlanPriceResponse(
                 x.Id,
@@ -1106,8 +1132,20 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
                 db.MealPlanPricePackages.Where(package => package.DurationDays == x.DurationDays)
                     .OrderBy(package => package.DisplayOrder).Select(package => package.NameEn).FirstOrDefault(),
                 db.MealPlanPricePackages.Where(package => package.DurationDays == x.DurationDays)
-                    .OrderBy(package => package.DisplayOrder).Select(package => package.NameAr).FirstOrDefault()))
+                    .OrderBy(package => package.DisplayOrder).Select(package => package.NameAr).FirstOrDefault(),
+                null))
             .SingleOrDefaultAsync(ct);
+        if (price is null) return null;
+
+        var translations = await db.MealPlanPriceTranslations.AsNoTracking()
+            .Where(translation => translation.MealPlanPriceId == priceId)
+            .OrderBy(translation => translation.LanguageCode)
+            .Select(translation => new AdminMealPlanPriceTranslationResponse(
+                translation.LanguageCode,
+                translation.Name,
+                translation.Description))
+            .ToListAsync(ct);
+        return price with { Translations = translations };
     }
 
     public async Task<AdminMealPlanPriceSummaryResponse> GetMealPlanPriceSummaryAsync(CancellationToken ct)
@@ -1164,6 +1202,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             CreatedBy = userId,
             UpdatedBy = userId
         };
+        ApplyPriceTranslations(price, request.Translations, now);
         db.MealPlanPrices.Add(price);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
@@ -1173,7 +1212,9 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
     public async Task<MealPlanPriceWriteResult> UpdateMealPlanPriceAsync(Guid priceId, UpsertMealPlanPriceRequest request, Guid? userId, CancellationToken ct)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        var price = await db.MealPlanPrices.SingleOrDefaultAsync(x => x.Id == priceId, ct);
+        var price = await db.MealPlanPrices
+            .Include(x => x.Translations)
+            .SingleOrDefaultAsync(x => x.Id == priceId, ct);
         if (price is null) return new(MealPlanPriceWriteStatus.NotFound);
         if (!await db.MealPlanTemplates.AnyAsync(x => x.Id == request.MealPlanTemplateId && x.IsLatest, ct))
             return new(MealPlanPriceWriteStatus.NotFound);
@@ -1195,6 +1236,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         price.IsActive = request.IsActive;
         price.UpdatedAt = clock.GetUtcNow();
         price.UpdatedBy = userId;
+        ApplyPriceTranslations(price, request.Translations, price.UpdatedAt);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return new(MealPlanPriceWriteStatus.Success, price.Id);
@@ -1579,6 +1621,28 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
     }
 
     private static void ApplyTranslations(MealItem meal, IEnumerable<AdminTranslationRequest> values, DateTimeOffset now) { foreach (var t in values) meal.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, PreparationInstructions = t.PreparationInstructions, ServingNotes = t.ServingNotes, CreatedAt = now, UpdatedAt = now }); }
+    private void ApplyPriceTranslations(
+        MealPlanPrice price,
+        IReadOnlyList<UpsertMealPlanPriceTranslationRequest>? values,
+        DateTimeOffset now)
+    {
+        if (values is null) return;
+        db.MealPlanPriceTranslations.RemoveRange(price.Translations);
+        price.Translations.Clear();
+        foreach (var translation in values)
+        {
+            price.Translations.Add(new()
+            {
+                LanguageCode = translation.LanguageCode.Trim().ToLowerInvariant(),
+                Name = translation.Name.Trim(),
+                Description = string.IsNullOrWhiteSpace(translation.Description)
+                    ? null
+                    : translation.Description.Trim(),
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+        }
+    }
     private static void ApplyNutrition(MealItem meal, AdminNutritionRequest? n, DateTimeOffset now) { if (n is null) { meal.Nutrition = null; return; } meal.Nutrition ??= new() { CreatedAt = now }; meal.Nutrition.ServingQuantity = n.ServingQuantity; meal.Nutrition.ServingUnit = n.ServingUnit; meal.Nutrition.CaloriesKcal = n.CaloriesKcal; meal.Nutrition.ProteinGrams = n.ProteinGrams; meal.Nutrition.CarbohydratesGrams = n.CarbohydratesGrams; meal.Nutrition.FatGrams = n.FatGrams; meal.Nutrition.SaturatedFatGrams = n.SaturatedFatGrams; meal.Nutrition.TransFatGrams = n.TransFatGrams; meal.Nutrition.FiberGrams = n.FiberGrams; meal.Nutrition.SugarGrams = n.SugarGrams; meal.Nutrition.SodiumMg = n.SodiumMg; meal.Nutrition.CholesterolMg = n.CholesterolMg; meal.Nutrition.UpdatedAt = now; }
     private static void ApplyAggregate(MealItem meal, UpsertMealRequest request, DateTimeOffset now, Guid? userId)
     {

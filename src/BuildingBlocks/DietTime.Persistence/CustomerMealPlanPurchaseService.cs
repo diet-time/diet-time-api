@@ -107,7 +107,23 @@ public sealed class CustomerMealPlanPurchaseService(
                 package.Code,
                 language == "ar" ? package.NameAr : package.NameEn,
                 package.DurationDays,
-                package.DisplayOrder))
+                package.DisplayOrder,
+                price.Translations
+                    .Where(translation => translation.LanguageCode == language)
+                    .Select(translation => translation.Name)
+                    .FirstOrDefault()
+                    ?? price.Translations
+                        .Where(translation => translation.LanguageCode == "en")
+                        .Select(translation => translation.Name)
+                        .FirstOrDefault(),
+                price.Translations
+                    .Where(translation => translation.LanguageCode == language)
+                    .Select(translation => translation.Description)
+                    .FirstOrDefault()
+                    ?? price.Translations
+                        .Where(translation => translation.LanguageCode == "en")
+                        .Select(translation => translation.Description)
+                        .FirstOrDefault()))
             .ToListAsync(ct);
 
         var calorieRows = await db.MealPlanSlotOptions.AsNoTracking()
@@ -173,7 +189,9 @@ public sealed class CustomerMealPlanPurchaseService(
                         row.PackageDisplayOrder,
                         row.CurrencyCode.Trim(),
                         row.Amount,
-                        DailyPrice(row.Amount, row.ServiceDays)))
+                        DailyPrice(row.Amount, row.ServiceDays),
+                        row.Name,
+                        row.Description))
                     .ToArray()))
             .ToArray();
 
@@ -290,5 +308,7 @@ public sealed class CustomerMealPlanPurchaseService(
         string PackageCode,
         string PackageName,
         int ServiceDays,
-        int PackageDisplayOrder);
+        int PackageDisplayOrder,
+        string? Name,
+        string? Description);
 }

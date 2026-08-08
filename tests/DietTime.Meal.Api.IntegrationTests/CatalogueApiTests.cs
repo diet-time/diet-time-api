@@ -26,7 +26,20 @@ public sealed class CatalogueApiTests : IAsyncLifetime
     [Fact] public async Task Meal_list_filters_by_plan_and_day() { if (!enabled) return; var body = await client!.GetStringAsync($"/api/v1/meal-plans/{planId}/meals?templateDayId={dayId}"); Assert.Contains(mealId.ToString(), body, StringComparison.OrdinalIgnoreCase); }
     [Fact] public async Task Meal_response_is_localized() { if (!enabled) return; var body = await client!.GetStringAsync($"/api/v1/meals/{mealId}?language=ar"); Assert.Contains("وجبة", body); }
     [Fact] public async Task Meal_details_returns_active_meal() { if (!enabled) return; Assert.True((await client!.GetAsync($"/api/v1/meals/{mealId}")).IsSuccessStatusCode); }
-    [Fact] public async Task Meal_plan_details_return_prices_and_unique_supported_types() { if (!enabled) return; using var json = System.Text.Json.JsonDocument.Parse(await client!.GetStringAsync($"/api/v1/meal-plans/{planId}")); var data = json.RootElement.GetProperty("data"); Assert.Equal("CLASSIC", data.GetProperty("code").GetString()); Assert.NotEmpty(data.GetProperty("prices").EnumerateArray()); var types = data.GetProperty("supportedMealTypes").EnumerateArray().ToArray(); Assert.Equal(types.Length, types.Select(type => type.GetProperty("id").GetGuid()).Distinct().Count()); }
+    [Fact]
+    public async Task Meal_plan_details_return_localized_prices_and_unique_supported_types()
+    {
+        if (!enabled) return;
+        using var json = System.Text.Json.JsonDocument.Parse(await client!.GetStringAsync($"/api/v1/meal-plans/{planId}?language=en"));
+        var data = json.RootElement.GetProperty("data");
+        Assert.Equal("CLASSIC", data.GetProperty("code").GetString());
+        var prices = data.GetProperty("prices").EnumerateArray().ToArray();
+        Assert.NotEmpty(prices);
+        Assert.Contains(prices, price => price.GetProperty("durationDays").GetInt32() == 6
+            && price.GetProperty("name").GetString() == "One meal weekly");
+        var types = data.GetProperty("supportedMealTypes").EnumerateArray().ToArray();
+        Assert.Equal(types.Length, types.Select(type => type.GetProperty("id").GetGuid()).Distinct().Count());
+    }
     [Fact] public async Task Missing_meal_returns_404() { if (!enabled) return; Assert.Equal(System.Net.HttpStatusCode.NotFound, (await client!.GetAsync($"/api/v1/meals/{Guid.NewGuid()}")).StatusCode); }
     [Fact] public async Task Inactive_meal_is_excluded() { if (!enabled) return; using var scope = factory!.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>(); var meal = await db.MealItems.FindAsync(mealId); meal!.Status = "INACTIVE"; await db.SaveChangesAsync(); Assert.Equal(System.Net.HttpStatusCode.NotFound, (await client!.GetAsync($"/api/v1/meals/{mealId}")).StatusCode); }
     [Fact] public async Task Unpublished_plan_is_excluded() { if (!enabled) return; using var scope = factory!.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>(); var plan = await db.MealPlanTemplates.FindAsync(planId); plan!.IsPublished = false; await db.SaveChangesAsync(); Assert.Equal(System.Net.HttpStatusCode.NotFound, (await client!.GetAsync($"/api/v1/meal-plans/{planId}")).StatusCode); }
@@ -179,6 +192,8 @@ public sealed class CatalogueApiTests : IAsyncLifetime
         Assert.True(en.GetProperty("hasRecordedAllergens").GetBoolean());
         Assert.Equal("One Week", en.GetProperty("mealConfigurations")[0].GetProperty("packages")[0].GetProperty("packageName").GetString());
         Assert.Equal("Arabic Week", ar.GetProperty("mealConfigurations")[0].GetProperty("packages")[0].GetProperty("packageName").GetString());
+        Assert.Equal("One meal weekly", en.GetProperty("mealConfigurations")[0].GetProperty("packages")[0].GetProperty("name").GetString());
+        Assert.Equal("Arabic weekly price", ar.GetProperty("mealConfigurations")[0].GetProperty("packages")[0].GetProperty("name").GetString());
     }
 
     [Fact]
@@ -268,7 +283,7 @@ public sealed class CatalogueApiTests : IAsyncLifetime
         oneDayPriceId = Guid.NewGuid();
         plan.Prices.Add(new() { Id = oneDayPriceId, DurationDays = 1, MealsPerDay = 1, SnacksPerDay = 0, CurrencyCode = "QAR", Amount = 55, EffectiveFrom = now.AddDays(-1), IsActive = true, CreatedAt = now, UpdatedAt = now });
         classicWeekPriceId = Guid.NewGuid();
-        plan.Prices.Add(new() { Id = classicWeekPriceId, DurationDays = 6, MealsPerDay = 1, SnacksPerDay = 0, CurrencyCode = "QAR", Amount = 300, EffectiveFrom = now.AddDays(-1), IsActive = true, CreatedAt = now, UpdatedAt = now });
+        plan.Prices.Add(new() { Id = classicWeekPriceId, DurationDays = 6, MealsPerDay = 1, SnacksPerDay = 0, CurrencyCode = "QAR", Amount = 300, EffectiveFrom = now.AddDays(-1), IsActive = true, CreatedAt = now, UpdatedAt = now, Translations = [new() { LanguageCode = "en", Name = "One meal weekly", Description = "Six service days", CreatedAt = now, UpdatedAt = now }, new() { LanguageCode = "ar", Name = "Arabic weekly price", Description = "Arabic weekly description", CreatedAt = now, UpdatedAt = now }] });
         snackWeekPriceId = Guid.NewGuid();
         plan.Prices.Add(new() { Id = snackWeekPriceId, DurationDays = 6, MealsPerDay = 1, SnacksPerDay = 1, CurrencyCode = "QAR", Amount = 330, EffectiveFrom = now.AddDays(-1), IsActive = true, CreatedAt = now, UpdatedAt = now });
         plan.Prices.Add(new() { DurationDays = 1, MealsPerDay = 1, SnacksPerDay = 0, CurrencyCode = "QAR", Amount = 1, EffectiveFrom = now.AddDays(1), IsActive = true, CreatedAt = now, UpdatedAt = now });

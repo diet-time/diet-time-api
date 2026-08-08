@@ -119,6 +119,15 @@ public sealed class MealPlanPrice : Entity
     public DateTimeOffset UpdatedAt { get; set; }
     public Guid? CreatedBy { get; set; }
     public Guid? UpdatedBy { get; set; }
+    public ICollection<MealPlanPriceTranslation> Translations { get; set; } = [];
+}
+
+public sealed class MealPlanPriceTranslation : Translation
+{
+    public Guid MealPlanPriceId { get; set; }
+    public MealPlanPrice Price { get; set; } = null!;
+    public string Name { get; set; } = "";
+    public string? Description { get; set; }
 }
 
 public sealed class CustomerProfile : Entity

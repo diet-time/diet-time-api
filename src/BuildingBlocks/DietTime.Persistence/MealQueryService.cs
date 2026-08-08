@@ -147,7 +147,23 @@ public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService st
                 price.MealsPerDay,
                 price.SnacksPerDay,
                 price.Amount,
-                price.CurrencyCode.Trim()))
+                price.CurrencyCode.Trim(),
+                price.Translations
+                    .Where(translation => translation.LanguageCode == language)
+                    .Select(translation => translation.Name)
+                    .FirstOrDefault()
+                    ?? price.Translations
+                        .Where(translation => translation.LanguageCode == "en")
+                        .Select(translation => translation.Name)
+                        .FirstOrDefault(),
+                price.Translations
+                    .Where(translation => translation.LanguageCode == language)
+                    .Select(translation => translation.Description)
+                    .FirstOrDefault()
+                    ?? price.Translations
+                        .Where(translation => translation.LanguageCode == "en")
+                        .Select(translation => translation.Description)
+                        .FirstOrDefault()))
             .ToListAsync(ct);
 
         var typeRows = await db.MealPlanTemplateSlots.AsNoTracking()
