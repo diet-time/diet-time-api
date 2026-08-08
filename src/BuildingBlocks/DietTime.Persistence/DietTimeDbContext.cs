@@ -53,7 +53,6 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
     protected override void OnModelCreating(ModelBuilder b)
     {
         base.OnModelCreating(b);
-        b.Entity<ApplicationUser>().ToTable("users", "public");
         b.Entity<ApplicationUser>().HasIndex(x => x.PhoneNumber).IsUnique().HasFilter("phone_number IS NOT NULL").HasDatabaseName("PhoneNumberIndex");
         b.Entity<RefreshToken>(e => { e.ToTable("refresh_tokens"); e.Property(x => x.TokenHash).HasMaxLength(64); e.HasIndex(x => x.TokenHash).IsUnique(); e.HasIndex(x => x.UserId); e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade); });
         ConfigureLookups(b); ConfigureMeals(b); ConfigurePlans(b); ConfigureUserManagement(b);
