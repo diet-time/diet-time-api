@@ -129,9 +129,30 @@ builder.Services.AddSingleton<IAmazonS3>(services =>
         AuthenticationRegion = storage.Region
     });
 });
- builder.Services.AddMemoryCache(); builder.Services.AddScoped<ILanguageResolver, LanguageResolver>(); builder.Services.AddScoped<IStorageUrlService, StorageUrlService>(); builder.Services.AddScoped<IMealQueryService, MealQueryService>(); builder.Services.AddScoped<IGuestHomeService, GuestHomeService>(); builder.Services.AddScoped<IMealSelectionService, MealSelectionService>(); builder.Services.AddScoped<IAdminMealService, AdminMealService>(); builder.Services.AddScoped<ITemplateMenuReader>(services => (AdminMealService)services.GetRequiredService<IAdminMealService>()); builder.Services.AddScoped<IOperationalCalendarService, DefaultOperationalCalendarService>(); builder.Services.AddScoped<IDeliverySchedulingService, DeliverySchedulingService>(); builder.Services.AddScoped<IPhoneOtpVerifier, TestPhoneOtpVerifier>(); builder.Services.AddScoped<IAuthService, AuthService>(); builder.Services.AddScoped<IUserProfileService, UserProfileService>(); builder.Services.AddScoped<ICustomerService, CustomerService>(); builder.Services.AddScoped<IApplicationRoleService, ApplicationRoleService>(); builder.Services.AddScoped<IMenuService, MenuService>(); builder.Services.AddScoped<IRoleMenuMappingService, RoleMenuMappingService>(); builder.Services.AddScoped<IUserMenuService, UserMenuService>(); builder.Services.AddScoped<IAccessControlService, AccessControlService>(); builder.Services.AddScoped<IPasswordService, PasswordService>(); builder.Services.AddScoped<IEmailService, EmailService>()builder.Services.AddSingleton(TimeProvider.System); builder.Services.AddMemoryCache(); builder.Services.AddScoped<ILanguageResolver, LanguageResolver>(); builder.Services.AddScoped<IStorageUrlService, StorageUrlService>(); builder.Services.AddScoped<IMealQueryService, MealQueryService>(); builder.Services.AddScoped<IGuestHomeService, GuestHomeService>(); builder.Services.AddScoped<IMealSelectionService, MealSelectionService>(); builder.Services.AddScoped<IAdminMealService, AdminMealService>(); builder.Services.AddScoped<ITemplateMenuReader>(services => (AdminMealService)services.GetRequiredService<IAdminMealService>()); builder.Services.AddScoped<IOperationalCalendarService, DefaultOperationalCalendarService>(); builder.Services.AddScoped<IDeliverySchedulingService, DeliverySchedulingService>(); builder.Services.AddScoped<IAuthService, AuthService>(); builder.Services.AddScoped<ICustomerProfileService, CustomerProfileService>(); builder.Services.AddSingleton(services => services.GetRequiredService<IOptions<CustomerNutritionOptions>>().Value); builder.Services.AddSingleton<ICustomerNutritionCalculator, CustomerNutritionCalculator>();
-builder.Services.AddSingleton(TimeProvider.System);;
-builder.Services.AddValidatorsFromAssemblyContaining<MealSelectionRequestValidator>(); builder.Services.AddFluentValidationAutoValidation();
+builder.Services.AddMemoryCache(); 
+builder.Services.AddScoped<ILanguageResolver, LanguageResolver>(); 
+builder.Services.AddScoped<IStorageUrlService, StorageUrlService>(); 
+builder.Services.AddScoped<IMealQueryService, MealQueryService>(); 
+builder.Services.AddScoped<IGuestHomeService, GuestHomeService>(); 
+builder.Services.AddScoped<IMealSelectionService, MealSelectionService>(); 
+builder.Services.AddScoped<IAdminMealService, AdminMealService>(); 
+builder.Services.AddScoped<ITemplateMenuReader>(services => (AdminMealService)services.GetRequiredService<IAdminMealService>()); 
+builder.Services.AddScoped<IOperationalCalendarService, DefaultOperationalCalendarService>(); 
+builder.Services.AddScoped<IDeliverySchedulingService, DeliverySchedulingService>(); 
+builder.Services.AddScoped<IPhoneOtpVerifier, TestPhoneOtpVerifier>(); 
+builder.Services.AddScoped<IAuthService, AuthService>(); 
+builder.Services.AddScoped<IUserProfileService, UserProfileService>(); 
+builder.Services.AddScoped<ICustomerService, CustomerService>(); 
+builder.Services.AddScoped<IApplicationRoleService, ApplicationRoleService>(); 
+builder.Services.AddScoped<IMenuService, MenuService>(); 
+builder.Services.AddScoped<IRoleMenuMappingService, RoleMenuMappingService>(); 
+builder.Services.AddScoped<IUserMenuService, UserMenuService>(); 
+builder.Services.AddScoped<IAccessControlService, AccessControlService>(); 
+builder.Services.AddScoped<IPasswordService, PasswordService>();
+builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddSingleton(TimeProvider.System); 
+builder.Services.AddValidatorsFromAssemblyContaining<MealSelectionRequestValidator>(); 
+builder.Services.AddFluentValidationAutoValidation();
 
 builder.Services.AddControllers().AddJsonOptions(o => { o.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull; o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(new UpperCaseJsonNamingPolicy())); });
 builder.Services.AddApiVersioning(o => { o.DefaultApiVersion = new(1); o.AssumeDefaultVersionWhenUnspecified = true; o.ReportApiVersions = true; o.ApiVersionReader = new UrlSegmentApiVersionReader(); }).AddMvc().AddApiExplorer(o => { o.GroupNameFormat = "'v'VVV"; o.SubstituteApiVersionInUrl = true; });
