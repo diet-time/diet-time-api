@@ -145,6 +145,8 @@ builder.Services.AddSingleton<ICustomerNutritionCalculator>(services =>
     new CustomerNutritionCalculator(
         services.GetRequiredService<IOptions<CustomerNutritionOptions>>().Value));
 builder.Services.AddScoped<ICustomerProfileService, CustomerProfileService>();
+builder.Services.AddScoped<ICustomerAddressService, CustomerAddressService>();
+builder.Services.AddScoped<IDeliveryTimeSlotService, DeliveryTimeSlotService>();
 builder.Services.AddScoped<ICustomerMealPlanPurchaseService, CustomerMealPlanPurchaseService>();
 builder.Services.AddScoped<IUserProfileService, UserProfileService>(); 
 builder.Services.AddScoped<ICustomerService, CustomerService>(); 

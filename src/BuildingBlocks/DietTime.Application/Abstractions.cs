@@ -82,6 +82,26 @@ public interface ICustomerProfileService
     Task<CustomerProfileResponse> UpdatePreferredNameAsync(Guid userId, string preferredName, CancellationToken cancellationToken);
 }
 
+public enum CustomerAddressWriteStatus { Success, CustomerNotFound, AddressNotFound }
+public sealed record CustomerAddressWriteResult(
+    CustomerAddressWriteStatus Status,
+    CustomerAddressResponse? Address = null);
+
+public interface ICustomerAddressService
+{
+    Task<CustomerAddressWriteResult> CreateAsync(Guid customerProfileId, Guid userId, UpsertCustomerAddressRequest request, CancellationToken cancellationToken);
+    Task<IReadOnlyList<CustomerAddressResponse>?> GetAllAsync(Guid customerProfileId, Guid userId, CancellationToken cancellationToken);
+    Task<CustomerAddressResponse?> GetAsync(Guid customerProfileId, Guid addressId, Guid userId, CancellationToken cancellationToken);
+    Task<CustomerAddressWriteResult> UpdateAsync(Guid customerProfileId, Guid addressId, Guid userId, UpsertCustomerAddressRequest request, CancellationToken cancellationToken);
+    Task<CustomerAddressWriteStatus> DeleteAsync(Guid customerProfileId, Guid addressId, Guid userId, CancellationToken cancellationToken);
+    Task<CustomerAddressWriteResult> SetDefaultAsync(Guid customerProfileId, Guid addressId, Guid userId, CancellationToken cancellationToken);
+}
+
+public interface IDeliveryTimeSlotService
+{
+    Task<IReadOnlyList<DeliveryTimeSlotResponse>> GetActiveAsync(CancellationToken cancellationToken);
+}
+
 public sealed record CustomerNutritionCalculationInput(
     string? GenderCode,
     DateOnly? DateOfBirth,

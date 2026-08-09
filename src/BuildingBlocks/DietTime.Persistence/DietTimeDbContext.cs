@@ -43,6 +43,8 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
     public DbSet<CustomerNutritionTarget> CustomerNutritionTargets => Set<CustomerNutritionTarget>();
     public DbSet<CustomerProfilePreference> CustomerProfilePreferences => Set<CustomerProfilePreference>();
     public DbSet<CustomerProfileAllergen> CustomerProfileAllergens => Set<CustomerProfileAllergen>();
+    public DbSet<CustomerAddress> CustomerAddresses => Set<CustomerAddress>();
+    public DbSet<DeliveryTimeSlot> DeliveryTimeSlots => Set<DeliveryTimeSlot>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
@@ -61,6 +63,8 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
         b.ApplyConfiguration(new CustomerNutritionTargetConfiguration());
         b.ApplyConfiguration(new CustomerProfilePreferenceConfiguration());
         b.ApplyConfiguration(new CustomerProfileAllergenConfiguration());
+        b.ApplyConfiguration(new CustomerAddressConfiguration());
+        b.ApplyConfiguration(new DeliveryTimeSlotConfiguration());
     }
 
     private static void ConfigureLookups(ModelBuilder b)

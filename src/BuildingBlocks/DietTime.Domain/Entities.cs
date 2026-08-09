@@ -157,6 +157,57 @@ public sealed class CustomerProfile : Entity
     public ICollection<CustomerNutritionTarget> NutritionTargets { get; set; } = [];
     public ICollection<CustomerProfilePreference> Preferences { get; set; } = [];
     public ICollection<CustomerProfileAllergen> Allergens { get; set; } = [];
+    public ICollection<CustomerAddress> Addresses { get; set; } = [];
+}
+
+public static class CustomerAddressTypes
+{
+    public const string Home = "HOME";
+    public const string Apartment = "APARTMENT";
+    public const string Office = "OFFICE";
+    public const string Other = "OTHER";
+    public static readonly IReadOnlySet<string> All = new HashSet<string>(
+        [Home, Apartment, Office, Other], StringComparer.Ordinal);
+}
+
+public sealed class CustomerAddress : Entity
+{
+    public Guid CustomerProfileId { get; set; }
+    public CustomerProfile CustomerProfile { get; set; } = null!;
+    public string? AddressName { get; set; }
+    public string AddressType { get; set; } = CustomerAddressTypes.Home;
+    public string? BuildingNo { get; set; }
+    public string? StreetNo { get; set; }
+    public string? UnitNumber { get; set; }
+    public string? ZoneNo { get; set; }
+    public string Area { get; set; } = "";
+    public string? Directions { get; set; }
+    public decimal? Latitude { get; set; }
+    public decimal? Longitude { get; set; }
+    public string? FormattedAddress { get; set; }
+    public bool IsDefault { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public Guid? UpdatedBy { get; set; }
+    public long RowVersion { get; set; } = 1;
+}
+
+public sealed class DeliveryTimeSlot : Entity
+{
+    public string Code { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string NameAr { get; set; } = "";
+    public TimeOnly StartTime { get; set; }
+    public TimeOnly EndTime { get; set; }
+    public int SortOrder { get; set; }
+    public bool IsActive { get; set; } = true;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public Guid? UpdatedBy { get; set; }
+    public long RowVersion { get; set; } = 1;
 }
 
 public sealed class CustomerNutritionTarget : Entity

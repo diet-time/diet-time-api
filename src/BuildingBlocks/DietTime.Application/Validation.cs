@@ -119,6 +119,28 @@ public sealed class UpdateCustomerPreferredNameRequestValidator
     }
 }
 
+public sealed class UpsertCustomerAddressRequestValidator
+    : AbstractValidator<UpsertCustomerAddressRequest>
+{
+    public UpsertCustomerAddressRequestValidator()
+    {
+        RuleFor(x => x.AddressName).MaximumLength(100);
+        RuleFor(x => x.AddressType)
+            .NotEmpty()
+            .Must(value => CustomerAddressTypes.All.Contains(value))
+            .WithMessage("Address type must be HOME, APARTMENT, OFFICE, or OTHER.");
+        RuleFor(x => x.BuildingNo).MaximumLength(50);
+        RuleFor(x => x.StreetNo).MaximumLength(50);
+        RuleFor(x => x.UnitNumber).MaximumLength(50);
+        RuleFor(x => x.ZoneNo).MaximumLength(50);
+        RuleFor(x => x.Area).NotEmpty().MaximumLength(150);
+        RuleFor(x => x.Directions).MaximumLength(500);
+        RuleFor(x => x.Latitude).InclusiveBetween(-90m, 90m).When(x => x.Latitude.HasValue);
+        RuleFor(x => x.Longitude).InclusiveBetween(-180m, 180m).When(x => x.Longitude.HasValue);
+        RuleFor(x => x.FormattedAddress).MaximumLength(500);
+    }
+}
+
 public sealed class UpsertAllergenRequestValidator : AbstractValidator<UpsertAllergenRequest>
 {
     public UpsertAllergenRequestValidator()

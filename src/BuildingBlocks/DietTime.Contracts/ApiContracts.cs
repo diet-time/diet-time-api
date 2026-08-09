@@ -235,6 +235,46 @@ public sealed record CustomerProfileResponse(
     DateTimeOffset UpdatedAt,
     long RowVersion);
 
+public sealed record UpsertCustomerAddressRequest(
+    string? AddressName,
+    string AddressType,
+    string? BuildingNo,
+    string? StreetNo,
+    string? UnitNumber,
+    string? ZoneNo,
+    string Area,
+    string? Directions,
+    decimal? Latitude,
+    decimal? Longitude,
+    string? FormattedAddress,
+    bool IsDefault = false);
+
+public sealed record CustomerAddressResponse(
+    Guid Id,
+    Guid CustomerProfileId,
+    string? AddressName,
+    string AddressType,
+    string? BuildingNo,
+    string? StreetNo,
+    string? UnitNumber,
+    string? ZoneNo,
+    string Area,
+    string? Directions,
+    decimal? Latitude,
+    decimal? Longitude,
+    string? FormattedAddress,
+    bool IsDefault);
+
+public sealed record CustomerAddressListResponse(IReadOnlyList<CustomerAddressResponse> Items);
+public sealed record DeliveryTimeSlotResponse(
+    Guid Id,
+    string Code,
+    string Name,
+    string NameAr,
+    TimeOnly StartTime,
+    TimeOnly EndTime);
+public sealed record DeliveryTimeSlotListResponse(IReadOnlyList<DeliveryTimeSlotResponse> Items);
+
 public sealed record ChangeMealStatusRequest(string Status);
 public sealed record AdminMealSummaryResponse(
     Guid Id,

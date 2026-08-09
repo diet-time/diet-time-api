@@ -78,6 +78,13 @@ POST /api/v1/auth/phone-otp
 POST /api/v1/auth/refresh
 POST /api/v1/auth/logout
 GET  /api/v1/auth/me
+POST /api/v1/customer-profiles/{customerProfileId}/addresses        (JWT, profile owner)
+GET  /api/v1/customer-profiles/{customerProfileId}/addresses         (JWT, profile owner)
+GET  /api/v1/customer-profiles/{customerProfileId}/addresses/{id}    (JWT, profile owner)
+PUT  /api/v1/customer-profiles/{customerProfileId}/addresses/{id}    (JWT, profile owner)
+DELETE /api/v1/customer-profiles/{customerProfileId}/addresses/{id} (JWT, profile owner)
+PATCH /api/v1/customer-profiles/{customerProfileId}/addresses/{id}/default (JWT, profile owner)
+GET  /api/v1/delivery-time-slots
 ```
 
 Admin endpoints from the brief are under `/api/v1/admin` and require `Admin`, `Dietitian`, or `ContentManager`. Meal images are uploaded as multipart form data to `POST /api/v1/admin/meals/{mealId}/media/upload`; send `mediaType=IMAGE` for the original or `mediaType=THUMBNAIL` for its thumbnail. An original image must exist before its thumbnail is uploaded. The persisted `public_url` and `thumbnail_url` point to the public API media route (`GET /api/v1/media/{objectKey}`), while storage credentials and object URLs remain server-side. Set `Api__PublicBaseUrl` to the externally reachable API origin in deployed environments.
