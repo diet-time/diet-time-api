@@ -43,7 +43,9 @@ public sealed class AuthService(UserManager<ApplicationUser> users, DietTimeDbCo
     public async Task<AuthSessionResponse?> LoginAsync(LoginRequest request, CancellationToken ct)
     {
         var user = await users.FindByEmailAsync(request.Email.Trim());
-        if (user is null || !await users.CheckPasswordAsync(user, request.Password)) return null;
+        if (user is null ||
+            !await db.UserProfiles.AsNoTracking().AnyAsync(x => x.UserId == user.Id && x.IsActive, ct) ||
+            !await users.CheckPasswordAsync(user, request.Password)) return null;
         return await IssueAsync(user, ct);
     }
 
@@ -54,6 +56,9 @@ public sealed class AuthService(UserManager<ApplicationUser> users, DietTimeDbCo
             .Include(x => x.User)
             .SingleOrDefaultAsync(x => x.TokenHash == hash, ct);
         if (token is null) return null;
+
+        if (!await db.UserProfiles.AsNoTracking().AnyAsync(x => x.UserId == token.UserId && x.IsActive, ct))
+            return null;
 
         var now = clock.GetUtcNow();
         if (token.RevokedAt is not null)

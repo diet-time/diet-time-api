@@ -67,6 +67,7 @@ public interface IAccessControlService
     Task<Guid> CreateUserAsync(CreateAccessUserRequest request, string actor, CancellationToken cancellationToken);
     Task<bool> UpdateUserAsync(Guid profileId, UpdateAccessUserRequest request, string actor, CancellationToken cancellationToken);
     Task<IReadOnlyList<ScreenPermissionResponse>> GetUserScreensAsync(Guid userId, CancellationToken cancellationToken);
+    Task<bool> HasScreenPermissionAsync(Guid userId, string routeUrl, bool requireWrite, CancellationToken cancellationToken);
 }
 
 public interface IPasswordService

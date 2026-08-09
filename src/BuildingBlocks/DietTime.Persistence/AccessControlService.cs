@@ -63,6 +63,9 @@ public sealed class AccessControlService(
         var role = await db.ApplicationRoles.FirstOrDefaultAsync(x => x.Id == roleId, cancellationToken);
         if (role == null) return false;
 
+        if (string.Equals(role.RoleName, "Admin", StringComparison.OrdinalIgnoreCase) && !request.IsActive)
+            throw new InvalidOperationException("The Admin role cannot be deactivated.");
+
         var roleName = Require(request.RoleName, "Role name");
         if (await db.ApplicationRoles.AnyAsync(x => x.Id != roleId && x.RoleName.ToUpper() == roleName.ToUpper(), cancellationToken))
             throw new InvalidOperationException($"Role '{roleName}' already exists.");
@@ -140,6 +143,9 @@ public sealed class AccessControlService(
     {
         var profile = await db.UserProfiles.FirstOrDefaultAsync(x => x.Id == profileId && !x.IsCustomer, cancellationToken);
         if (profile == null) return false;
+        if (profile.IsActive && !request.IsActive && Guid.TryParse(actor, out var actorId) && actorId == profile.UserId)
+            throw new InvalidOperationException("You cannot deactivate your own user account.");
+
         var user = await userManager.FindByIdAsync(profile.UserId.ToString());
         if (user == null) return false;
         var roles = await GetSelectedRolesAsync(request.RoleIds, cancellationToken);
@@ -172,12 +178,26 @@ public sealed class AccessControlService(
         profile.Status = request.IsActive ? "ACTIVE" : "INACTIVE";
         profile.ModifiedBy = actor;
         profile.ModifiedAt = clock.GetUtcNow();
+
+        if (!request.IsActive)
+        {
+            var activeRefreshTokens = await db.RefreshTokens
+                .Where(x => x.UserId == profile.UserId && x.RevokedAt == null)
+                .ToListAsync(cancellationToken);
+            foreach (var refreshToken in activeRefreshTokens)
+                refreshToken.RevokedAt = profile.ModifiedAt;
+        }
+
         await db.SaveChangesAsync(cancellationToken);
         return true;
     }
 
     public async Task<IReadOnlyList<ScreenPermissionResponse>> GetUserScreensAsync(Guid userId, CancellationToken cancellationToken)
     {
+        var isActive = await db.UserProfiles.AsNoTracking()
+            .AnyAsync(x => x.UserId == userId && x.IsActive, cancellationToken);
+        if (!isActive) return [];
+
         var user = await userManager.FindByIdAsync(userId.ToString());
         if (user == null) return [];
         var roleNames = await userManager.GetRolesAsync(user);
@@ -192,6 +212,13 @@ public sealed class AccessControlService(
                 permissions.Any(x => x.MenuId == screen.Id && x.CanRead),
                 permissions.Any(x => x.MenuId == screen.Id && x.CanWrite)))
             .Where(x => x.CanRead).ToList();
+    }
+
+    public async Task<bool> HasScreenPermissionAsync(Guid userId, string routeUrl, bool requireWrite, CancellationToken cancellationToken)
+    {
+        var screens = await GetUserScreensAsync(userId, cancellationToken);
+        var permission = screens.FirstOrDefault(x => string.Equals(x.RouteUrl, routeUrl, StringComparison.OrdinalIgnoreCase));
+        return permission is not null && (requireWrite ? permission.CanWrite : permission.CanRead);
     }
 
     private async Task<List<ApplicationRole>> GetSelectedRolesAsync(IReadOnlyList<Guid> roleIds, CancellationToken cancellationToken)
