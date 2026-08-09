@@ -7,10 +7,11 @@ using Microsoft.Extensions.Caching.Memory;
 
 namespace DietTime.Persistence;
 
-public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService storage, IMemoryCache cache) : IMealQueryService
+public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService storage, IMemoryCache cache, TimeProvider clock) : IMealQueryService
 {
     public async Task<IReadOnlyList<PlanCategoryResponse>> GetPlanCategoriesAsync(string language, DateOnly today, CancellationToken ct)
     {
+        var now = clock.GetUtcNow();
         var rows = await db.MealPlanTemplates.AsNoTracking()
             .Where(p => p.IsActive && p.IsPublished && !db.MealPlanTemplates.Any(v => v.VersionGroupId == p.VersionGroupId && v.IsPublished && v.VersionNumber > p.VersionNumber) && (p.ValidFrom == null || p.ValidFrom <= today) && (p.ValidUntil == null || p.ValidUntil >= today))
             .OrderBy(p => p.PlanType).ThenBy(p => p.Code)
@@ -25,22 +26,105 @@ public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService st
                     .OrderByDescending(m => m.IsPrimary)
                     .ThenBy(m => m.DisplayOrder)
                     .Select(m => new { m.PublicUrl, m.ObjectKey, m.ThumbnailUrl, m.ThumbnailObjectKey })
-                    .FirstOrDefault()
+                    .FirstOrDefault(),
+                Prices = p.Prices
+                    .Where(price =>
+                        price.IsActive &&
+                        price.EffectiveFrom <= now &&
+                        (price.EffectiveUntil == null || price.EffectiveUntil > now))
+                    .Select(price => new PlanCardPriceCandidate(
+                        price.Id,
+                        price.Amount,
+                        price.CurrencyCode,
+                        price.DurationDays))
+                    .ToList()
             }).ToListAsync(ct);
-        return rows.Select(x => new PlanCategoryResponse(
-            x.Id,
-            x.Code,
-            x.Name,
-            x.Description,
-            x.PlanMedia is null
-                ? null
-                : Image(x.PlanMedia.ThumbnailUrl ?? x.PlanMedia.PublicUrl, x.PlanMedia.ThumbnailObjectKey ?? x.PlanMedia.ObjectKey, true),
-            false)).ToArray();
+
+        var planIds = rows.Select(row => row.Id).ToArray();
+        var calorieRows = await db.MealPlanSlotOptions.AsNoTracking()
+            .Where(option =>
+                planIds.Contains(option.Slot.Day.MealPlanTemplateId) &&
+                option.Slot.Day.IsActive &&
+                option.Slot.IsActive &&
+                option.IsAvailable &&
+                (option.AvailableFrom == null || option.AvailableFrom <= now) &&
+                (option.AvailableUntil == null || option.AvailableUntil > now) &&
+                option.MealItem.Status == "ACTIVE" &&
+                option.MealItem.IsAvailable &&
+                (option.MealItem.AvailableFrom == null || option.MealItem.AvailableFrom <= now) &&
+                (option.MealItem.AvailableUntil == null || option.MealItem.AvailableUntil > now) &&
+                option.MealItem.Nutrition != null &&
+                option.MealItem.Nutrition.CaloriesKcal != null)
+            .Select(option => new
+            {
+                PlanId = option.Slot.Day.MealPlanTemplateId,
+                DayId = option.Slot.MealPlanTemplateDayId,
+                SlotId = option.MealPlanTemplateSlotId,
+                option.IsDefault,
+                option.DisplayOrder,
+                CaloriesKcal = option.MealItem.Nutrition!.CaloriesKcal!.Value
+            })
+            .ToListAsync(ct);
+        var dailyCaloriesByPlan = calorieRows
+            .GroupBy(row => row.PlanId)
+            .ToDictionary(
+                plan => plan.Key,
+                plan => (decimal?)Math.Round(
+                    plan.GroupBy(row => row.DayId)
+                        .Average(day => day
+                            .GroupBy(row => row.SlotId)
+                            .Sum(slot => slot
+                                .OrderByDescending(row => row.IsDefault)
+                                .ThenBy(row => row.DisplayOrder)
+                                .First()
+                                .CaloriesKcal)),
+                    0));
+
+        return rows.Select(x =>
+        {
+            var price = SelectPlanCardPrice(x.Prices);
+            var dailyPrice = price is null
+                ? (decimal?)null
+                : decimal.Round(price.Amount / price.DurationDays, 4, MidpointRounding.AwayFromZero);
+            return new PlanCategoryResponse(
+                x.Id,
+                x.Code,
+                x.Name,
+                x.Description,
+                x.PlanMedia is null
+                    ? null
+                    : Image(x.PlanMedia.ThumbnailUrl ?? x.PlanMedia.PublicUrl, x.PlanMedia.ThumbnailObjectKey ?? x.PlanMedia.ObjectKey, true),
+                false,
+                dailyCaloriesByPlan.GetValueOrDefault(x.Id),
+                price?.Amount,
+                price?.CurrencyCode.Trim(),
+                price?.DurationDays,
+                dailyPrice,
+                price is not null,
+                price?.Id,
+                null,
+                price?.DurationDays);
+        }).ToArray();
     }
+
+    private static PlanCardPriceCandidate? SelectPlanCardPrice(
+        IEnumerable<PlanCardPriceCandidate> prices) => prices
+        .Where(price => price.DurationDays > 0)
+        .OrderBy(price => price.DurationDays == 1 ? 0 : 1)
+        .ThenBy(price => price.Amount / price.DurationDays)
+        .ThenBy(price => price.DurationDays)
+        .FirstOrDefault();
+
+    private sealed record PlanCardPriceCandidate(
+        Guid Id,
+        decimal Amount,
+        string CurrencyCode,
+        int DurationDays);
 
     public async Task<MealPlanResponse?> GetPlanAsync(Guid planId, string language, DateOnly today, CancellationToken ct)
     {
-        var plan = await db.MealPlanTemplates.AsNoTracking().Where(p => p.Id == planId && p.IsActive && p.IsPublished && (p.ValidFrom == null || p.ValidFrom <= today) && (p.ValidUntil == null || p.ValidUntil >= today))
+        var plan = await db.MealPlanTemplates.AsNoTracking()
+            .Where(p => p.Id == planId && p.IsActive && p.IsPublished && (p.ValidFrom == null || p.ValidFrom <= today) && (p.ValidUntil == null || p.ValidUntil >= today))
             .Select(p => new
             {
                 p.Id,
@@ -49,11 +133,76 @@ public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService st
                 p.DurationDays,
                 p.IsCustomizable,
                 Name = p.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault() ?? p.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? p.Translations.Select(t => t.Name).FirstOrDefault() ?? p.Code,
-                Description = p.Translations.Where(t => t.LanguageCode == language).Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault() ?? p.Translations.Where(t => t.LanguageCode == "en").Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault() ?? p.Translations.Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault(),
-                Prices = p.Prices.Where(x => x.IsActive).OrderBy(x => x.Amount).Select(x => new PlanPriceResponse(x.DurationDays, x.MealsPerDay, x.SnacksPerDay, x.Amount, x.CurrencyCode.Trim())).ToList(),
-                Types = p.Days.SelectMany(d => d.Slots).Where(s => s.IsActive).Select(s => new { s.MealType.Id, s.MealType.Code, s.MealType.DisplayOrder, Name = s.MealType.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault() ?? s.MealType.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? s.MealType.Translations.Select(t => t.Name).FirstOrDefault() ?? s.MealType.Code }).Distinct().ToList()
-            }).SingleOrDefaultAsync(ct);
-        return plan is null ? null : new MealPlanResponse(plan.Id, plan.Code, plan.Name, plan.Description, plan.PlanType, plan.DurationDays, plan.IsCustomizable, plan.Prices, plan.Types.OrderBy(x => x.DisplayOrder).Select(x => new MealTypeResponse(x.Id, x.Code, x.Name, x.DisplayOrder)).ToArray());
+                Description = p.Translations.Where(t => t.LanguageCode == language).Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault() ?? p.Translations.Where(t => t.LanguageCode == "en").Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault() ?? p.Translations.Select(t => t.FullDescription ?? t.ShortDescription).FirstOrDefault()
+            })
+            .SingleOrDefaultAsync(ct);
+
+        if (plan is null) return null;
+
+        var prices = await db.MealPlanPrices.AsNoTracking()
+            .Where(price => price.MealPlanTemplateId == plan.Id && price.IsActive)
+            .OrderBy(price => price.Amount)
+            .Select(price => new PlanPriceResponse(
+                price.DurationDays,
+                price.MealsPerDay,
+                price.SnacksPerDay,
+                price.Amount,
+                price.CurrencyCode.Trim(),
+                price.Translations
+                    .Where(translation => translation.LanguageCode == language)
+                    .Select(translation => translation.Name)
+                    .FirstOrDefault()
+                    ?? price.Translations
+                        .Where(translation => translation.LanguageCode == "en")
+                        .Select(translation => translation.Name)
+                        .FirstOrDefault(),
+                price.Translations
+                    .Where(translation => translation.LanguageCode == language)
+                    .Select(translation => translation.Description)
+                    .FirstOrDefault()
+                    ?? price.Translations
+                        .Where(translation => translation.LanguageCode == "en")
+                        .Select(translation => translation.Description)
+                        .FirstOrDefault()))
+            .ToListAsync(ct);
+
+        var typeRows = await db.MealPlanTemplateSlots.AsNoTracking()
+            .Where(slot => slot.Day.MealPlanTemplateId == plan.Id && slot.IsActive)
+            .Select(slot => new
+            {
+                slot.MealType.Id,
+                slot.MealType.Code,
+                slot.MealType.DisplayOrder,
+                Name = slot.MealType.Translations
+                    .Where(t => t.LanguageCode == language)
+                    .Select(t => t.Name)
+                    .FirstOrDefault()
+                    ?? slot.MealType.Translations
+                        .Where(t => t.LanguageCode == "en")
+                        .Select(t => t.Name)
+                        .FirstOrDefault()
+                    ?? slot.MealType.Translations.Select(t => t.Name).FirstOrDefault()
+                    ?? slot.MealType.Code
+            })
+            .ToListAsync(ct);
+
+        var types = typeRows
+            .GroupBy(type => type.Id)
+            .Select(group => group.First())
+            .OrderBy(type => type.DisplayOrder)
+            .Select(type => new MealTypeResponse(type.Id, type.Code, type.Name, type.DisplayOrder))
+            .ToArray();
+
+        return new MealPlanResponse(
+            plan.Id,
+            plan.Code,
+            plan.Name,
+            plan.Description,
+            plan.PlanType,
+            plan.DurationDays,
+            plan.IsCustomizable,
+            prices,
+            types);
     }
 
     public async Task<IReadOnlyList<CalendarDayResponse>?> GetCalendarAsync(Guid planId, DateOnly startDate, int numberOfDays, string language, CancellationToken ct)

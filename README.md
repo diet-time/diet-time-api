@@ -43,6 +43,7 @@ Authentication uses one rotating session contract:
 ```text
 POST /api/v1/auth/register
 POST /api/v1/auth/login
+POST /api/v1/auth/phone-otp
 POST /api/v1/auth/refresh
 POST /api/v1/auth/logout
 GET  /api/v1/auth/me
@@ -50,7 +51,9 @@ GET  /api/v1/auth/me
 
 `DTDBCONNECTION` takes precedence when both database variables are present. It accepts either an Npgsql connection string or a `postgres://`/`postgresql://` URI. Keep only one database variable configured in each deployed environment when possible.
 
-Login, registration, and refresh return an `ApiResponse<AuthSessionResponse>`. Refresh tokens are hashed in PostgreSQL, rotated on every refresh, and revoked on logout. Browser clients receive the refresh token in an HttpOnly cookie (`Secure` outside Development); native clients store the returned refresh token in platform secure storage. Access tokens remain short-lived and are sent as bearer tokens.
+Login, registration, and refresh return an `ApiResponse<AuthSessionResponse>`. Refresh tokens are hashed in PostgreSQL, rotated on every refresh, and revoked on logout. Browser clients receive the refresh token in an HttpOnly cookie (`Secure` outside Development); native clients store the returned refresh token in platform secure storage. Access tokens remain short-lived and are sent as bearer tokens. The default refresh-session lifetime is 3,650 days so native sessions survive normal app restarts; deleting the app removes its securely stored token. Native clients must call `POST /api/v1/auth/refresh` before expiry or after an access-token 401 and persist the newly rotated refresh token returned by that call.
+
+Temporary phone login is available through `POST /api/v1/auth/phone-otp`. Send an E.164 number such as `+97455555555` with the configured test OTP; the first successful login creates the Identity user and customer profile. Development uses `123456`. In other environments, explicitly set `PhoneOtp__Enabled=true` and provide `PhoneOtp__TestCode` through secrets. Keep it disabled in production until `IPhoneOtpVerifier` is replaced with the Twilio implementation.
 
 Apply `20260730000000_AddRefreshSessions` to environments that do not already have the `refresh_tokens` table before deploying this session flow.
 
@@ -71,6 +74,7 @@ GET  /api/v1/meals/search
 POST /api/v1/meal-selections/validate        (JWT)
 POST /api/v1/auth/register
 POST /api/v1/auth/login
+POST /api/v1/auth/phone-otp
 POST /api/v1/auth/refresh
 POST /api/v1/auth/logout
 GET  /api/v1/auth/me

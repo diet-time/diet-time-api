@@ -89,4 +89,24 @@ public sealed class GuestHomeController(
             })
             : Ok(ApiResponse<GuestMenuResponse>.Ok(response));
     }
+
+    /// <summary>Gets the active allergens available to guests.</summary>
+    /// <remarks>
+    /// Returns active allergens ordered by code, with localized names.
+    ///
+    /// Example: `GET /api/v1/guest/allergens?language=en`
+    /// </remarks>
+    /// <response code="200">The active, localized allergens.</response>
+    /// <response code="400">The requested language is invalid.</response>
+    [HttpGet("allergens")]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(ApiResponse<IReadOnlyList<GuestAllergenLookupResponse>>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ApiResponse<IReadOnlyList<GuestAllergenLookupResponse>>>> GetAllergens(
+        [FromQuery] GuestAllergensQuery query,
+        CancellationToken ct)
+    {
+        var response = await guestHome.GetAllergensAsync(query.Language, ct);
+        return Ok(ApiResponse<IReadOnlyList<GuestAllergenLookupResponse>>.Ok(response));
+    }
 }

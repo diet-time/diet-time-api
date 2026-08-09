@@ -5,7 +5,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace DietTime.Persistence;
 
-public sealed class ApplicationUser : IdentityUser<Guid> { }
+public sealed class ApplicationUser : IdentityUser<Guid>
+{
+    public CustomerProfile? CustomerProfile { get; set; }
+}
 public sealed class RefreshToken : Entity { public Guid UserId { get; set; } public ApplicationUser User { get; set; } = null!; public string TokenHash { get; set; } = ""; public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset ExpiresAt { get; set; } public DateTimeOffset? RevokedAt { get; set; } }
 
 public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> options)
@@ -34,6 +37,12 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
     public DbSet<MealPlanTemplateSlotTranslation> MealPlanTemplateSlotTranslations => Set<MealPlanTemplateSlotTranslation>();
     public DbSet<MealPlanSlotOption> MealPlanSlotOptions => Set<MealPlanSlotOption>();
     public DbSet<MealPlanPrice> MealPlanPrices => Set<MealPlanPrice>();
+    public DbSet<MealPlanPriceTranslation> MealPlanPriceTranslations => Set<MealPlanPriceTranslation>();
+    public DbSet<MealPlanPricePackage> MealPlanPricePackages => Set<MealPlanPricePackage>();
+    public DbSet<CustomerProfile> CustomerProfiles => Set<CustomerProfile>();
+    public DbSet<CustomerNutritionTarget> CustomerNutritionTargets => Set<CustomerNutritionTarget>();
+    public DbSet<CustomerProfilePreference> CustomerProfilePreferences => Set<CustomerProfilePreference>();
+    public DbSet<CustomerProfileAllergen> CustomerProfileAllergens => Set<CustomerProfileAllergen>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
@@ -45,8 +54,13 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
     protected override void OnModelCreating(ModelBuilder b)
     {
         base.OnModelCreating(b);
+        b.Entity<ApplicationUser>().HasIndex(x => x.PhoneNumber).IsUnique().HasFilter("phone_number IS NOT NULL").HasDatabaseName("PhoneNumberIndex");
         b.Entity<RefreshToken>(e => { e.ToTable("refresh_tokens"); e.Property(x => x.TokenHash).HasMaxLength(64); e.HasIndex(x => x.TokenHash).IsUnique(); e.HasIndex(x => x.UserId); e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade); });
         ConfigureLookups(b); ConfigureMeals(b); ConfigurePlans(b); ConfigureUserManagement(b);
+        b.ApplyConfiguration(new CustomerProfileConfiguration());
+        b.ApplyConfiguration(new CustomerNutritionTargetConfiguration());
+        b.ApplyConfiguration(new CustomerProfilePreferenceConfiguration());
+        b.ApplyConfiguration(new CustomerProfileAllergenConfiguration());
     }
 
     private static void ConfigureLookups(ModelBuilder b)
@@ -81,7 +95,48 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
         b.Entity<MealPlanTemplateSlot>(e => { e.ToTable("meal_plan_template_slots"); e.Property(x => x.RowVersion).IsConcurrencyToken(); e.HasIndex(x => new { x.MealPlanTemplateDayId, x.MealTypeId }).IsUnique(); e.HasOne(x => x.Day).WithMany(x => x.Slots).HasForeignKey(x => x.MealPlanTemplateDayId).OnDelete(DeleteBehavior.Cascade); e.HasOne(x => x.MealType).WithMany().HasForeignKey(x => x.MealTypeId).OnDelete(DeleteBehavior.Restrict); });
         Translation<MealPlanTemplateSlotTranslation>(b, "meal_plan_template_slot_translations", 10); b.Entity<MealPlanTemplateSlotTranslation>(e => { e.HasIndex(x => new { x.MealPlanTemplateSlotId, x.LanguageCode }).IsUnique(); e.HasOne(x => x.Slot).WithMany(x => x.Translations).HasForeignKey(x => x.MealPlanTemplateSlotId).OnDelete(DeleteBehavior.Cascade); });
         b.Entity<MealPlanSlotOption>(e => { e.ToTable("meal_plan_slot_options"); e.Property(x => x.AdditionalPrice).HasPrecision(12, 2); e.HasIndex(x => x.MealPlanTemplateSlotId).HasDatabaseName("ix_meal_plan_slot_options_slot"); e.HasIndex(x => x.MealItemId).HasDatabaseName("ix_meal_plan_slot_options_meal"); e.HasOne(x => x.Slot).WithMany(x => x.Options).HasForeignKey(x => x.MealPlanTemplateSlotId).OnDelete(DeleteBehavior.Cascade); e.HasOne(x => x.MealItem).WithMany().HasForeignKey(x => x.MealItemId).OnDelete(DeleteBehavior.Restrict); });
-        b.Entity<MealPlanPrice>(e => { e.ToTable("meal_plan_prices"); e.Property(x => x.Amount).HasPrecision(12, 2); e.Property(x => x.CurrencyCode).HasColumnType("char(3)"); e.HasIndex(x => new { x.MealPlanTemplateId, x.DurationDays, x.MealsPerDay, x.SnacksPerDay, x.CurrencyCode }).HasDatabaseName("ix_meal_plan_prices_package"); e.HasOne(x => x.Plan).WithMany(x => x.Prices).HasForeignKey(x => x.MealPlanTemplateId).OnDelete(DeleteBehavior.Restrict); });
+        b.Entity<MealPlanPricePackage>(e =>
+        {
+            e.ToTable("meal_plan_price_packages", "public");
+            e.HasKey(x => x.Code);
+            e.Property(x => x.Code).HasColumnName("code").HasMaxLength(50).IsRequired();
+            e.Property(x => x.NameEn).HasColumnName("name_en").HasMaxLength(100).IsRequired();
+            e.Property(x => x.NameAr).HasColumnName("name_ar").HasMaxLength(100).IsRequired();
+            e.Property(x => x.DurationDays).HasColumnName("duration_days").IsRequired();
+            e.Property(x => x.DisplayOrder).HasColumnName("display_order").IsRequired();
+            e.Property(x => x.IsActive).HasColumnName("is_active").IsRequired();
+            e.ToTable(t =>
+            {
+                t.HasCheckConstraint("ck_meal_plan_price_packages_duration", "duration_days > 0");
+                t.HasCheckConstraint("ck_meal_plan_price_packages_display_order", "display_order >= 0");
+            });
+        });
+        b.Entity<MealPlanPrice>(e =>
+        {
+            e.ToTable("meal_plan_prices");
+            e.Property(x => x.Amount).HasPrecision(12, 2);
+            e.Property(x => x.CurrencyCode).HasColumnType("char(3)");
+            e.HasIndex(x => new { x.MealPlanTemplateId, x.DurationDays, x.MealsPerDay, x.SnacksPerDay, x.CurrencyCode }).HasDatabaseName("ix_meal_plan_prices_package");
+            e.HasOne(x => x.Plan).WithMany(x => x.Prices).HasForeignKey(x => x.MealPlanTemplateId).OnDelete(DeleteBehavior.Restrict);
+        });
+        Translation<MealPlanPriceTranslation>(b, "meal_plan_price_translations", 10);
+        b.Entity<MealPlanPriceTranslation>(e =>
+        {
+            e.ToTable("meal_plan_price_translations", "public");
+            e.Property(x => x.Name).HasMaxLength(150);
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.HasIndex(x => new { x.MealPlanPriceId, x.LanguageCode })
+                .IsUnique()
+                .HasDatabaseName("uq_meal_plan_price_translations_language");
+            e.HasIndex(x => x.MealPlanPriceId)
+                .HasDatabaseName("ix_meal_plan_price_translations_price_id");
+            e.HasIndex(x => x.LanguageCode)
+                .HasDatabaseName("ix_meal_plan_price_translations_language_code");
+            e.HasOne(x => x.Price)
+                .WithMany(x => x.Translations)
+                .HasForeignKey(x => x.MealPlanPriceId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
     }
 
     private static void Translation<T>(ModelBuilder b, string table, int languageLength) where T : Translation

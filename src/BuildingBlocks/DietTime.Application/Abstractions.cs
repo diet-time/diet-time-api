@@ -4,6 +4,17 @@ using DietTime.Domain;
 namespace DietTime.Application;
 
 public enum AdminWriteResult { Success, NotFound, Conflict }
+public enum MealPlanPricePackageWriteResult { Success, NotFound, DuplicateCode, DurationInUse, IdentifierChange }
+public enum MealPlanPriceWriteStatus
+{
+    Success,
+    NotFound,
+    Conflict,
+    PackageNotFound,
+    PackageInactive,
+    PackageDurationMismatch
+}
+public sealed record MealPlanPriceWriteResult(MealPlanPriceWriteStatus Status, Guid? Id = null);
 
 public interface IMealQueryService
 {
@@ -20,11 +31,78 @@ public interface IGuestHomeService
 {
     Task<GuestHomeResponse?> GetAsync(GuestHomeQuery query, DateTimeOffset now, CancellationToken cancellationToken);
     Task<GuestMenuResponse?> GetMenuAsync(string planCode, GuestMenuQuery query, DateTimeOffset now, CancellationToken cancellationToken);
+    Task<IReadOnlyList<GuestAllergenLookupResponse>> GetAllergensAsync(string language, CancellationToken cancellationToken);
 }
 
 public interface IMealSelectionService
 {
     Task<MealSelectionValidationResponse> ValidateAsync(MealSelectionRequest request, DateTimeOffset now, CancellationToken cancellationToken);
+}
+
+public sealed record CustomerProfileUpsertResult(
+    CustomerProfileResponse? Profile,
+    IReadOnlyList<Guid> InvalidAllergenIds)
+{
+    public bool IsSuccess => Profile is not null && InvalidAllergenIds.Count == 0;
+}
+
+public enum MealPlanSelectionValidationStatus
+{
+    Valid,
+    PriceNotFound,
+    WrongPlan,
+    PriceInactive,
+    PriceNotEffective,
+    PriceExpired,
+    PricePackageNotFound,
+    PricePackageInactive
+}
+
+public sealed record MealPlanSelectionValidationResult(
+    MealPlanSelectionValidationStatus Status,
+    MealPlanSelectionValidationResponse? Selection = null);
+
+public interface ICustomerMealPlanPurchaseService
+{
+    Task<MealPlanPurchaseOptionsResponse?> GetPurchaseOptionsAsync(
+        string mealPlanCodeOrId,
+        Guid userId,
+        string language,
+        CancellationToken cancellationToken);
+
+    Task<MealPlanSelectionValidationResult> ValidateSelectionAsync(
+        ValidateMealPlanSelectionRequest request,
+        CancellationToken cancellationToken);
+}
+
+public interface ICustomerProfileService
+{
+    Task<CustomerProfileResponse?> GetAsync(Guid userId, CancellationToken cancellationToken);
+    Task<CustomerProfileUpsertResult> UpsertAsync(Guid userId, UpsertCustomerProfileRequest request, CancellationToken cancellationToken);
+    Task<CustomerProfileResponse> UpdatePreferredNameAsync(Guid userId, string preferredName, CancellationToken cancellationToken);
+}
+
+public sealed record CustomerNutritionCalculationInput(
+    string? GenderCode,
+    DateOnly? DateOfBirth,
+    decimal? HeightCm,
+    decimal? WeightKg,
+    string? GoalCode,
+    string? ActivityLevelCode,
+    DateOnly CalculationDate);
+public sealed record CustomerNutritionCalculationResult(
+    int? DailyCaloriesKcal,
+    decimal? DailyProteinG,
+    decimal? DailyCarbohydratesG,
+    decimal? DailyFatG,
+    decimal? DailyFiberG,
+    int? DailyWaterMl,
+    string? CalculationMethod,
+    string? CalculationVersion);
+
+public interface ICustomerNutritionCalculator
+{
+    CustomerNutritionCalculationResult? Calculate(CustomerNutritionCalculationInput input);
 }
 
 public interface IAdminMealService
@@ -55,14 +133,20 @@ public interface IAdminMealService
     Task<VersionedUpdateResponse?> UpdatePlanAsync(Guid planId, CreatePlanRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<AdminPlanImageResponse?> AddPlanImageAsync(Guid planId, SaveMediaRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<bool> DeletePlanAsync(Guid planId, CancellationToken cancellationToken);
-    Task<PagedResult<AdminMealPlanPriceResponse>> GetMealPlanPricesAsync(string? search, Guid? mealPlanTemplateId, string? status, string? currencyCode, int page, int pageSize, CancellationToken cancellationToken);
+    Task<PagedResult<AdminMealPlanPriceResponse>> GetMealPlanPricesAsync(string? search, Guid? mealPlanTemplateId, string? status, string? currencyCode, string? packageId, string? packageCode, int page, int pageSize, CancellationToken cancellationToken);
     Task<AdminMealPlanPriceResponse?> GetMealPlanPriceAsync(Guid priceId, CancellationToken cancellationToken);
     Task<AdminMealPlanPriceSummaryResponse> GetMealPlanPriceSummaryAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<string>> GetMealPlanPriceCurrenciesAsync(CancellationToken cancellationToken);
-    Task<Guid?> CreateMealPlanPriceAsync(UpsertMealPlanPriceRequest request, Guid? userId, CancellationToken cancellationToken);
-    Task<AdminWriteResult> UpdateMealPlanPriceAsync(Guid priceId, UpsertMealPlanPriceRequest request, Guid? userId, CancellationToken cancellationToken);
+    Task<MealPlanPriceWriteResult> CreateMealPlanPriceAsync(UpsertMealPlanPriceRequest request, Guid? userId, CancellationToken cancellationToken);
+    Task<MealPlanPriceWriteResult> UpdateMealPlanPriceAsync(Guid priceId, UpsertMealPlanPriceRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<AdminWriteResult> SetMealPlanPriceStatusAsync(Guid priceId, bool isActive, Guid? userId, CancellationToken cancellationToken);
     Task<AdminWriteResult> DeleteMealPlanPriceAsync(Guid priceId, CancellationToken cancellationToken);
+    Task<PagedResult<MealPlanPricePackageResponse>> GetMealPlanPricePackagesAsync(string? search, bool? isActive, string? sortBy, string? sortDirection, int page, int pageSize, CancellationToken cancellationToken);
+    Task<IReadOnlyList<MealPlanPricePackageLookupResponse>> GetMealPlanPricePackageLookupAsync(CancellationToken cancellationToken);
+    Task<MealPlanPricePackageResponse?> GetMealPlanPricePackageAsync(string packageId, CancellationToken cancellationToken);
+    Task<(MealPlanPricePackageWriteResult Result, string? Id)> CreateMealPlanPricePackageAsync(UpsertMealPlanPricePackageRequest request, Guid? userId, CancellationToken cancellationToken);
+    Task<MealPlanPricePackageWriteResult> UpdateMealPlanPricePackageAsync(string packageId, UpsertMealPlanPricePackageRequest request, Guid? userId, CancellationToken cancellationToken);
+    Task<AdminWriteResult> SetMealPlanPricePackageStatusAsync(string packageId, bool isActive, Guid? userId, CancellationToken cancellationToken);
     Task<IReadOnlyList<MealPlanTemplateDayResponse>?> GetTemplateDaysAsync(Guid templateId, CancellationToken cancellationToken);
     Task<Guid?> CreateTemplateDayAsync(Guid templateId, UpsertMealPlanTemplateDayRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<bool> UpdateTemplateDayAsync(Guid templateId, Guid dayId, UpsertMealPlanTemplateDayRequest request, Guid? userId, CancellationToken cancellationToken);
@@ -103,7 +187,15 @@ public interface IAuthService
 {
     Task<AuthSessionResponse?> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken);
     Task<AuthSessionResponse?> LoginAsync(LoginRequest request, CancellationToken cancellationToken);
+    Task<PhoneOtpAuthResult> LoginWithPhoneOtpAsync(PhoneOtpLoginRequest request, CancellationToken cancellationToken);
     Task<AuthSessionResponse?> RefreshAsync(string refreshToken, CancellationToken cancellationToken);
     Task RevokeAsync(string refreshToken, CancellationToken cancellationToken);
     Task<AuthUserResponse?> GetUserAsync(Guid userId, CancellationToken cancellationToken);
 }
+public interface IPhoneOtpVerifier
+{
+    Task<PhoneOtpVerificationStatus> VerifyAsync(string phoneNumber, string otp, CancellationToken cancellationToken);
+}
+public enum PhoneOtpVerificationStatus { Valid, Invalid, Disabled }
+public enum PhoneOtpAuthStatus { Success, InvalidOtp, Disabled, Conflict }
+public sealed record PhoneOtpAuthResult(PhoneOtpAuthStatus Status, AuthSessionResponse? Session = null);
