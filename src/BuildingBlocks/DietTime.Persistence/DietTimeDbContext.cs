@@ -45,6 +45,10 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
     public DbSet<CustomerProfileAllergen> CustomerProfileAllergens => Set<CustomerProfileAllergen>();
     public DbSet<CustomerAddress> CustomerAddresses => Set<CustomerAddress>();
     public DbSet<DeliveryTimeSlot> DeliveryTimeSlots => Set<DeliveryTimeSlot>();
+    public DbSet<Order> Orders => Set<Order>();
+    public DbSet<OrderMeal> OrderMeals => Set<OrderMeal>();
+    public DbSet<OrderDeliveryDay> OrderDeliveryDays => Set<OrderDeliveryDay>();
+    public DbSet<OrderStatusHistory> OrderStatusHistory => Set<OrderStatusHistory>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<UserProfile> UserProfiles => Set<UserProfile>();
@@ -65,6 +69,11 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
         b.ApplyConfiguration(new CustomerProfileAllergenConfiguration());
         b.ApplyConfiguration(new CustomerAddressConfiguration());
         b.ApplyConfiguration(new DeliveryTimeSlotConfiguration());
+        b.ApplyConfiguration(new OrderConfiguration());
+        b.ApplyConfiguration(new OrderMealConfiguration());
+        b.ApplyConfiguration(new OrderDeliveryDayConfiguration());
+        b.ApplyConfiguration(new OrderStatusHistoryConfiguration());
+        b.HasSequence<long>("order_number_seq", "public");
     }
 
     private static void ConfigureLookups(ModelBuilder b)

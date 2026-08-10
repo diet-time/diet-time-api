@@ -275,6 +275,76 @@ public sealed record DeliveryTimeSlotResponse(
     TimeOnly EndTime);
 public sealed record DeliveryTimeSlotListResponse(IReadOnlyList<DeliveryTimeSlotResponse> Items);
 
+public sealed record PlaceOrderMealRequest(Guid MealTypeId, int Quantity);
+public sealed record PlaceOrderRequest(
+    Guid CustomerProfileId,
+    Guid MealPlanTemplateId,
+    Guid MealPlanPriceId,
+    Guid CustomerAddressId,
+    Guid DeliveryTimeSlotId,
+    DateOnly StartDate,
+    IReadOnlyList<int> DeliveryDays,
+    IReadOnlyList<PlaceOrderMealRequest> Meals,
+    string? CouponCode = null);
+
+public sealed record OrderPlanResponse(
+    Guid MealPlanTemplateId, Guid MealPlanPriceId, string Name, string DurationName);
+public sealed record OrderMealResponse(Guid MealTypeId, string Name, int Quantity);
+public sealed record OrderTimeSlotResponse(Guid Id, string Name, TimeOnly StartTime, TimeOnly EndTime);
+public sealed record OrderAddressResponse(
+    Guid AddressId,
+    string? AddressName,
+    string AddressType,
+    string? BuildingNo,
+    string? StreetNo,
+    string? UnitNumber,
+    string? ZoneNo,
+    string Area,
+    string? Directions,
+    decimal? Latitude,
+    decimal? Longitude,
+    string? FormattedAddress);
+public sealed record OrderDeliveryResponse(
+    int DaysPerWeek,
+    IReadOnlyList<int> Days,
+    DateOnly StartDate,
+    DateOnly EndDate,
+    OrderTimeSlotResponse TimeSlot,
+    OrderAddressResponse Address);
+public sealed record OrderPricingResponse(
+    decimal Subtotal,
+    decimal DiscountAmount,
+    decimal DeliveryCharge,
+    decimal TotalAmount,
+    string CurrencyCode);
+public sealed record PlaceOrderResponse(
+    Guid Id,
+    string OrderNumber,
+    string Status,
+    string PaymentStatus,
+    OrderPlanResponse Plan,
+    IReadOnlyList<OrderMealResponse> Meals,
+    OrderDeliveryResponse Delivery,
+    OrderPricingResponse Pricing,
+    DateTimeOffset PlacedAt);
+public sealed record CustomerOrderSummaryResponse(
+    Guid Id,
+    string OrderNumber,
+    string PlanName,
+    string PlanDurationName,
+    DateOnly StartDate,
+    DateOnly EndDate,
+    string Status,
+    string PaymentStatus,
+    decimal TotalAmount,
+    string CurrencyCode,
+    DateTimeOffset PlacedAt);
+public sealed record CustomerOrdersResponse(
+    IReadOnlyList<CustomerOrderSummaryResponse> Items,
+    int PageNumber,
+    int PageSize,
+    int TotalCount);
+
 public sealed record ChangeMealStatusRequest(string Status);
 public sealed record AdminMealSummaryResponse(
     Guid Id,

@@ -102,6 +102,40 @@ public interface IDeliveryTimeSlotService
     Task<IReadOnlyList<DeliveryTimeSlotResponse>> GetActiveAsync(CancellationToken cancellationToken);
 }
 
+public enum PlaceOrderStatus
+{
+    Created,
+    Replayed,
+    IdempotencyConflict,
+    CustomerNotFound,
+    TemplateNotFound,
+    TemplateUnavailable,
+    PriceNotFound,
+    PriceUnavailable,
+    InvalidMealConfiguration,
+    InvalidDeliveryDays,
+    AddressNotFound,
+    DeliveryTimeSlotNotFound,
+    InvalidStartDate,
+    CouponNotSupported
+}
+
+public sealed record PlaceOrderResult(
+    PlaceOrderStatus Status,
+    PlaceOrderResponse? Order = null,
+    string? Detail = null);
+
+public interface IOrderService
+{
+    Task<PlaceOrderResult> PlaceAsync(
+        PlaceOrderRequest request, string idempotencyKey, Guid userId,
+        CancellationToken cancellationToken);
+    Task<PlaceOrderResponse?> GetAsync(Guid orderId, Guid userId, CancellationToken cancellationToken);
+    Task<CustomerOrdersResponse?> GetCustomerOrdersAsync(
+        Guid customerProfileId, Guid userId, string? status,
+        int pageNumber, int pageSize, CancellationToken cancellationToken);
+}
+
 public sealed record CustomerNutritionCalculationInput(
     string? GenderCode,
     DateOnly? DateOfBirth,

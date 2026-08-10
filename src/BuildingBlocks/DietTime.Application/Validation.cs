@@ -141,6 +141,34 @@ public sealed class UpsertCustomerAddressRequestValidator
     }
 }
 
+public sealed class PlaceOrderRequestValidator : AbstractValidator<PlaceOrderRequest>
+{
+    public PlaceOrderRequestValidator()
+    {
+        RuleFor(x => x.CustomerProfileId).NotEmpty();
+        RuleFor(x => x.MealPlanTemplateId).NotEmpty();
+        RuleFor(x => x.MealPlanPriceId).NotEmpty();
+        RuleFor(x => x.CustomerAddressId).NotEmpty();
+        RuleFor(x => x.DeliveryTimeSlotId).NotEmpty();
+        RuleFor(x => x.StartDate).NotEqual(default(DateOnly));
+        RuleFor(x => x.DeliveryDays).NotNull().NotEmpty().Must(days => days.Count <= 7);
+        RuleForEach(x => x.DeliveryDays).InclusiveBetween(1, 7);
+        RuleFor(x => x.DeliveryDays)
+            .Must(days => days.Distinct().Count() == days.Count)
+            .WithMessage("Duplicate delivery days are not allowed.");
+        RuleFor(x => x.Meals).NotNull().NotEmpty().Must(meals => meals.Count <= 20);
+        RuleForEach(x => x.Meals).ChildRules(meal =>
+        {
+            meal.RuleFor(x => x.MealTypeId).NotEmpty();
+            meal.RuleFor(x => x.Quantity).GreaterThan(0);
+        });
+        RuleFor(x => x.Meals)
+            .Must(meals => meals.Select(meal => meal.MealTypeId).Distinct().Count() == meals.Count)
+            .WithMessage("Duplicate meal types are not allowed.");
+        RuleFor(x => x.CouponCode).MaximumLength(100);
+    }
+}
+
 public sealed class UpsertAllergenRequestValidator : AbstractValidator<UpsertAllergenRequest>
 {
     public UpsertAllergenRequestValidator()

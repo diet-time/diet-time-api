@@ -210,6 +210,88 @@ public sealed class DeliveryTimeSlot : Entity
     public long RowVersion { get; set; } = 1;
 }
 
+public static class OrderStatuses
+{
+    public const string Confirmed = "CONFIRMED";
+}
+
+public static class PaymentStatuses
+{
+    public const string Pending = "PENDING";
+}
+
+public sealed class Order : Entity
+{
+    public string OrderNumber { get; set; } = "";
+    public Guid CustomerProfileId { get; set; }
+    public Guid MealPlanTemplateId { get; set; }
+    public Guid MealPlanPriceId { get; set; }
+    public Guid CustomerAddressId { get; set; }
+    public Guid DeliveryTimeSlotId { get; set; }
+    public DateOnly StartDate { get; set; }
+    public DateOnly EndDate { get; set; }
+    public int DeliveryDaysPerWeek { get; set; }
+    public string PlanName { get; set; } = "";
+    public string PlanDurationName { get; set; } = "";
+    public decimal Subtotal { get; set; }
+    public decimal DiscountAmount { get; set; }
+    public decimal DeliveryCharge { get; set; }
+    public decimal TotalAmount { get; set; }
+    public string CurrencyCode { get; set; } = "QAR";
+    public string? CouponCode { get; set; }
+    public string? DeliveryAddressName { get; set; }
+    public string DeliveryAddressType { get; set; } = "";
+    public string? DeliveryBuildingNo { get; set; }
+    public string? DeliveryStreetNo { get; set; }
+    public string? DeliveryUnitNumber { get; set; }
+    public string? DeliveryZoneNo { get; set; }
+    public string DeliveryArea { get; set; } = "";
+    public string? DeliveryDirections { get; set; }
+    public decimal? DeliveryLatitude { get; set; }
+    public decimal? DeliveryLongitude { get; set; }
+    public string? DeliveryFormattedAddress { get; set; }
+    public string DeliveryTimeSlotName { get; set; } = "";
+    public TimeOnly DeliveryStartTime { get; set; }
+    public TimeOnly DeliveryEndTime { get; set; }
+    public string Status { get; set; } = OrderStatuses.Confirmed;
+    public string PaymentStatus { get; set; } = PaymentStatuses.Pending;
+    public DateTimeOffset PlacedAt { get; set; }
+    public string IdempotencyKey { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public Guid? UpdatedBy { get; set; }
+    public long RowVersion { get; set; } = 1;
+    public ICollection<OrderMeal> Meals { get; set; } = [];
+    public ICollection<OrderDeliveryDay> DeliveryDays { get; set; } = [];
+    public ICollection<OrderStatusHistory> StatusHistory { get; set; } = [];
+}
+
+public sealed class OrderMeal : Entity
+{
+    public Guid OrderId { get; set; }
+    public Order Order { get; set; } = null!;
+    public Guid MealTypeId { get; set; }
+    public string MealTypeName { get; set; } = "";
+    public int Quantity { get; set; }
+}
+
+public sealed class OrderDeliveryDay : Entity
+{
+    public Guid OrderId { get; set; }
+    public Order Order { get; set; } = null!;
+    public int DayOfWeek { get; set; }
+}
+
+public sealed class OrderStatusHistory : Entity
+{
+    public Guid OrderId { get; set; }
+    public Order Order { get; set; } = null!;
+    public string Status { get; set; } = "";
+    public string? Notes { get; set; }
+    public DateTimeOffset ChangedAt { get; set; }
+}
+
 public sealed class CustomerNutritionTarget : Entity
 {
     public Guid CustomerProfileId { get; set; }

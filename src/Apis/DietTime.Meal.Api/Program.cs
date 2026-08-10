@@ -56,6 +56,7 @@ builder.Services.Configure<PhoneOtpOptions>(builder.Configuration.GetSection(Pho
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
 builder.Services.Configure<DeliveryScheduleOptions>(builder.Configuration.GetSection(DeliveryScheduleOptions.SectionName));
 builder.Services.Configure<CustomerNutritionOptions>(builder.Configuration.GetSection(CustomerNutritionOptions.SectionName));
+builder.Services.Configure<OrderOptions>(builder.Configuration.GetSection(OrderOptions.SectionName));
 builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection(SmtpOptions.SectionName));
 builder.Services.PostConfigure<StorageOptions>(options =>
 {
@@ -147,6 +148,7 @@ builder.Services.AddSingleton<ICustomerNutritionCalculator>(services =>
 builder.Services.AddScoped<ICustomerProfileService, CustomerProfileService>();
 builder.Services.AddScoped<ICustomerAddressService, CustomerAddressService>();
 builder.Services.AddScoped<IDeliveryTimeSlotService, DeliveryTimeSlotService>();
+builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<ICustomerMealPlanPurchaseService, CustomerMealPlanPurchaseService>();
 builder.Services.AddScoped<IUserProfileService, UserProfileService>(); 
 builder.Services.AddScoped<ICustomerService, CustomerService>(); 

@@ -33,6 +33,31 @@ public static class SelectionRules
     public static decimal ResolveAdditionalPrice(decimal slotPrice, bool allowsPaidUpgrade) => allowsPaidUpgrade ? slotPrice : 0;
 }
 
+public static class OrderSchedulingRules
+{
+    public static DateOnly CalculateEndDate(
+        DateOnly startDate, IReadOnlyCollection<int> deliveryDays, int serviceDays)
+    {
+        if (deliveryDays.Count == 0 || deliveryDays.Any(day => day is < 1 or > 7))
+            throw new ArgumentException("At least one valid delivery weekday is required.", nameof(deliveryDays));
+        if (serviceDays <= 0)
+            throw new ArgumentOutOfRangeException(nameof(serviceDays));
+
+        var selected = deliveryDays.ToHashSet();
+        var date = startDate;
+        var delivered = 0;
+        while (true)
+        {
+            if (selected.Contains(ToApiWeekday(date.DayOfWeek)) && ++delivered == serviceDays)
+                return date;
+            date = date.AddDays(1);
+        }
+    }
+
+    public static int ToApiWeekday(DayOfWeek weekday) =>
+        weekday == DayOfWeek.Sunday ? 7 : (int)weekday;
+}
+
 public static class MediaObjectKeyRules
 {
     public static bool IsAllowed(string? objectKey)
