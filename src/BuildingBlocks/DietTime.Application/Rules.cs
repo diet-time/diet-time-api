@@ -33,6 +33,13 @@ public static class SelectionRules
     public static decimal ResolveAdditionalPrice(decimal slotPrice, bool allowsPaidUpgrade) => allowsPaidUpgrade ? slotPrice : 0;
 }
 
+public static class MealTypeClassification
+{
+    public static bool IsSnack(string code) =>
+        code.Equals("SNACK", StringComparison.OrdinalIgnoreCase) ||
+        code.Equals("SNACK_DESSERT", StringComparison.OrdinalIgnoreCase);
+}
+
 public static class OrderSchedulingRules
 {
     public static DateOnly CalculateEndDate(

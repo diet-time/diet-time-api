@@ -160,7 +160,7 @@ public sealed class OrderApiTests : IAsyncLifetime
         var types = new[]
         {
             Type(lunchId, "LUNCH", "Lunch", now), Type(dinnerId, "DINNER", "Dinner", now),
-            Type(snackId, "SNACK", "Snack", now)
+            Type(snackId, "SNACK_DESSERT", "Snack / Dessert", now)
         };
         db.MealTypes.AddRange(types);
         var plan = new MealPlanTemplate { Id = planId, VersionGroupId = Guid.NewGuid(), VersionNumber = 1, IsLatest = true, Code = "CLASSIC", PlanType = "STANDARD", DurationDays = 20, IsPublished = true, IsActive = true, CreatedAt = now, UpdatedAt = now, RowVersion = 1 };
@@ -184,7 +184,7 @@ public sealed class OrderApiTests : IAsyncLifetime
 
     private static MealType Type(Guid id, string code, string name, DateTimeOffset now)
     {
-        var type = new MealType { Id = id, Code = code, DisplayOrder = code == "SNACK" ? 3 : code == "DINNER" ? 2 : 1, IsActive = true, CreatedAt = now, UpdatedAt = now };
+        var type = new MealType { Id = id, Code = code, DisplayOrder = code == "SNACK_DESSERT" ? 3 : code == "DINNER" ? 2 : 1, IsActive = true, CreatedAt = now, UpdatedAt = now };
         type.Translations.Add(new MealTypeTranslation { Id = Guid.NewGuid(), LanguageCode = "en", Name = name, CreatedAt = now, UpdatedAt = now });
         return type;
     }

@@ -5,6 +5,25 @@ namespace DietTime.UnitTests;
 
 public sealed class OrderTests
 {
+    [Theory]
+    [InlineData("SNACK")]
+    [InlineData("snack")]
+    [InlineData("SNACK_DESSERT")]
+    [InlineData("snack_dessert")]
+    public void Recognizes_catalogue_snack_codes(string code)
+    {
+        Assert.True(MealTypeClassification.IsSnack(code));
+    }
+
+    [Theory]
+    [InlineData("BREAKFAST")]
+    [InlineData("LUNCH")]
+    [InlineData("DINNER")]
+    public void Does_not_classify_regular_meals_as_snacks(string code)
+    {
+        Assert.False(MealTypeClassification.IsSnack(code));
+    }
+
     [Fact]
     public void Calculates_end_date_using_service_days_only()
     {

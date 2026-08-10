@@ -101,7 +101,7 @@ public sealed class OrderService(
             return Fail(PlaceOrderStatus.InvalidMealConfiguration, "A selected meal type is not offered by this meal plan.");
 
         var quantities = request.Meals.ToDictionary(x => x.MealTypeId, x => x.Quantity);
-        var snackQuantity = mealTypes.Where(x => x.Code.Equals("SNACK", StringComparison.OrdinalIgnoreCase))
+        var snackQuantity = mealTypes.Where(x => MealTypeClassification.IsSnack(x.Code))
             .Sum(x => quantities[x.Id]);
         var mealQuantity = request.Meals.Sum(x => x.Quantity) - snackQuantity;
         if (mealQuantity != price.MealsPerDay || snackQuantity != price.SnacksPerDay)
