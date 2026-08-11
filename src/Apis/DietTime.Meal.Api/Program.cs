@@ -149,6 +149,7 @@ builder.Services.AddScoped<ICustomerProfileService, CustomerProfileService>();
 builder.Services.AddScoped<ICustomerAddressService, CustomerAddressService>();
 builder.Services.AddScoped<IDeliveryTimeSlotService, DeliveryTimeSlotService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
+builder.Services.AddScoped<IAdminDeliveryCalendarService, AdminDeliveryCalendarService>();
 builder.Services.AddScoped<ICustomerMealPlanPurchaseService, CustomerMealPlanPurchaseService>();
 builder.Services.AddScoped<IUserProfileService, UserProfileService>(); 
 builder.Services.AddScoped<ICustomerService, CustomerService>(); 
