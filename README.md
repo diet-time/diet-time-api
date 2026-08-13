@@ -140,3 +140,10 @@ PostgreSQL integration tests use Testcontainers and are opt-in because Docker is
 - There is no plan-media table, so plan categories temporarily use a primary meal image.
 - Admin MFA is ready through Identity token providers and `two_factor_enabled`, but enrollment/challenge endpoints are not included.
 - Micronutrients beyond the nutrition columns in the supplied schema cannot be returned until a micronutrient table or JSON contract is added.
+## Operations dashboard data limitations
+
+`GET /api/admin/dashboard/operations` derives scheduled deliveries from each order's
+stored service-date range and configured delivery weekdays. The current schema has no
+delivery execution record or completion status, so `completedDeliveries` is returned as
+`null`. It also has no route, driver, or per-delivery assignment data from which a genuine
+scheduling conflict can be identified, so `deliveryConflicts` is returned as `0`.

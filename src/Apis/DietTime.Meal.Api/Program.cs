@@ -57,6 +57,7 @@ builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(Stor
 builder.Services.Configure<DeliveryScheduleOptions>(builder.Configuration.GetSection(DeliveryScheduleOptions.SectionName));
 builder.Services.Configure<CustomerNutritionOptions>(builder.Configuration.GetSection(CustomerNutritionOptions.SectionName));
 builder.Services.Configure<OrderOptions>(builder.Configuration.GetSection(OrderOptions.SectionName));
+builder.Services.Configure<OperationsDashboardOptions>(builder.Configuration.GetSection(OperationsDashboardOptions.SectionName));
 builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection(SmtpOptions.SectionName));
 builder.Services.PostConfigure<StorageOptions>(options =>
 {
@@ -150,6 +151,7 @@ builder.Services.AddScoped<ICustomerAddressService, CustomerAddressService>();
 builder.Services.AddScoped<IDeliveryTimeSlotService, DeliveryTimeSlotService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<IAdminDeliveryCalendarService, AdminDeliveryCalendarService>();
+builder.Services.AddScoped<IOperationsDashboardService, OperationsDashboardService>();
 builder.Services.AddScoped<ICustomerMealPlanPurchaseService, CustomerMealPlanPurchaseService>();
 builder.Services.AddScoped<IUserProfileService, UserProfileService>(); 
 builder.Services.AddScoped<ICustomerService, CustomerService>(); 

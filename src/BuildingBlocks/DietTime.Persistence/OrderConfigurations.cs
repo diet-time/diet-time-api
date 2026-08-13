@@ -54,6 +54,7 @@ public sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
         e.HasIndex(x => x.OrderNumber).IsUnique().HasDatabaseName("ux_orders_order_number");
         e.HasIndex(x => x.IdempotencyKey).IsUnique().HasDatabaseName("ux_orders_idempotency_key");
         e.HasIndex(x => new { x.CustomerProfileId, x.PlacedAt }).HasDatabaseName("ix_orders_customer_placed_at");
+        e.HasIndex(x => new { x.Status, x.StartDate, x.EndDate }).HasDatabaseName("ix_orders_status_service_dates");
     }
 
     private static void Money(PropertyBuilder<decimal> property) => property.HasPrecision(12, 2);
@@ -85,6 +86,7 @@ public sealed class OrderDeliveryDayConfiguration : IEntityTypeConfiguration<Ord
         e.Property(x => x.OrderId).HasColumnName("order_id");
         e.Property(x => x.DayOfWeek).HasColumnName("day_of_week");
         e.HasIndex(x => new { x.OrderId, x.DayOfWeek }).IsUnique().HasDatabaseName("ux_order_delivery_days_order_day");
+        e.HasIndex(x => new { x.DayOfWeek, x.OrderId }).HasDatabaseName("ix_order_delivery_days_day_order");
         e.HasOne(x => x.Order).WithMany(x => x.DeliveryDays).HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Cascade);
     }
 }
