@@ -89,6 +89,62 @@ public sealed class AdminDeliveryCalendarService(DietTimeDbContext db) : IAdminD
         return new AdminDeliveryCalendarResponse(startDate, endDate, days);
     }
 
+    public async Task<DeliveryPreparationSummaryResponse> GetPreparationSummaryAsync(
+        DateOnly date,
+        CancellationToken cancellationToken)
+    {
+        var apiWeekday = OperationsDashboardScheduling.ToApiWeekday(date.DayOfWeek);
+        var menuWeekday = MenuWeekdayExtensions.FromDate(date);
+        var scheduledOrders = await db.Orders.AsNoTracking()
+            .Where(order => order.Status == OrderStatuses.Confirmed &&
+                order.StartDate <= date && order.EndDate >= date &&
+                order.DeliveryDays.Any(day => day.DayOfWeek == apiWeekday))
+            .Select(order => new DeliveryPreparationOrderSource(
+                order.Id,
+                order.CustomerProfileId,
+                order.MealPlanTemplateId,
+                order.PlanName))
+            .ToListAsync(cancellationToken);
+
+        if (scheduledOrders.Count == 0)
+            return DeliveryPreparationAggregation.Build(date, [], []);
+
+        var orderIds = scheduledOrders.Select(order => order.OrderId).ToArray();
+        var menuRows = await (
+            from orderMeal in db.OrderMeals.AsNoTracking()
+            where orderIds.Contains(orderMeal.OrderId)
+            join order in db.Orders.AsNoTracking()
+                on orderMeal.OrderId equals order.Id
+            join day in db.MealPlanTemplateDays.AsNoTracking()
+                on order.MealPlanTemplateId equals day.MealPlanTemplateId
+            join slot in db.MealPlanTemplateSlots.AsNoTracking()
+                on new { DayId = day.Id, orderMeal.MealTypeId }
+                equals new { DayId = slot.MealPlanTemplateDayId, slot.MealTypeId }
+            join option in db.MealPlanSlotOptions.AsNoTracking()
+                on slot.Id equals option.MealPlanTemplateSlotId
+            join mealType in db.MealTypes.AsNoTracking()
+                on orderMeal.MealTypeId equals mealType.Id
+            join menuItem in db.MealItems.AsNoTracking()
+                on option.MealItemId equals menuItem.Id
+            where day.MenuWeekday == menuWeekday && day.IsActive && slot.IsActive &&
+                option.IsDefault && option.IsAvailable && menuItem.IsAvailable &&
+                menuItem.Status != "ARCHIVED"
+            select new DeliveryPreparationMenuSource(
+                orderMeal.OrderId,
+                orderMeal.MealTypeId,
+                orderMeal.MealTypeName,
+                mealType.DisplayOrder,
+                menuItem.Id,
+                menuItem.Translations
+                    .Where(translation => translation.LanguageCode == "en")
+                    .Select(translation => translation.Name)
+                    .FirstOrDefault() ?? menuItem.Sku,
+                orderMeal.Quantity))
+            .ToListAsync(cancellationToken);
+
+        return DeliveryPreparationAggregation.Build(date, scheduledOrders, menuRows);
+    }
+
     private static string ResolveCustomerName(
         Guid? userId,
         string? preferredName,

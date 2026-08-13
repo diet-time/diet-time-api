@@ -118,6 +118,13 @@ Example request body:
 
 Meal-plan template days use stable uppercase weekday codes in `day_of_week` and are ordered by `display_order`. Menu lookup always selects the weekday matching the actual delivery date; numbered rolling-day progression is not supported.
 
+The delivery preparation summary is available at
+`GET /api/v1/admin/delivery-calendar/{date}/preparation-summary` (with an unversioned
+alias for the operations SPA). The current schema validates menu choices but does not
+persist a per-order, per-service-date selection. Preparation therefore uses only the
+configured default menu item for each active meal-plan weekday slot; it does not guess
+among non-default options.
+
 ## Response example
 
 ```json

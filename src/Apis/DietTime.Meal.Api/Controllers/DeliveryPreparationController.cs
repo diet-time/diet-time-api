@@ -1,0 +1,34 @@
+using System.Globalization;
+using Asp.Versioning;
+using DietTime.Application;
+using DietTime.Contracts;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+
+namespace DietTime.Meal.Api.Controllers;
+
+[ApiController]
+[ApiVersion(1)]
+[Authorize(Roles = "Admin,Operations")]
+[Route("api/admin/delivery-calendar")]
+[Route("api/v{version:apiVersion}/admin/delivery-calendar")]
+public sealed class DeliveryPreparationController(IAdminDeliveryCalendarService calendar) : ControllerBase
+{
+    [HttpGet("{date}/preparation-summary")]
+    [ProducesResponseType(typeof(ApiResponse<DeliveryPreparationSummaryResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> GetPreparationSummary(
+        string date,
+        CancellationToken cancellationToken)
+    {
+        if (!DateOnly.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out var selectedDate))
+        {
+            ModelState.AddModelError(nameof(date), "date must use yyyy-MM-dd format.");
+            return ValidationProblem(ModelState);
+        }
+
+        var summary = await calendar.GetPreparationSummaryAsync(selectedDate, cancellationToken);
+        return Ok(ApiResponse<DeliveryPreparationSummaryResponse>.Ok(summary));
+    }
+}
