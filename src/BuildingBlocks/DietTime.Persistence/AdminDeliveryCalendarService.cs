@@ -110,7 +110,7 @@ public sealed class AdminDeliveryCalendarService(DietTimeDbContext db) : IAdminD
             return DeliveryPreparationAggregation.Build(date, [], []);
 
         var orderIds = scheduledOrders.Select(order => order.OrderId).ToArray();
-        var menuRows = await (
+        var menuCandidates = await (
             from orderMeal in db.OrderMeals.AsNoTracking()
             where orderIds.Contains(orderMeal.OrderId)
             join order in db.Orders.AsNoTracking()
@@ -126,21 +126,45 @@ public sealed class AdminDeliveryCalendarService(DietTimeDbContext db) : IAdminD
                 on orderMeal.MealTypeId equals mealType.Id
             join menuItem in db.MealItems.AsNoTracking()
                 on option.MealItemId equals menuItem.Id
-            where day.MenuWeekday == menuWeekday && day.IsActive && slot.IsActive &&
-                option.IsDefault && option.IsAvailable && menuItem.IsAvailable &&
-                menuItem.Status != "ARCHIVED"
-            select new DeliveryPreparationMenuSource(
+            where day.MenuWeekday == menuWeekday
+            select new
+            {
                 orderMeal.OrderId,
                 orderMeal.MealTypeId,
                 orderMeal.MealTypeName,
-                mealType.DisplayOrder,
-                menuItem.Id,
-                menuItem.Translations
+                MealTypeDisplayOrder = mealType.DisplayOrder,
+                MenuItemId = menuItem.Id,
+                MenuItemName = menuItem.Translations
                     .Where(translation => translation.LanguageCode == "en")
                     .Select(translation => translation.Name)
                     .FirstOrDefault() ?? menuItem.Sku,
-                orderMeal.Quantity))
+                orderMeal.Quantity,
+                option.IsDefault,
+                option.IsAvailable,
+                option.DisplayOrder
+            })
             .ToListAsync(cancellationToken);
+
+        // Orders retain their plan version, so preparation must still work when an
+        // option or slot is later made unavailable. Prefer the configured default;
+        // legacy plans without one fall back deterministically to their first option.
+        var menuRows = menuCandidates
+            .GroupBy(row => new { row.OrderId, row.MealTypeId })
+            .Select(group => group
+                .OrderByDescending(row => row.IsDefault)
+                .ThenByDescending(row => row.IsAvailable)
+                .ThenBy(row => row.DisplayOrder)
+                .ThenBy(row => row.MenuItemName, StringComparer.OrdinalIgnoreCase)
+                .First())
+            .Select(row => new DeliveryPreparationMenuSource(
+                row.OrderId,
+                row.MealTypeId,
+                row.MealTypeName,
+                row.MealTypeDisplayOrder,
+                row.MenuItemId,
+                row.MenuItemName,
+                row.Quantity))
+            .ToArray();
 
         return DeliveryPreparationAggregation.Build(date, scheduledOrders, menuRows);
     }

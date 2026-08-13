@@ -118,6 +118,10 @@ public sealed class DeliveryPreparationApiTests : IAsyncLifetime
 
         var planA = Plan("EVERYDAY", breakfast, wrap, lunch, chicken, now);
         var planB = Plan("BALANCED", breakfast, croissant, lunch, chicken, now);
+        // Legacy plan data may have no default marker. Preparation should still
+        // resolve the first configured option instead of returning an empty day.
+        foreach (var option in planB.Days.SelectMany(day => day.Slots).SelectMany(slot => slot.Options))
+            option.IsDefault = false;
         db.MealPlanTemplates.AddRange(planA, planB);
         db.Orders.AddRange(
             Order(customerA.Id, planA, "ORD-001", OrderStatuses.Confirmed, [6], 1, now),
