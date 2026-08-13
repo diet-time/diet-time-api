@@ -25,4 +25,10 @@
     <ProjectReference Include="..\..\src\BuildingBlocks\DietTime.Infrastructure\DietTime.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\..\src\Apis\DietTime.Meal.Api\appsettings.Development.json"
+             Link="appsettings.Development.json"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

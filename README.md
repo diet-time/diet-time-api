@@ -91,6 +91,29 @@ Admin endpoints from the brief are under `/api/v1/admin` and require `Admin`, `D
 
 Swagger is available outside Production at `/swagger`; liveness/database health is `/health`.
 
+## WhatsApp order notifications
+
+Successful new orders can send the `new_order_summary` template through the Meta
+WhatsApp Business Cloud API. The notification is attempted only after the order
+transaction commits; provider failures are logged and never change the successful
+checkout response. Replayed idempotency keys do not send a second message.
+
+Development configures the operations recipient as `+97474452435` but leaves the
+integration disabled until provider credentials are supplied. Register that number
+as a Meta test recipient, then configure secrets and enable the integration:
+
+```text
+WhatsApp__Enabled=true
+WhatsApp__PhoneNumberId=<Meta phone number ID>
+WhatsApp__AccessToken=<Meta access token>
+```
+
+Production must additionally configure its own `WhatsApp__OperationsNumber`; do not
+reuse the development recipient or commit provider credentials. Configuration is
+validated at startup whenever WhatsApp is enabled. In Development, an authenticated
+Admin can call `POST /api/admin/integrations/whatsapp/test`; the endpoint always uses
+the configured operations number and never accepts a destination from the request.
+
 ## Calendar behavior
 
 Meal-plan template days use stable uppercase weekday codes in `day_of_week` and are ordered by `display_order`. Menu lookup always selects the weekday matching the actual delivery date; numbered rolling-day progression is not supported.

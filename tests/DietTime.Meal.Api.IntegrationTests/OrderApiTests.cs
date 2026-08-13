@@ -2,9 +2,11 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using DietTime.Domain;
+using DietTime.Application;
 using DietTime.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Testcontainers.PostgreSql;
 
 namespace DietTime.Meal.Api.IntegrationTests;
@@ -25,6 +27,7 @@ public sealed class OrderApiTests : IAsyncLifetime
     private Guid lunchId;
     private Guid dinnerId;
     private Guid snackId;
+    private readonly WhatsAppRecorder whatsApp = new();
 
     public async Task InitializeAsync()
     {
@@ -32,7 +35,12 @@ public sealed class OrderApiTests : IAsyncLifetime
         postgres = new PostgreSqlBuilder().WithImage("postgres:16-alpine")
             .WithDatabase("diettime_orders_test").WithUsername("postgres").WithPassword("postgres").Build();
         await postgres.StartAsync();
-        factory = new ApiFactory(postgres.GetConnectionString());
+        factory = new ApiFactory(postgres.GetConnectionString(), services =>
+        {
+            services.RemoveAll<IWhatsAppService>();
+            services.AddSingleton(whatsApp);
+            services.AddScoped<IWhatsAppService, CommitAwareWhatsAppService>();
+        });
         client = factory.CreateClient();
         await SeedAsync();
         Authenticate(userId);
@@ -63,6 +71,19 @@ public sealed class OrderApiTests : IAsyncLifetime
         Assert.Equal(1880m, created.GetProperty("pricing").GetProperty("totalAmount").GetDecimal());
         Assert.Equal(ExpectedEndDate(RequestStartDate(), 20),
             DateOnly.Parse(created.GetProperty("delivery").GetProperty("endDate").GetString()!));
+        var notification = Assert.Single(whatsApp.Notifications);
+        Assert.True(whatsApp.OrderWasCommittedWhenCalled);
+        Assert.Equal("Ahmed Ali", notification.CustomerName);
+        Assert.Equal("+97450123456", notification.CustomerMobile);
+        Assert.Equal("Classic", notification.MealPlanName);
+        Assert.Equal("1 Month", notification.Duration);
+        Assert.Equal(2, notification.MealsPerDay);
+        Assert.Equal(RequestStartDate(), notification.StartDate);
+        Assert.Equal(ExpectedDeliveryDayLabels(RequestStartDate()), notification.DeliveryDays);
+        Assert.Equal("Zone 91, Al Wakrah, Qatar", notification.DeliveryAddress);
+        Assert.Equal(1880m, notification.TotalAmount);
+        Assert.Equal("QAR", notification.Currency);
+        Assert.Equal("CONFIRMED", notification.OrderStatus);
 
         using var replayMessage = new HttpRequestMessage(HttpMethod.Post, "/api/v1/orders")
             { Content = JsonContent.Create(request) };
@@ -71,6 +92,7 @@ public sealed class OrderApiTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.Created, replay.StatusCode);
         Assert.Equal("true", replay.Headers.GetValues("Idempotent-Replayed").Single());
         Assert.Equal(orderId, (await replay.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid());
+        Assert.Single(whatsApp.Notifications);
 
         using (var scope = factory!.Services.CreateScope())
         {
@@ -113,6 +135,44 @@ public sealed class OrderApiTests : IAsyncLifetime
             { Content = JsonContent.Create(Request()) };
         foreignMessage.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
         Assert.Equal(HttpStatusCode.NotFound, (await client.SendAsync(foreignMessage)).StatusCode);
+        Assert.Empty(whatsApp.Notifications);
+    }
+
+    [Fact]
+    public async Task WhatsApp_failure_does_not_fail_or_duplicate_the_order()
+    {
+        if (!enabled) return;
+        whatsApp.Result = new WhatsAppSendResult
+        {
+            Success = false,
+            ErrorCode = "131030",
+            ErrorMessage = "Recipient is not registered"
+        };
+        using var message = new HttpRequestMessage(HttpMethod.Post, "/api/v1/orders")
+            { Content = JsonContent.Create(Request()) };
+        message.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
+
+        var response = await client!.SendAsync(message);
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Single(whatsApp.Notifications);
+        using var scope = factory!.Services.CreateScope();
+        Assert.Equal(1, await scope.ServiceProvider
+            .GetRequiredService<DietTimeDbContext>().Orders.CountAsync());
+    }
+
+    [Fact]
+    public async Task Development_test_endpoint_uses_the_configured_destination()
+    {
+        if (!enabled) return;
+
+        var response = await client!.PostAsync(
+            "/api/admin/integrations/whatsapp/test", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("97474452435", json.GetProperty("destination").GetString());
+        Assert.Single(whatsApp.Notifications);
     }
 
     private object Request(string? coupon = null) => new
@@ -144,6 +204,19 @@ public sealed class OrderApiTests : IAsyncLifetime
         }
     }
 
+    private static string ExpectedDeliveryDayLabels(DateOnly start)
+    {
+        var seen = new HashSet<int>();
+        var labels = new List<string>();
+        for (var date = start; seen.Count < DeliveryDays().Length; date = date.AddDays(1))
+        {
+            var weekday = ApiWeekday(date.DayOfWeek);
+            if (DeliveryDays().Contains(weekday) && seen.Add(weekday))
+                labels.Add(date.ToString("ddd", System.Globalization.CultureInfo.InvariantCulture));
+        }
+        return string.Join(", ", labels);
+    }
+
     private async Task SeedAsync()
     {
         using var scope = factory!.Services.CreateScope();
@@ -154,9 +227,9 @@ public sealed class OrderApiTests : IAsyncLifetime
         planId = Guid.NewGuid(); priceId = Guid.NewGuid(); addressId = Guid.NewGuid(); slotId = Guid.NewGuid();
         lunchId = Guid.NewGuid(); dinnerId = Guid.NewGuid(); snackId = Guid.NewGuid();
         db.Users.AddRange(
-            new ApplicationUser { Id = userId, UserName = "order-owner", SecurityStamp = Guid.NewGuid().ToString() },
+            new ApplicationUser { Id = userId, UserName = "order-owner", PhoneNumber = "+97450123456", SecurityStamp = Guid.NewGuid().ToString() },
             new ApplicationUser { Id = otherUserId, UserName = "other-order-user", SecurityStamp = Guid.NewGuid().ToString() });
-        db.CustomerProfiles.Add(new CustomerProfile { Id = profileId, UserId = userId, IsActive = true, PreferredLanguage = "en", OnboardingStatus = "COMPLETED", CreatedAt = now, UpdatedAt = now, RowVersion = 1 });
+        db.CustomerProfiles.Add(new CustomerProfile { Id = profileId, UserId = userId, PreferredName = "Ahmed Ali", IsActive = true, PreferredLanguage = "en", OnboardingStatus = "COMPLETED", CreatedAt = now, UpdatedAt = now, RowVersion = 1 });
         var types = new[]
         {
             Type(lunchId, "LUNCH", "Lunch", now), Type(dinnerId, "DINNER", "Dinner", now),
@@ -193,5 +266,33 @@ public sealed class OrderApiTests : IAsyncLifetime
     {
         client!.DefaultRequestHeaders.Remove("X-Development-User-Id");
         client.DefaultRequestHeaders.Add("X-Development-User-Id", id.ToString());
+    }
+}
+
+internal sealed class WhatsAppRecorder
+{
+    public List<NewOrderWhatsAppNotification> Notifications { get; } = [];
+    public bool OrderWasCommittedWhenCalled { get; set; }
+    public WhatsAppSendResult Result { get; set; } = new()
+    {
+        Success = true,
+        MessageId = "wamid.test"
+    };
+}
+
+internal sealed class CommitAwareWhatsAppService(
+    DietTimeDbContext db,
+    WhatsAppRecorder recorder) : IWhatsAppService
+{
+    public async Task<WhatsAppSendResult> SendNewOrderNotificationAsync(
+        NewOrderWhatsAppNotification notification,
+        CancellationToken cancellationToken = default)
+    {
+        recorder.OrderWasCommittedWhenCalled =
+            db.Database.CurrentTransaction is null &&
+            await db.Orders.AsNoTracking().AnyAsync(
+                x => x.Id == notification.OrderId, cancellationToken);
+        recorder.Notifications.Add(notification);
+        return recorder.Result;
     }
 }

@@ -1,4 +1,5 @@
 using System.Data;
+using System.Globalization;
 using DietTime.Application;
 using DietTime.Contracts;
 using DietTime.Domain;
@@ -18,6 +19,7 @@ public sealed class OrderService(
     DietTimeDbContext db,
     TimeProvider clock,
     IOptions<OrderOptions> options,
+    IWhatsAppService whatsApp,
     ILogger<OrderService> logger) : IOrderService
 {
     public async Task<PlaceOrderResult> PlaceAsync(
@@ -213,6 +215,7 @@ public sealed class OrderService(
         await transaction.CommitAsync(cancellationToken);
         logger.LogInformation("Order {OrderNumber} placed for customer profile {CustomerProfileId}",
             order.OrderNumber, order.CustomerProfileId);
+        await SendWhatsAppNotificationAsync(order.Id, cancellationToken);
         return new(PlaceOrderStatus.Created, Map(order));
     }
 
@@ -287,6 +290,111 @@ public sealed class OrderService(
         MenuWeekday.Thursday => 4, MenuWeekday.Friday => 5, MenuWeekday.Saturday => 6,
         MenuWeekday.Sunday => 7, _ => throw new ArgumentOutOfRangeException(nameof(weekday))
     };
+
+    private async Task SendWhatsAppNotificationAsync(
+        Guid orderId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var order = await db.Orders.AsNoTracking()
+                .Include(x => x.DeliveryDays)
+                .SingleAsync(x => x.Id == orderId, cancellationToken);
+            var customer = await (
+                from profile in db.CustomerProfiles.AsNoTracking()
+                join user in db.Users.AsNoTracking() on profile.UserId equals user.Id
+                where profile.Id == order.CustomerProfileId
+                select new { profile.PreferredName, user.UserName, user.PhoneNumber })
+                .SingleAsync(cancellationToken);
+            var mealsPerDay = await db.MealPlanPrices.AsNoTracking()
+                .Where(x => x.Id == order.MealPlanPriceId)
+                .Select(x => x.MealsPerDay)
+                .SingleAsync(cancellationToken);
+
+            var notification = new NewOrderWhatsAppNotification
+            {
+                OrderId = order.Id,
+                OrderNumber = order.OrderNumber,
+                CustomerName = FirstNonEmpty(customer.PreferredName, customer.UserName, "Customer"),
+                CustomerMobile = customer.PhoneNumber?.Trim() ?? string.Empty,
+                MealPlanName = order.PlanName,
+                Duration = order.PlanDurationName,
+                MealsPerDay = mealsPerDay,
+                StartDate = order.StartDate,
+                DeliveryDays = FormatDeliveryDays(order),
+                DeliveryAddress = FormatDeliveryAddress(order),
+                TotalAmount = order.TotalAmount,
+                Currency = order.CurrencyCode,
+                OrderStatus = order.Status
+            };
+
+            var result = await whatsApp.SendNewOrderNotificationAsync(
+                notification, cancellationToken);
+            if (result.Success)
+            {
+                logger.LogInformation(
+                    "WhatsApp new-order notification sent. OrderId={OrderId} OrderNumber={OrderNumber} WhatsAppMessageId={WhatsAppMessageId}",
+                    order.Id, order.OrderNumber, result.MessageId);
+            }
+            else if (result.ErrorCode == "whatsapp_disabled")
+            {
+                logger.LogDebug(
+                    "WhatsApp new-order notification is disabled. OrderId={OrderId} OrderNumber={OrderNumber}",
+                    order.Id, order.OrderNumber);
+            }
+            else
+            {
+                logger.LogError(
+                    "Failed to send WhatsApp new-order notification. OrderId={OrderId} OrderNumber={OrderNumber} ErrorCode={ErrorCode}",
+                    order.Id, order.OrderNumber, result.ErrorCode);
+            }
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(
+                exception,
+                "Failed to send WhatsApp new-order notification after order commit. OrderId={OrderId}",
+                orderId);
+        }
+    }
+
+    internal static string FormatDeliveryDays(Order order)
+    {
+        var configured = order.DeliveryDays.Select(x => x.DayOfWeek).ToHashSet();
+        var values = new List<string>();
+        var seen = new HashSet<int>();
+        for (var date = order.StartDate; date <= order.EndDate && seen.Count < configured.Count; date = date.AddDays(1))
+        {
+            var weekday = OrderSchedulingRules.ToApiWeekday(date.DayOfWeek);
+            if (configured.Contains(weekday) && seen.Add(weekday))
+                values.Add(date.ToString("ddd", CultureInfo.InvariantCulture));
+        }
+        return string.Join(", ", values);
+    }
+
+    internal static string FormatDeliveryAddress(Order order)
+    {
+        if (!string.IsNullOrWhiteSpace(order.DeliveryFormattedAddress))
+            return order.DeliveryFormattedAddress.Trim();
+
+        var parts = new[]
+        {
+            order.DeliveryAddressName,
+            Labeled("Unit", order.DeliveryUnitNumber),
+            Labeled("Building", order.DeliveryBuildingNo),
+            Labeled("Street", order.DeliveryStreetNo),
+            Labeled("Zone", order.DeliveryZoneNo),
+            order.DeliveryArea
+        };
+        return string.Join(", ", parts.Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static string? Labeled(string label, string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : $"{label} {value.Trim()}";
+
+    private static string FirstNonEmpty(params string?[] values) =>
+        values.First(value => !string.IsNullOrWhiteSpace(value))!.Trim();
 
     private static string LocalizedName(IEnumerable<NameRow> names, string language, string fallback)
     {

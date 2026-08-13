@@ -59,6 +59,11 @@ builder.Services.Configure<CustomerNutritionOptions>(builder.Configuration.GetSe
 builder.Services.Configure<OrderOptions>(builder.Configuration.GetSection(OrderOptions.SectionName));
 builder.Services.Configure<OperationsDashboardOptions>(builder.Configuration.GetSection(OperationsDashboardOptions.SectionName));
 builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection(SmtpOptions.SectionName));
+builder.Services.AddOptions<WhatsAppOptions>()
+    .Bind(builder.Configuration.GetSection(WhatsAppOptions.SectionName))
+    .Validate(options => options.IsValid(),
+        "Enabled WhatsApp integration requires ApiVersion, PhoneNumberId, AccessToken, a valid OperationsNumber, NewOrderTemplateName, and TemplateLanguage.")
+    .ValidateOnStart();
 builder.Services.PostConfigure<StorageOptions>(options =>
 {
     options.ServiceUrl = builder.Configuration["AWS_ENDPOINT_URL"] ?? options.ServiceUrl;
@@ -162,6 +167,11 @@ builder.Services.AddScoped<IUserMenuService, UserMenuService>();
 builder.Services.AddScoped<IAccessControlService, AccessControlService>(); 
 builder.Services.AddScoped<IPasswordService, PasswordService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddHttpClient<IWhatsAppService, MetaWhatsAppService>(client =>
+{
+    client.BaseAddress = new Uri("https://graph.facebook.com/");
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
 builder.Services.AddSingleton(TimeProvider.System); 
 builder.Services.AddValidatorsFromAssemblyContaining<MealSelectionRequestValidator>(); 
 builder.Services.AddFluentValidationAutoValidation();
