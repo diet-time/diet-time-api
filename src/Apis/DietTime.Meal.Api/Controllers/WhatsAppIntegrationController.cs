@@ -1,3 +1,4 @@
+using Asp.Versioning;
 using DietTime.Application;
 using DietTime.Contracts;
 using DietTime.Infrastructure;
@@ -7,8 +8,10 @@ using Microsoft.AspNetCore.Mvc;
 namespace DietTime.Meal.Api.Controllers;
 
 [ApiController]
+[ApiVersion(1)]
 [Authorize(Roles = "Admin")]
 [Route("api/admin/integrations/whatsapp")]
+[Route("api/v{version:apiVersion}/admin/integrations/whatsapp")]
 public sealed class WhatsAppIntegrationController(
     ITwilioWhatsAppService twilioWhatsApp) : ControllerBase
 {

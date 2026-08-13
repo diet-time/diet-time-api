@@ -135,6 +135,7 @@ public sealed class AuthenticationContractTests
         Assert.Contains("/api/v1/admin/meal-plans/{planId}/image/upload", document);
         Assert.Contains("/api/v1/admin/meal-plans/{planId}/image", document);
         Assert.Contains("/api/v1/admin/delivery-calendar/{date}/preparation-summary", document);
+        Assert.Contains("/api/v1/admin/integrations/whatsapp/twilio/messages", document);
     }
 
     [Theory]
