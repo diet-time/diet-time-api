@@ -175,6 +175,7 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
         }
     }
     [HttpDelete("meals/{mealId:guid}/media/{mediaId:guid}")] public async Task<IActionResult> DeleteMedia(Guid mealId, Guid mediaId, CancellationToken ct) => await admin.DeleteMediaAsync(mealId, mediaId, ct) ? NoContent() : NotFound();
+    [HttpDelete("meals/{mealId:guid}/media/{mediaId:guid}/thumbnail")] public async Task<IActionResult> DeleteThumbnail(Guid mealId, Guid mediaId, CancellationToken ct) => await admin.DeleteThumbnailAsync(mealId, mediaId, ct) ? NoContent() : NotFound();
     [HttpGet("meal-plans")] public async Task<ActionResult<ApiResponse<IReadOnlyList<AdminMealPlanSummaryResponse>>>> GetMealPlans([FromQuery] string? search = null, [FromQuery] int page = 1, [FromQuery] int pageSize = 25, CancellationToken ct = default) { if (page < 1 || pageSize is < 1 or > 100) return BadRequest(); var rows = await admin.GetMealPlansAsync(search, page, pageSize, ct); return Ok(ApiResponse<IReadOnlyList<AdminMealPlanSummaryResponse>>.Ok(rows.Items, rows.Meta)); }
     [HttpGet("meal-plans/{planId:guid}")] public async Task<ActionResult<ApiResponse<AdminMealPlanDetailResponse>>> GetMealPlan(Guid planId, CancellationToken ct) { var plan = await admin.GetMealPlanAsync(planId, ct); return plan is null ? NotFound() : Ok(ApiResponse<AdminMealPlanDetailResponse>.Ok(plan)); }
     [HttpPost("meal-plans")] public async Task<ActionResult<ApiResponse<object>>> CreatePlan(CreatePlanRequest request, CancellationToken ct) { var id = await admin.CreatePlanAsync(request, UserId, ct); return Ok(ApiResponse<object>.Ok(new { id })); }
@@ -216,6 +217,7 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
             StatusCodes.Status201Created,
             ApiResponse<AdminPlanImageResponse>.Ok(media));
     }
+    [HttpDelete("meal-plans/{planId:guid}/image")] public async Task<IActionResult> DeletePlanImage(Guid planId, CancellationToken ct) => await admin.DeletePlanImageAsync(planId, ct) ? NoContent() : NotFound();
     [HttpDelete("meal-plans/{planId:guid}")] public async Task<IActionResult> DeletePlan(Guid planId, CancellationToken ct) => await admin.DeletePlanAsync(planId, ct) ? NoContent() : NotFound();
     [HttpGet("meal-plan-pricing")]
     public async Task<ActionResult<ApiResponse<IReadOnlyList<AdminMealPlanPriceResponse>>>> GetMealPlanPricing(

@@ -7,7 +7,7 @@ using Microsoft.Extensions.Options;
 
 namespace DietTime.Persistence;
 
-public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, IMemoryCache cache, IOptions<DeliveryScheduleOptions> deliverySchedule) : IAdminMealService, ITemplateMenuReader
+public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, IMemoryCache cache, IOptions<DeliveryScheduleOptions> deliverySchedule, IStorageUrlService storage) : IAdminMealService, ITemplateMenuReader
 {
     private const int ExpiringMealHorizonDays = 7;
 
@@ -803,7 +803,37 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         var response = new AdminMediaResponse(media.Id, mealId, media.MediaType, media.ObjectKey, media.PublicUrl, media.MimeType ?? "application/octet-stream", media.IsPrimary, media.DisplayOrder, media.Status, altTextEn, media.ThumbnailObjectKey, media.ThumbnailUrl);
         return new(response, previousObjectKey);
     }
-    public async Task<bool> DeleteMediaAsync(Guid mealId, Guid mediaId, CancellationToken ct) { var groupId = await db.MealItems.Where(x => x.Id == mealId).Select(x => (Guid?)x.VersionGroupId).SingleOrDefaultAsync(ct); if (groupId is null) return false; var latestId = await db.MealItems.Where(x => x.VersionGroupId == groupId && x.IsLatest).Select(x => x.Id).SingleAsync(ct); return await db.MealMedia.Where(x => x.Id == mediaId && x.EntityId == latestId && (x.MediaType == MealMediaTypes.MealItem || x.MediaType == MealMediaTypes.Thumbnail)).ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, "DELETED").SetProperty(x => x.IsPrimary, false), ct) > 0; }
+    public async Task<bool> DeleteMediaAsync(Guid mealId, Guid mediaId, CancellationToken ct)
+    {
+        var groupId = await db.MealItems.Where(x => x.Id == mealId).Select(x => (Guid?)x.VersionGroupId).SingleOrDefaultAsync(ct);
+        if (groupId is null) return false;
+        var latestId = await db.MealItems.Where(x => x.VersionGroupId == groupId && x.IsLatest).Select(x => x.Id).SingleAsync(ct);
+        var media = await db.MealMedia.SingleOrDefaultAsync(x => x.Id == mediaId && x.EntityId == latestId && x.Status == "ACTIVE" && (x.MediaType == MealMediaTypes.MealItem || x.MediaType == MealMediaTypes.Thumbnail), ct);
+        if (media is null) return false;
+
+        await DeleteStoredObjectsAsync(media.ObjectKey, media.ThumbnailObjectKey, ct);
+        media.Status = "DELETED";
+        media.IsPrimary = false;
+        media.UpdatedAt = clock.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public async Task<bool> DeleteThumbnailAsync(Guid mealId, Guid mediaId, CancellationToken ct)
+    {
+        var groupId = await db.MealItems.Where(x => x.Id == mealId).Select(x => (Guid?)x.VersionGroupId).SingleOrDefaultAsync(ct);
+        if (groupId is null) return false;
+        var latestId = await db.MealItems.Where(x => x.VersionGroupId == groupId && x.IsLatest).Select(x => x.Id).SingleAsync(ct);
+        var media = await db.MealMedia.SingleOrDefaultAsync(x => x.Id == mediaId && x.EntityId == latestId && x.Status == "ACTIVE" && x.MediaType == MealMediaTypes.MealItem, ct);
+        if (media is null || string.IsNullOrWhiteSpace(media.ThumbnailObjectKey)) return false;
+
+        await storage.DeleteAsync(media.ThumbnailObjectKey, ct);
+        media.ThumbnailObjectKey = null;
+        media.ThumbnailUrl = null;
+        media.UpdatedAt = clock.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
 
     public async Task<PagedResult<AdminMealPlanSummaryResponse>> GetMealPlansAsync(string? search, int page, int pageSize, CancellationToken ct)
     {
@@ -972,6 +1002,31 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         await tx.CommitAsync(ct);
         return new(plan.Id, media.MediaType, media.PublicUrl ?? media.ObjectKey, request.ContentType);
     }
+    public async Task<bool> DeletePlanImageAsync(Guid planId, CancellationToken ct)
+    {
+        var groupId = await db.MealPlanTemplates.AsNoTracking().Where(x => x.Id == planId).Select(x => (Guid?)x.VersionGroupId).SingleOrDefaultAsync(ct);
+        if (groupId is null) return false;
+        var plan = await db.MealPlanTemplates.SingleAsync(x => x.VersionGroupId == groupId && x.IsLatest, ct);
+        var media = await db.MealMedia.SingleOrDefaultAsync(x => x.EntityId == plan.Id && x.Status == "ACTIVE" && x.MediaType == MealMediaTypes.MealPlan, ct);
+        if (media is null) return false;
+
+        await DeleteStoredObjectsAsync(media.ObjectKey, media.ThumbnailObjectKey, ct);
+        media.Status = "DELETED";
+        media.IsPrimary = false;
+        media.UpdatedAt = clock.GetUtcNow();
+        plan.UpdatedAt = clock.GetUtcNow();
+        plan.RowVersion++;
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    private async Task DeleteStoredObjectsAsync(string objectKey, string? thumbnailObjectKey, CancellationToken ct)
+    {
+        await storage.DeleteAsync(objectKey, ct);
+        if (!string.IsNullOrWhiteSpace(thumbnailObjectKey) && !string.Equals(thumbnailObjectKey, objectKey, StringComparison.Ordinal))
+            await storage.DeleteAsync(thumbnailObjectKey, ct);
+    }
+
     public async Task<bool> DeletePlanAsync(Guid planId, CancellationToken ct) { await using var tx = await db.Database.BeginTransactionAsync(ct); await db.MealPlanPrices.Where(x => x.MealPlanTemplateId == planId).ExecuteDeleteAsync(ct); await db.MealMedia.Where(x => x.EntityId == planId && x.MediaType == MealMediaTypes.MealPlan).ExecuteDeleteAsync(ct); var deleted = await db.MealPlanTemplates.Where(x => x.Id == planId).ExecuteDeleteAsync(ct) > 0; await tx.CommitAsync(ct); return deleted; }
     public async Task<PagedResult<AdminMealPlanPriceResponse>> GetMealPlanPricesAsync(
         string? search,

@@ -181,11 +181,13 @@ public interface IAdminMealService
     Task<AdminMediaResponse?> AddMediaAsync(Guid mealId, SaveMediaRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<AdminThumbnailUpdateResponse?> SetThumbnailAsync(Guid mealId, SaveThumbnailRequest request, CancellationToken cancellationToken);
     Task<bool> DeleteMediaAsync(Guid mealId, Guid mediaId, CancellationToken cancellationToken);
+    Task<bool> DeleteThumbnailAsync(Guid mealId, Guid mediaId, CancellationToken cancellationToken);
     Task<PagedResult<AdminMealPlanSummaryResponse>> GetMealPlansAsync(string? search, int page, int pageSize, CancellationToken cancellationToken);
     Task<AdminMealPlanDetailResponse?> GetMealPlanAsync(Guid planId, CancellationToken cancellationToken);
     Task<Guid> CreatePlanAsync(CreatePlanRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<VersionedUpdateResponse?> UpdatePlanAsync(Guid planId, CreatePlanRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<AdminPlanImageResponse?> AddPlanImageAsync(Guid planId, SaveMediaRequest request, Guid? userId, CancellationToken cancellationToken);
+    Task<bool> DeletePlanImageAsync(Guid planId, CancellationToken cancellationToken);
     Task<bool> DeletePlanAsync(Guid planId, CancellationToken cancellationToken);
     Task<PagedResult<AdminMealPlanPriceResponse>> GetMealPlanPricesAsync(string? search, Guid? mealPlanTemplateId, string? status, string? currencyCode, string? packageId, string? packageCode, int page, int pageSize, CancellationToken cancellationToken);
     Task<AdminMealPlanPriceResponse?> GetMealPlanPriceAsync(Guid priceId, CancellationToken cancellationToken);
