@@ -17,11 +17,16 @@ public sealed class TwilioWhatsAppOptions
     public string AccountSid { get; set; } = string.Empty;
     public string AuthToken { get; set; } = string.Empty;
     public string FromNumber { get; set; } = string.Empty;
+    public string OperationsNumber { get; set; } = string.Empty;
+    public string NewOrderContentSid { get; set; } = string.Empty;
 
     public bool IsValid() => !Enabled ||
         (AccountSid.StartsWith("AC", StringComparison.Ordinal) && AccountSid.Length > 2 &&
          !string.IsNullOrWhiteSpace(AuthToken) &&
-         TwilioWhatsAppPhoneNumber.IsValid(FromNumber));
+         TwilioWhatsAppPhoneNumber.IsValid(FromNumber) &&
+         TwilioWhatsAppPhoneNumber.IsValid(OperationsNumber) &&
+         NewOrderContentSid.StartsWith("HX", StringComparison.Ordinal) &&
+         NewOrderContentSid.Length <= 64);
 }
 
 public static class TwilioWhatsAppPhoneNumber
@@ -47,6 +52,30 @@ public sealed class TwilioWhatsAppService(
     ILogger<TwilioWhatsAppService> logger) : ITwilioWhatsAppService
 {
     private const int MaximumAttempts = 3;
+
+    public Task<WhatsAppSendResult> SendNewOrderNotificationAsync(
+        NewOrderWhatsAppNotification notification,
+        CancellationToken cancellationToken = default)
+    {
+        var configuration = options.Value;
+        return SendTemplateAsync(new TwilioWhatsAppTemplateMessage(
+            configuration.OperationsNumber,
+            configuration.NewOrderContentSid,
+            new Dictionary<string, string>
+            {
+                ["1"] = notification.OrderNumber,
+                ["2"] = notification.CustomerName,
+                ["3"] = notification.CustomerMobile,
+                ["4"] = notification.MealPlanName,
+                ["5"] = notification.Duration,
+                ["6"] = notification.MealsPerDay.ToString(CultureInfo.InvariantCulture),
+                ["7"] = notification.StartDate.ToString("dd MMM yyyy", CultureInfo.InvariantCulture),
+                ["8"] = notification.DeliveryDays,
+                ["9"] = notification.DeliveryAddress,
+                ["10"] = $"{notification.Currency.Trim().ToUpperInvariant()} {notification.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture)}",
+                ["11"] = ToDisplayStatus(notification.OrderStatus)
+            }), cancellationToken);
+    }
 
     public async Task<WhatsAppSendResult> SendTemplateAsync(
         TwilioWhatsAppTemplateMessage message,
@@ -112,6 +141,12 @@ public sealed class TwilioWhatsAppService(
     private static bool IsTransient(HttpStatusCode statusCode) =>
         statusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests ||
         (int)statusCode >= 500;
+
+    private static string ToDisplayStatus(string status)
+    {
+        var normalized = status.Trim().Replace('_', ' ').ToLowerInvariant();
+        return CultureInfo.InvariantCulture.TextInfo.ToTitleCase(normalized);
+    }
 
     private static WhatsAppSendResult ReadFailure(HttpStatusCode statusCode, string body)
     {

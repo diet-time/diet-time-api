@@ -9,6 +9,23 @@ namespace DietTime.UnitTests;
 
 public sealed class WhatsAppTests
 {
+    [Fact]
+    public void Enabled_configuration_requires_new_order_destination_and_content_sid()
+    {
+        var options = new TwilioWhatsAppOptions
+        {
+            Enabled = true,
+            AccountSid = "ACaccount",
+            AuthToken = "secret-token",
+            FromNumber = "+14155238886"
+        };
+
+        Assert.False(options.IsValid());
+        options.OperationsNumber = "+97474452435";
+        options.NewOrderContentSid = "HXneworder";
+        Assert.True(options.IsValid());
+    }
+
     [Theory]
     [InlineData("+97474452435", true)]
     [InlineData("whatsapp:+97474452435", true)]
@@ -95,6 +112,43 @@ public sealed class WhatsAppTests
         Assert.Equal("21608", result.ErrorCode);
         Assert.Equal("Unverified recipient", result.ErrorMessage);
         Assert.Equal(1, handler.CallCount);
+    }
+
+    [Fact]
+    public async Task New_order_uses_configured_operations_number_and_all_template_values()
+    {
+        var handler = new RecordingHandler((_, _) => new HttpResponseMessage(HttpStatusCode.Created)
+        {
+            Content = new StringContent("{\"sid\":\"SMorder\"}")
+        });
+        var service = new TwilioWhatsAppService(
+            new HttpClient(handler) { BaseAddress = new Uri("https://api.twilio.com/") },
+            Options.Create(new TwilioWhatsAppOptions
+            {
+                Enabled = true,
+                AccountSid = "ACaccount",
+                AuthToken = "secret-token",
+                FromNumber = "+14155238886",
+                OperationsNumber = "+97474452435",
+                NewOrderContentSid = "HXneworder"
+            }),
+            NullLogger<TwilioWhatsAppService>.Instance);
+
+        var result = await service.SendNewOrderNotificationAsync(new(
+            Guid.NewGuid(), "ORD-001", "Ahmed Ali", "+97450123456",
+            "Weight Loss", "12 Days", 3, new DateOnly(2026, 8, 15),
+            "Sat, Sun, Mon", "Doha, Qatar", 499m, "QAR", "CONFIRMED"));
+
+        Assert.True(result.Success);
+        var form = ParseForm(handler.Body!);
+        Assert.Equal("whatsapp:+97474452435", form["To"]);
+        Assert.Equal("HXneworder", form["ContentSid"]);
+        using var variables = JsonDocument.Parse(form["ContentVariables"]);
+        Assert.Equal(11, variables.RootElement.EnumerateObject().Count());
+        Assert.Equal("ORD-001", variables.RootElement.GetProperty("1").GetString());
+        Assert.Equal("+97450123456", variables.RootElement.GetProperty("3").GetString());
+        Assert.Equal("QAR 499.00", variables.RootElement.GetProperty("10").GetString());
+        Assert.Equal("Confirmed", variables.RootElement.GetProperty("11").GetString());
     }
 
     private static IReadOnlyDictionary<string, string> ParseForm(string body) =>

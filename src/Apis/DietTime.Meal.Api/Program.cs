@@ -62,7 +62,7 @@ builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection(SmtpOpt
 builder.Services.AddOptions<TwilioWhatsAppOptions>()
     .Bind(builder.Configuration.GetSection(TwilioWhatsAppOptions.SectionName))
     .Validate(options => options.IsValid(),
-        "Enabled Twilio WhatsApp integration requires a valid AccountSid, AuthToken, and FromNumber.")
+        "Enabled Twilio WhatsApp integration requires a valid AccountSid, AuthToken, FromNumber, OperationsNumber, and NewOrderContentSid.")
     .ValidateOnStart();
 builder.Services.PostConfigure<StorageOptions>(options =>
 {

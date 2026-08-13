@@ -102,7 +102,13 @@ TwilioWhatsApp__Enabled=true
 TwilioWhatsApp__AccountSid=<Twilio account SID>
 TwilioWhatsApp__AuthToken=<Twilio auth token>
 TwilioWhatsApp__FromNumber=+14155238886
+TwilioWhatsApp__OperationsNumber=+97474452435
+TwilioWhatsApp__NewOrderContentSid=<approved new-order Content SID beginning with HX>
 ```
+
+New orders send the configured Twilio content template to `OperationsNumber`
+only after the order transaction commits. Provider failures are logged without
+failing checkout, and idempotent order replays do not send another message.
 
 Example request body:
 
