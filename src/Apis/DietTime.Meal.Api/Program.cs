@@ -59,10 +59,10 @@ builder.Services.Configure<CustomerNutritionOptions>(builder.Configuration.GetSe
 builder.Services.Configure<OrderOptions>(builder.Configuration.GetSection(OrderOptions.SectionName));
 builder.Services.Configure<OperationsDashboardOptions>(builder.Configuration.GetSection(OperationsDashboardOptions.SectionName));
 builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection(SmtpOptions.SectionName));
-builder.Services.AddOptions<WhatsAppOptions>()
-    .Bind(builder.Configuration.GetSection(WhatsAppOptions.SectionName))
+builder.Services.AddOptions<TwilioWhatsAppOptions>()
+    .Bind(builder.Configuration.GetSection(TwilioWhatsAppOptions.SectionName))
     .Validate(options => options.IsValid(),
-        "Enabled WhatsApp integration requires ApiVersion, PhoneNumberId, AccessToken, a valid OperationsNumber, NewOrderTemplateName, and TemplateLanguage.")
+        "Enabled Twilio WhatsApp integration requires a valid AccountSid, AuthToken, and FromNumber.")
     .ValidateOnStart();
 builder.Services.PostConfigure<StorageOptions>(options =>
 {
@@ -167,9 +167,9 @@ builder.Services.AddScoped<IUserMenuService, UserMenuService>();
 builder.Services.AddScoped<IAccessControlService, AccessControlService>(); 
 builder.Services.AddScoped<IPasswordService, PasswordService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
-builder.Services.AddHttpClient<IWhatsAppService, MetaWhatsAppService>(client =>
+builder.Services.AddHttpClient<ITwilioWhatsAppService, TwilioWhatsAppService>(client =>
 {
-    client.BaseAddress = new Uri("https://graph.facebook.com/");
+    client.BaseAddress = new Uri("https://api.twilio.com/");
     client.Timeout = TimeSpan.FromSeconds(15);
 });
 builder.Services.AddSingleton(TimeProvider.System); 

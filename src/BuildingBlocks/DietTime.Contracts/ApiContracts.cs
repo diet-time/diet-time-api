@@ -10,6 +10,11 @@ public sealed record ApiResponse<T>
     public static ApiResponse<T> Ok(T data, PaginationMeta? meta = null) => new() { Data = data, Meta = meta };
 }
 public sealed record ApiError(string Code, string Message, string? Field = null);
+public sealed record SendTwilioWhatsAppTemplateRequest(
+    string To,
+    string ContentSid,
+    IReadOnlyDictionary<string, string> ContentVariables);
+public sealed record SendWhatsAppTemplateResponse(bool Success, string? MessageId);
 public sealed record PaginationMeta(int Page, int PageSize, int TotalCount, int TotalPages);
 public sealed record PagedResult<T>(IReadOnlyList<T> Items, PaginationMeta Meta);
 

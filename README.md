@@ -91,28 +91,28 @@ Admin endpoints from the brief are under `/api/v1/admin` and require `Admin`, `D
 
 Swagger is available outside Production at `/swagger`; liveness/database health is `/health`.
 
-## WhatsApp order notifications
+## Twilio WhatsApp messages
 
-Successful new orders can send the `new_order_summary` template through the Meta
-WhatsApp Business Cloud API. The notification is attempted only after the order
-transaction commits; provider failures are logged and never change the successful
-checkout response. Replayed idempotency keys do not send a second message.
-
-Development configures the operations recipient as `+97474452435` but leaves the
-integration disabled until provider credentials are supplied. Register that number
-as a Meta test recipient, then configure secrets and enable the integration:
+Twilio WhatsApp content templates are supported through the Admin-only
+`POST /api/admin/integrations/whatsapp/twilio/messages` endpoint. Configure provider
+credentials through deployment secrets (never commit the auth token):
 
 ```text
-WhatsApp__Enabled=true
-WhatsApp__PhoneNumberId=<Meta phone number ID>
-WhatsApp__AccessToken=<Meta access token>
+TwilioWhatsApp__Enabled=true
+TwilioWhatsApp__AccountSid=<Twilio account SID>
+TwilioWhatsApp__AuthToken=<Twilio auth token>
+TwilioWhatsApp__FromNumber=+14155238886
 ```
 
-Production must additionally configure its own `WhatsApp__OperationsNumber`; do not
-reuse the development recipient or commit provider credentials. Configuration is
-validated at startup whenever WhatsApp is enabled. In Development, an authenticated
-Admin can call `POST /api/admin/integrations/whatsapp/test`; the endpoint always uses
-the configured operations number and never accepts a destination from the request.
+Example request body:
+
+```json
+{
+  "to": "+97474452435",
+  "contentSid": "HXb5b62575e6e4ff6129ad7c8efe1f983e",
+  "contentVariables": { "1": "12/1", "2": "3pm" }
+}
+```
 
 ## Calendar behavior
 
