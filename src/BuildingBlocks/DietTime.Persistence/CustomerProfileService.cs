@@ -35,8 +35,7 @@ public sealed class CustomerProfileService(
             .Select(x => x.AllergenId)
             .Distinct()
             .ToArray();
-        var activeAllergens = await db.Allergens
-            .Include(x => x.Translations)
+        var activeAllergens = await db.Allergens.AsNoTracking()
             .Where(x => requestedAllergenIds.Contains(x.Id) && x.IsActive)
             .ToListAsync(ct);
         var activeAllergenIds = activeAllergens.Select(x => x.Id).ToHashSet();
@@ -88,7 +87,6 @@ public sealed class CustomerProfileService(
         profile.UpdatedBy = userId;
 
         SynchronizePreferences(profile, request.Preferences, now);
-        SynchronizeAllergens(profile, request.Allergens, activeAllergens, userId, now);
         var nutritionTarget = RecalculateNutritionTarget(profile, today, userId, now);
 
         if (nutritionTarget is not null)
@@ -98,6 +96,12 @@ public sealed class CustomerProfileService(
             db.CustomerNutritionTargets.Add(nutritionTarget);
         }
         await SaveChangesWithConcurrencyDiagnosticsAsync(userId, ct);
+        await SynchronizeAllergensAsync(
+            profile.Id, request.Allergens, userId, now, ct);
+        await db.Entry(profile).Collection(x => x.Allergens).Query()
+            .Include(x => x.Allergen)
+            .ThenInclude(x => x.Translations)
+            .LoadAsync(ct);
         await transaction.CommitAsync(ct);
 
         logger.LogInformation(
@@ -209,10 +213,6 @@ public sealed class CustomerProfileService(
             ct);
         await db.Entry(profile).Collection(x => x.NutritionTargets).LoadAsync(ct);
         await db.Entry(profile).Collection(x => x.Preferences).LoadAsync(ct);
-        await db.Entry(profile).Collection(x => x.Allergens).Query()
-            .Include(x => x.Allergen)
-            .ThenInclude(x => x.Translations)
-            .LoadAsync(ct);
         return profile;
     }
 
@@ -431,45 +431,48 @@ public sealed class CustomerProfileService(
         }
     }
 
-    private void SynchronizeAllergens(
-        CustomerProfile profile,
+    private async Task SynchronizeAllergensAsync(
+        Guid profileId,
         IReadOnlyCollection<CustomerAllergenRequest> requested,
-        IReadOnlyCollection<Allergen> activeAllergens,
         Guid userId,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        CancellationToken ct)
     {
-        var requestedById = requested.ToDictionary(x => x.AllergenId);
-        foreach (var existing in profile.Allergens.ToArray())
+        var requestedIds = requested.Select(x => x.AllergenId).Distinct().ToArray();
+        if (requestedIds.Length == 0)
         {
-            if (!requestedById.Remove(existing.AllergenId, out var item))
-            {
-                db.CustomerProfileAllergens.Remove(existing);
-                continue;
-            }
-
-            existing.SeverityCode = NormalizeCode(item.SeverityCode);
-            existing.MedicallyConfirmed = item.MedicallyConfirmed;
-            existing.Notes = NormalizeText(item.Notes);
-            existing.UpdatedAt = now;
-            existing.UpdatedBy = userId;
+            await db.CustomerProfileAllergens
+                .Where(x => x.CustomerProfileId == profileId)
+                .ExecuteDeleteAsync(ct);
+        }
+        else
+        {
+            await db.CustomerProfileAllergens
+                .Where(x => x.CustomerProfileId == profileId &&
+                    !requestedIds.Contains(x.AllergenId))
+                .ExecuteDeleteAsync(ct);
         }
 
-        var allergensById = activeAllergens.ToDictionary(x => x.Id);
-        foreach (var item in requestedById.Values)
+        foreach (var item in requested)
         {
-            profile.Allergens.Add(new CustomerProfileAllergen
-            {
-                Id = Guid.NewGuid(),
-                AllergenId = item.AllergenId,
-                Allergen = allergensById[item.AllergenId],
-                SeverityCode = NormalizeCode(item.SeverityCode),
-                MedicallyConfirmed = item.MedicallyConfirmed,
-                Notes = NormalizeText(item.Notes),
-                CreatedAt = now,
-                UpdatedAt = now,
-                CreatedBy = userId,
-                UpdatedBy = userId
-            });
+            var associationId = Guid.NewGuid();
+            var severityCode = NormalizeCode(item.SeverityCode);
+            var notes = NormalizeText(item.Notes);
+            await db.Database.ExecuteSqlInterpolatedAsync($"""
+                INSERT INTO public.customer_profile_allergens
+                    (id, customer_profile_id, allergen_id, severity_code,
+                     medically_confirmed, notes, created_at, updated_at, created_by, updated_by)
+                VALUES
+                    ({associationId}, {profileId}, {item.AllergenId}, {severityCode},
+                     {item.MedicallyConfirmed}, {notes}, {now}, {now}, {userId}, {userId})
+                ON CONFLICT (customer_profile_id, allergen_id)
+                DO UPDATE SET
+                    severity_code = EXCLUDED.severity_code,
+                    medically_confirmed = EXCLUDED.medically_confirmed,
+                    notes = EXCLUDED.notes,
+                    updated_at = EXCLUDED.updated_at,
+                    updated_by = EXCLUDED.updated_by
+                """, ct);
         }
     }
 
