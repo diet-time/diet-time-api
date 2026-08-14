@@ -14,10 +14,13 @@ namespace DietTime.Infrastructure;
 public sealed class KitchenPreparationPdfReportGenerator : IKitchenPreparationReportGenerator
 {
     private const string FontFamily = "DietTimeSans";
-    private static readonly Color DarkGreen = Color.Parse("#174D3A");
-    private static readonly Color LightGreen = Color.Parse("#EAF3EE");
-    private static readonly Color Border = Color.Parse("#B8C7BF");
-    private static readonly Color Text = Color.Parse("#26332D");
+    private const double ContentWidthMm = 267;
+    private static readonly Color Green = Color.Parse("#0B5D4B");
+    private static readonly Color DarkGreen = Color.Parse("#173B34");
+    private static readonly Color LightGreen = Color.Parse("#E9F3EF");
+    private static readonly Color LightGray = Color.Parse("#F6F8F7");
+    private static readonly Color Border = Color.Parse("#D8E2DE");
+    private static readonly Color Muted = Color.Parse("#667B75");
     private static readonly object FontResolverLock = new();
     private readonly TimeProvider timeProvider;
     private readonly TimeZoneInfo businessTimeZone;
@@ -61,11 +64,12 @@ public sealed class KitchenPreparationPdfReportGenerator : IKitchenPreparationRe
 
         var section = document.AddSection();
         section.PageSetup.PageFormat = PageFormat.A4;
-        section.PageSetup.Orientation = Orientation.Portrait;
-        section.PageSetup.LeftMargin = Unit.FromMillimeter(18);
-        section.PageSetup.RightMargin = Unit.FromMillimeter(18);
-        section.PageSetup.TopMargin = Unit.FromMillimeter(16);
-        section.PageSetup.BottomMargin = Unit.FromMillimeter(18);
+        section.PageSetup.Orientation = Orientation.Landscape;
+        section.PageSetup.LeftMargin = Unit.FromMillimeter(15);
+        section.PageSetup.RightMargin = Unit.FromMillimeter(15);
+        section.PageSetup.TopMargin = Unit.FromMillimeter(9);
+        section.PageSetup.BottomMargin = Unit.FromMillimeter(13);
+        section.PageSetup.FooterDistance = Unit.FromMillimeter(7);
         AddFooter(section, summary.Date);
         AddReportHeader(section, summary.Date);
 
@@ -81,9 +85,9 @@ public sealed class KitchenPreparationPdfReportGenerator : IKitchenPreparationRe
     {
         var brand = section.AddParagraph("DIET TIME");
         brand.Style = "Brand";
-        brand.Format.SpaceAfter = Unit.FromMillimeter(1);
+        brand.Format.SpaceAfter = Unit.FromMillimeter(2);
 
-        var title = section.AddParagraph("KITCHEN PREPARATION REPORT");
+        var title = section.AddParagraph("Kitchen Preparation");
         title.Style = "ReportTitle";
 
         var delivery = section.AddParagraph(
@@ -92,9 +96,9 @@ public sealed class KitchenPreparationPdfReportGenerator : IKitchenPreparationRe
 
         var generatedAt = TimeZoneInfo.ConvertTime(timeProvider.GetUtcNow(), businessTimeZone);
         var generated = section.AddParagraph(
-            $"Generated: {generatedAt.ToString("dd MMM yyyy, hh:mm tt", CultureInfo.GetCultureInfo("en-US"))}");
+            $"Generated {generatedAt.ToString("dd MMM yyyy, hh:mm tt", CultureInfo.GetCultureInfo("en-US"))}");
         generated.Style = "Generated";
-        generated.Format.SpaceAfter = Unit.FromMillimeter(7);
+        generated.Format.SpaceAfter = Unit.FromMillimeter(2);
     }
 
     private static void AddEmptyState(Section section, DeliveryPreparationSummaryResponse summary)
@@ -107,7 +111,7 @@ public sealed class KitchenPreparationPdfReportGenerator : IKitchenPreparationRe
             "There are no meals scheduled for preparation on this delivery date.");
         message.Format.SpaceAfter = Unit.FromMillimeter(6);
 
-        AddKeyValueTable(section,
+        AddMetricCards(section,
         [
             ("Orders", summary.OrderCount.ToString(CultureInfo.InvariantCulture)),
             ("Customers", summary.CustomerCount.ToString(CultureInfo.InvariantCulture)),
@@ -117,58 +121,107 @@ public sealed class KitchenPreparationPdfReportGenerator : IKitchenPreparationRe
 
     private void AddPreparationReport(Section section, DeliveryPreparationSummaryResponse summary)
     {
-        AddSectionHeading(section, "SUMMARY");
-        AddKeyValueTable(section,
+        AddMetricCards(section,
         [
             ("Orders", summary.OrderCount.ToString(CultureInfo.InvariantCulture)),
             ("Customers", summary.CustomerCount.ToString(CultureInfo.InvariantCulture)),
-            ("Total Meal Items", summary.MealItemCount.ToString(CultureInfo.InvariantCulture))
+            ("Meal Items", summary.MealItemCount.ToString(CultureInfo.InvariantCulture))
         ]);
 
         AddSectionHeading(section, "PREPARATION OVERVIEW");
-        AddKeyValueTable(section, summary.MealTypes
+        AddOverviewTable(section, summary.MealTypes
             .Select(type => (type.MealTypeName, type.Quantity.ToString(CultureInfo.InvariantCulture)))
             .ToArray());
 
         AddSectionHeading(section, "MENU ITEMS TO PREPARE");
-        foreach (var mealType in summary.MealTypes)
-            AddMealType(section, summary.Date, mealType);
+        AddMealTypes(section, summary);
 
         AddSectionHeading(section, "PLAN BREAKDOWN");
-        AddKeyValueTable(section, summary.PlanBreakdown
-            .Select(plan => (
-                plan.MealPlanName,
-                $"{plan.OrderCount} {Pluralize(plan.OrderCount, "order", "orders")}"))
-            .ToArray());
+        AddPlanBreakdown(section, summary.PlanBreakdown);
+        AddGrandTotal(section, summary);
+    }
 
+    private static void AddGrandTotal(Section section, DeliveryPreparationSummaryResponse summary)
+    {
         var totalBox = section.AddTable();
         totalBox.KeepTogether = true;
         totalBox.Borders.Width = Unit.FromPoint(0.8);
-        totalBox.Borders.Color = DarkGreen;
+        totalBox.Borders.Color = Color.Parse("#A9C7BC");
         totalBox.Shading.Color = LightGreen;
-        totalBox.AddColumn(Unit.FromMillimeter(174));
-        var cell = totalBox.AddRow().Cells[0];
-        cell.Format.Alignment = ParagraphAlignment.Center;
-        cell.Format.SpaceBefore = Unit.FromMillimeter(5);
-        cell.Format.SpaceAfter = Unit.FromMillimeter(5);
-        var label = cell.AddParagraph("TOTAL MEAL ITEMS TO PREPARE");
+        totalBox.Format.SpaceBefore = Unit.FromMillimeter(1.5);
+        totalBox.AddColumn(Unit.FromMillimeter(78));
+        totalBox.AddColumn(Unit.FromMillimeter(56));
+        totalBox.AddColumn(Unit.FromMillimeter(133));
+        var row = totalBox.AddRow();
+        row.Height = Unit.FromMillimeter(11);
+        row.HeightRule = RowHeightRule.AtLeast;
+        var label = row.Cells[0].AddParagraph("TOTAL MEAL ITEMS TO PREPARE");
+        label.Format.Alignment = ParagraphAlignment.Center;
         label.Format.Font.Bold = true;
-        label.Format.Font.Color = DarkGreen;
-        label.Format.Font.Size = Unit.FromPoint(11);
-        var amount = cell.AddParagraph(summary.MealItemCount.ToString(CultureInfo.InvariantCulture));
+        label.Format.Font.Color = Muted;
+        label.Format.Font.Size = Unit.FromPoint(7.5);
+        var amount = row.Cells[1].AddParagraph(summary.MealItemCount.ToString(CultureInfo.InvariantCulture));
+        amount.Format.Alignment = ParagraphAlignment.Center;
         amount.Format.Font.Bold = true;
-        amount.Format.Font.Color = DarkGreen;
-        amount.Format.Font.Size = Unit.FromPoint(24);
-        var detail = cell.AddParagraph(
+        amount.Format.Font.Color = Green;
+        amount.Format.Font.Size = Unit.FromPoint(25);
+        var detail = row.Cells[2].AddParagraph(
             $"Across {summary.OrderCount} {Pluralize(summary.OrderCount, "order", "orders")} and " +
             $"{summary.CustomerCount} {Pluralize(summary.CustomerCount, "customer", "customers")}");
-        detail.Format.Font.Size = Unit.FromPoint(9);
+        detail.Format.Font.Color = Muted;
+        detail.Format.Font.Size = Unit.FromPoint(7.5);
+        SetCellPadding(row, 2);
     }
 
-    private void AddMealType(
+    private void AddMealTypes(Section section, DeliveryPreparationSummaryResponse summary)
+    {
+        const int maximumCardRows = 18;
+        var pending = new List<DeliveryPreparationMealTypeResponse>(2);
+
+        foreach (var mealType in summary.MealTypes)
+        {
+            if (mealType.Items.Count > maximumCardRows)
+            {
+                FlushMealCards(section, summary.Date, pending);
+                AddMealTypeTable(section.Elements, summary.Date, mealType, ContentWidthMm);
+                continue;
+            }
+
+            pending.Add(mealType);
+            if (pending.Count == 2)
+                FlushMealCards(section, summary.Date, pending);
+        }
+
+        FlushMealCards(section, summary.Date, pending);
+    }
+
+    private void FlushMealCards(
         Section section,
         DateOnly deliveryDate,
-        DeliveryPreparationMealTypeResponse mealType)
+        List<DeliveryPreparationMealTypeResponse> mealTypes)
+    {
+        if (mealTypes.Count == 0)
+            return;
+
+        var layout = section.AddTable();
+        layout.KeepTogether = true;
+        layout.Borders.Width = 0;
+        layout.Format.SpaceAfter = Unit.FromMillimeter(2);
+        layout.AddColumn(Unit.FromMillimeter(132));
+        layout.AddColumn(Unit.FromMillimeter(3));
+        layout.AddColumn(Unit.FromMillimeter(132));
+        var row = layout.AddRow();
+        AddMealTypeTable(row.Cells[0].Elements, deliveryDate, mealTypes[0], 132);
+        if (mealTypes.Count == 2)
+            AddMealTypeTable(row.Cells[2].Elements, deliveryDate, mealTypes[1], 132);
+        mealTypes.Clear();
+    }
+
+    private void AddMealTypeTable(
+        DocumentElements container,
+        DateOnly deliveryDate,
+        DeliveryPreparationMealTypeResponse mealType,
+        double widthMm)
     {
         var itemTotal = mealType.Items.Sum(item => item.Quantity);
         if (itemTotal != mealType.Quantity)
@@ -179,39 +232,52 @@ public sealed class KitchenPreparationPdfReportGenerator : IKitchenPreparationRe
                 mealType.Quantity, itemTotal);
         }
 
-        var heading = section.AddParagraph(mealType.MealTypeName.ToUpperInvariant());
-        heading.Style = "MealTypeHeading";
-        heading.Format.KeepWithNext = true;
-
-        var table = section.AddTable();
-        table.Format.SpaceAfter = Unit.FromMillimeter(6);
+        var table = container.AddTable();
+        table.KeepTogether = mealType.Items.Count <= 18;
+        table.Format.SpaceAfter = Unit.FromMillimeter(3);
         table.Borders.Color = Border;
-        table.Borders.Width = Unit.FromPoint(0.35);
-        table.AddColumn(Unit.FromMillimeter(145));
-        table.AddColumn(Unit.FromMillimeter(29));
+        table.Borders.Width = Unit.FromPoint(0.45);
+        table.AddColumn(Unit.FromMillimeter(widthMm - 17));
+        table.AddColumn(Unit.FromMillimeter(17));
+
+        var title = table.AddRow();
+        title.HeadingFormat = true;
+        title.Shading.Color = Green;
+        title.Cells[0].MergeRight = 1;
+        var titleText = title.Cells[0].AddParagraph(mealType.MealTypeName.ToUpperInvariant());
+        titleText.Format.Font.Bold = true;
+        titleText.Format.Font.Color = Colors.White;
+        titleText.Format.Font.Size = Unit.FromPoint(9);
+        SetCellPadding(title, 0.9);
 
         var header = table.AddRow();
         header.HeadingFormat = true;
         header.Format.Font.Bold = true;
         header.Shading.Color = LightGreen;
-        header.Cells[0].AddParagraph("Menu Item");
-        header.Cells[1].AddParagraph("Quantity");
+        header.Format.Font.Size = Unit.FromPoint(8.5);
+        header.Cells[0].AddParagraph("Menu item");
+        header.Cells[1].AddParagraph("Qty");
         header.Cells[1].Format.Alignment = ParagraphAlignment.Right;
+        SetCellPadding(header, 0.8);
 
         foreach (var item in mealType.Items)
         {
             var row = table.AddRow();
+            row.Format.Font.Size = Unit.FromPoint(8.5);
             row.Cells[0].AddParagraph(item.MenuItemName);
             row.Cells[1].AddParagraph(item.Quantity.ToString(CultureInfo.InvariantCulture));
             row.Cells[1].Format.Alignment = ParagraphAlignment.Right;
+            SetCellPadding(row, 0.8);
         }
 
         var total = table.AddRow();
         total.Format.Font.Bold = true;
-        total.Borders.Top.Width = Unit.FromPoint(0.8);
+        total.Format.Font.Size = Unit.FromPoint(8.5);
+        total.Shading.Color = LightGray;
         total.Cells[0].AddParagraph("TOTAL");
         total.Cells[1].AddParagraph(mealType.Quantity.ToString(CultureInfo.InvariantCulture));
         total.Cells[1].Format.Alignment = ParagraphAlignment.Right;
+        SetCellPadding(total, 0.8);
     }
 
     private static void AddSectionHeading(Section section, string text)
@@ -221,37 +287,125 @@ public sealed class KitchenPreparationPdfReportGenerator : IKitchenPreparationRe
         paragraph.Format.KeepWithNext = true;
     }
 
-    private static void AddKeyValueTable(Section section, IReadOnlyCollection<(string Label, string Value)> rows)
+    private static void AddMetricCards(Section section, IReadOnlyCollection<(string Label, string Value)> metrics)
     {
         var table = section.AddTable();
         table.KeepTogether = true;
-        table.Format.SpaceAfter = Unit.FromMillimeter(7);
+        table.Format.LeftIndent = Unit.FromMillimeter(4);
+        table.Format.SpaceAfter = Unit.FromMillimeter(3);
         table.Borders.Color = Border;
-        table.Borders.Width = Unit.FromPoint(0.35);
-        table.AddColumn(Unit.FromMillimeter(145));
-        table.AddColumn(Unit.FromMillimeter(29));
-        foreach (var (label, value) in rows)
+        table.Borders.Width = Unit.FromPoint(0.5);
+        table.Shading.Color = LightGreen;
+        var columnWidth = (ContentWidthMm - 8) / metrics.Count;
+        foreach (var _ in metrics)
+            table.AddColumn(Unit.FromMillimeter(columnWidth));
+        var row = table.AddRow();
+        var index = 0;
+        foreach (var (label, value) in metrics)
         {
-            var row = table.AddRow();
-            row.Cells[0].AddParagraph(label);
-            row.Cells[1].AddParagraph(value);
-            row.Cells[1].Format.Alignment = ParagraphAlignment.Right;
-            row.Cells[1].Format.Font.Bold = true;
+            var cell = row.Cells[index++];
+            cell.Format.Alignment = ParagraphAlignment.Center;
+            var amount = cell.AddParagraph(value);
+            amount.Format.Font.Bold = true;
+            amount.Format.Font.Size = Unit.FromPoint(18);
+            amount.Format.Font.Color = DarkGreen;
+            var caption = cell.AddParagraph(label.ToUpperInvariant());
+            caption.Format.Font.Bold = true;
+            caption.Format.Font.Size = Unit.FromPoint(7.5);
+            caption.Format.Font.Color = Muted;
         }
+        SetCellPadding(row, 1.4);
+    }
+
+    private static void AddOverviewTable(Section section, IReadOnlyCollection<(string Label, string Value)> metrics)
+    {
+        if (metrics.Count == 0)
+            return;
+
+        var table = section.AddTable();
+        table.KeepTogether = true;
+        table.Format.LeftIndent = Unit.FromMillimeter(4);
+        table.Format.SpaceAfter = Unit.FromMillimeter(3);
+        table.Borders.Color = Border;
+        table.Borders.Width = Unit.FromPoint(0.5);
+        var width = (ContentWidthMm - 8) / metrics.Count;
+        foreach (var _ in metrics)
+            table.AddColumn(Unit.FromMillimeter(width));
+        var row = table.AddRow();
+        var index = 0;
+        foreach (var (label, value) in metrics)
+        {
+            var cell = row.Cells[index++];
+            cell.Format.Alignment = ParagraphAlignment.Center;
+            var caption = cell.AddParagraph(label);
+            caption.Format.Font.Bold = true;
+            caption.Format.Font.Size = Unit.FromPoint(7.5);
+            caption.Format.Font.Color = Muted;
+            var amount = cell.AddParagraph(value);
+            amount.Format.Font.Bold = true;
+            amount.Format.Font.Size = Unit.FromPoint(12);
+            amount.Format.Font.Color = DarkGreen;
+        }
+        SetCellPadding(row, 1.2);
+    }
+
+    private static void AddPlanBreakdown(
+        Section section,
+        IReadOnlyCollection<DeliveryPreparationPlanResponse> plans)
+    {
+        foreach (var group in plans.Chunk(3))
+        {
+            var table = section.AddTable();
+            table.KeepTogether = true;
+            table.Format.LeftIndent = Unit.FromMillimeter(18);
+            table.Format.SpaceAfter = Unit.FromMillimeter(2);
+            table.Borders.Color = Border;
+            table.Borders.Width = Unit.FromPoint(0.45);
+            var groupWidth = (ContentWidthMm - 36) / group.Length;
+            foreach (var _ in group)
+            {
+                table.AddColumn(Unit.FromMillimeter(groupWidth * 0.68));
+                table.AddColumn(Unit.FromMillimeter(groupWidth * 0.32));
+            }
+
+            var row = table.AddRow();
+            for (var index = 0; index < group.Length; index++)
+            {
+                var plan = group[index];
+                var name = row.Cells[index * 2].AddParagraph(plan.MealPlanName);
+                name.Format.Font.Size = Unit.FromPoint(8.5);
+                var orders = row.Cells[(index * 2) + 1].AddParagraph(
+                    $"{plan.OrderCount} {Pluralize(plan.OrderCount, "order", "orders")}");
+                orders.Format.Font.Bold = true;
+                orders.Format.Font.Size = Unit.FromPoint(8.5);
+            }
+            SetCellPadding(row, 1);
+        }
+    }
+
+    private static void SetCellPadding(Row row, double verticalMm)
+    {
+        row.TopPadding = Unit.FromMillimeter(verticalMm);
+        row.BottomPadding = Unit.FromMillimeter(verticalMm);
+        row.VerticalAlignment = VerticalAlignment.Center;
     }
 
     private static void AddFooter(Section section, DateOnly deliveryDate)
     {
-        var footer = section.Footers.Primary.AddParagraph();
-        footer.Format.Font.Size = Unit.FromPoint(8);
-        footer.Format.Font.Color = Colors.DimGray;
-        footer.Format.Alignment = ParagraphAlignment.Center;
-        footer.AddText("Diet Time - Kitchen Preparation | ");
-        footer.AddText(deliveryDate.ToString("dd MMM yyyy", CultureInfo.GetCultureInfo("en-GB")));
-        footer.AddText(" | Page ");
-        footer.AddPageField();
-        footer.AddText(" of ");
-        footer.AddNumPagesField();
+        var footer = section.Footers.Primary.AddTable();
+        footer.Borders.Top.Color = Border;
+        footer.Borders.Top.Width = Unit.FromPoint(0.5);
+        footer.AddColumn(Unit.FromMillimeter(230));
+        footer.AddColumn(Unit.FromMillimeter(37));
+        var row = footer.AddRow();
+        row.Format.Font.Size = Unit.FromPoint(7);
+        row.Format.Font.Color = Muted;
+        var description = row.Cells[0].AddParagraph("Diet Time - Kitchen Preparation | ");
+        description.AddText(deliveryDate.ToString("dd MMM yyyy", CultureInfo.GetCultureInfo("en-GB")));
+        var page = row.Cells[1].AddParagraph("Page ");
+        page.Format.Alignment = ParagraphAlignment.Right;
+        page.AddPageField();
+        SetCellPadding(row, 1);
     }
 
     private static void ConfigureStyles(Document document)
@@ -259,21 +413,16 @@ public sealed class KitchenPreparationPdfReportGenerator : IKitchenPreparationRe
         var normal = document.Styles[StyleNames.Normal]!;
         normal.Font.Name = FontFamily;
         normal.Font.Size = Unit.FromPoint(9.5);
-        normal.Font.Color = Text;
-        normal.ParagraphFormat.SpaceAfter = Unit.FromPoint(2);
+        normal.Font.Color = DarkGreen;
+        normal.ParagraphFormat.SpaceAfter = Unit.Zero;
 
-        AddStyle(document, "Brand", 14, true, DarkGreen);
-        AddStyle(document, "ReportTitle", 17, true, DarkGreen);
-        AddStyle(document, "DeliveryDate", 15, true, Text);
-        AddStyle(document, "Generated", 8, false, Colors.DimGray);
-        var sectionHeading = AddStyle(document, "SectionHeading", 10, true, DarkGreen);
-        sectionHeading.ParagraphFormat.SpaceBefore = Unit.FromMillimeter(4);
-        sectionHeading.ParagraphFormat.SpaceAfter = Unit.FromMillimeter(2);
-        var mealHeading = AddStyle(document, "MealTypeHeading", 10, true, Colors.White);
-        mealHeading.ParagraphFormat.Shading.Color = DarkGreen;
-        mealHeading.ParagraphFormat.LeftIndent = Unit.FromMillimeter(2);
-        mealHeading.ParagraphFormat.SpaceBefore = Unit.FromMillimeter(2);
-        mealHeading.ParagraphFormat.SpaceAfter = Unit.FromMillimeter(1.5);
+        AddStyle(document, "Brand", 9, true, Green);
+        AddStyle(document, "ReportTitle", 20, true, DarkGreen);
+        AddStyle(document, "DeliveryDate", 10.5, true, DarkGreen);
+        AddStyle(document, "Generated", 7.5, false, Muted);
+        var sectionHeading = AddStyle(document, "SectionHeading", 9, true, Green);
+        sectionHeading.ParagraphFormat.SpaceBefore = Unit.FromMillimeter(1.5);
+        sectionHeading.ParagraphFormat.SpaceAfter = Unit.FromMillimeter(1);
         var empty = AddStyle(document, "EmptyHeading", 13, true, DarkGreen);
         empty.ParagraphFormat.Shading.Color = LightGreen;
         empty.ParagraphFormat.LeftIndent = Unit.FromMillimeter(3);

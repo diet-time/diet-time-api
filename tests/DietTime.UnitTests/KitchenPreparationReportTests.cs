@@ -37,7 +37,7 @@ public sealed class KitchenPreparationReportTests
         var text = ExtractText(pdf);
 
         Assert.StartsWith("%PDF-", Encoding.ASCII.GetString(pdf, 0, 5));
-        Assert.Contains("KITCHEN PREPARATION REPORT", text);
+        Assert.Contains("Kitchen Preparation", text);
         Assert.Contains("Sunday, 16 August 2026", text);
         Assert.Contains("Oatmeal Banana", text);
         Assert.Contains("Hot & Cheesy Scrambled Egg Croissant", text);
@@ -62,6 +62,47 @@ public sealed class KitchenPreparationReportTests
     }
 
     [Fact]
+    public async Task Standard_day_uses_single_page_landscape_dashboard_layout()
+    {
+        static DeliveryPreparationMealTypeResponse MealType(string name, params (string Name, int Qty)[] items) =>
+            new(
+                Guid.NewGuid(),
+                name,
+                items.Sum(item => item.Qty),
+                items.Select(item => new DeliveryPreparationMenuItemResponse(
+                    Guid.NewGuid(), item.Name, item.Qty)).ToArray());
+
+        var summary = new DeliveryPreparationSummaryResponse(
+            new(2026, 8, 15), "Scheduled", 7, 2, 28,
+            [
+                MealType("Breakfast", ("Hot & Cheesy Scrambled Egg Croissant", 5), ("Oatmeal Banana", 2)),
+                MealType("Lunch", ("Butter Shrimp With Rice", 5), ("Shrimp Risotto", 2)),
+                MealType("Dinner", ("Fattoush Salad", 7)),
+                MealType("Snack / Dessert", ("Mushroom Soup", 7))
+            ],
+            [
+                new(Guid.NewGuid(), "Everyday Choice", 4),
+                new(Guid.NewGuid(), "Balanced Living", 2),
+                new(Guid.NewGuid(), "Complete Balance", 1)
+            ]);
+
+        var pdf = await Generator().GenerateAsync(summary, default);
+        using var document = PdfReader.Open(new MemoryStream(pdf));
+        var text = ExtractText(document);
+
+        Assert.True(
+            document.PageCount == 1,
+            string.Join(" | ", document.Pages.Cast<PdfSharp.Pdf.PdfPage>()
+                .Select((page, index) => $"Page {index + 1}: {ExtractText(page)}")));
+        Assert.True(document.Pages[0].Width.Point > document.Pages[0].Height.Point);
+        Assert.Contains("PREPARATION OVERVIEW", text);
+        Assert.Contains("MENU ITEMS TO PREPARE", text);
+        Assert.Contains("PLAN BREAKDOWN", text);
+        Assert.Contains("TOTAL MEAL ITEMS TO PREPARE", text);
+        Assert.Contains("Snack / Dessert", text, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task Large_report_spans_pages_and_keeps_long_item_names()
     {
         var items = Enumerable.Range(1, 150)
@@ -83,7 +124,7 @@ public sealed class KitchenPreparationReportTests
         Assert.True(document.PageCount > 1);
         Assert.Contains("Menu item 001 with a deliberately long operational kitchen name", text);
         Assert.Contains("Menu item 150 with a deliberately long operational kitchen name", text);
-        Assert.Contains("Page 1 of", text);
+        Assert.Contains("Page 1", text);
     }
 
     [Fact]
@@ -128,6 +169,13 @@ public sealed class KitchenPreparationReportTests
         var text = new StringBuilder();
         foreach (var page in document.Pages)
             Append(ContentReader.ReadContent(page), text);
+        return text.ToString();
+    }
+
+    private static string ExtractText(PdfSharp.Pdf.PdfPage page)
+    {
+        var text = new StringBuilder();
+        Append(ContentReader.ReadContent(page), text);
         return text.ToString();
     }
 
