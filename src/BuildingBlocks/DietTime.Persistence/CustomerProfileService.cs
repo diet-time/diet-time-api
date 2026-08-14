@@ -51,8 +51,7 @@ public sealed class CustomerProfileService(
         await AcquireProfileWriteLockAsync(userId, ct);
         var now = clock.GetUtcNow();
         var today = DateOnly.FromDateTime(now.UtcDateTime);
-        var profile = await ProfileQuery(tracking: true)
-            .SingleOrDefaultAsync(x => x.UserId == userId, ct);
+        var profile = await LoadProfileForUpdateAsync(userId, includeDetails: true, ct);
 
         if (profile is null)
         {
@@ -92,14 +91,13 @@ public sealed class CustomerProfileService(
         SynchronizeAllergens(profile, request.Allergens, activeAllergens, userId, now);
         var nutritionTarget = RecalculateNutritionTarget(profile, today, userId, now);
 
-        await db.SaveChangesAsync(ct);
         if (nutritionTarget is not null)
         {
             nutritionTarget.CustomerProfileId = profile.Id;
             nutritionTarget.CustomerProfile = profile;
             db.CustomerNutritionTargets.Add(nutritionTarget);
-            await db.SaveChangesAsync(ct);
         }
+        await SaveChangesWithConcurrencyDiagnosticsAsync(userId, ct);
         await transaction.CommitAsync(ct);
 
         logger.LogInformation(
@@ -117,8 +115,9 @@ public sealed class CustomerProfileService(
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await AcquireProfileWriteLockAsync(userId, ct);
-        var profile = await db.CustomerProfiles.SingleOrDefaultAsync(
-            x => x.UserId == userId && x.IsActive, ct);
+        var profile = await LoadProfileForUpdateAsync(userId, includeDetails: false, ct);
+        if (profile is not null && !profile.IsActive)
+            profile = null;
         if (profile is null)
             return null;
 
@@ -130,7 +129,7 @@ public sealed class CustomerProfileService(
         profile.UpdatedBy = userId;
         profile.RowVersion++;
 
-        await db.SaveChangesAsync(ct);
+        await SaveChangesWithConcurrencyDiagnosticsAsync(userId, ct);
         await transaction.CommitAsync(ct);
 
         logger.LogInformation(
@@ -147,8 +146,7 @@ public sealed class CustomerProfileService(
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await AcquireProfileWriteLockAsync(userId, ct);
         var now = clock.GetUtcNow();
-        var profile = await ProfileQuery(tracking: true)
-            .SingleOrDefaultAsync(x => x.UserId == userId, ct);
+        var profile = await LoadProfileForUpdateAsync(userId, includeDetails: true, ct);
 
         if (profile is null)
         {
@@ -171,7 +169,7 @@ public sealed class CustomerProfileService(
         profile.PreferredName = preferredName.Trim();
         profile.UpdatedAt = now;
         profile.UpdatedBy = userId;
-        await db.SaveChangesAsync(ct);
+        await SaveChangesWithConcurrencyDiagnosticsAsync(userId, ct);
         await transaction.CommitAsync(ct);
 
         logger.LogInformation(
@@ -186,6 +184,57 @@ public sealed class CustomerProfileService(
         var lockKey = $"customer-profile:{userId:D}";
         return db.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))", ct);
+    }
+
+    private async Task<CustomerProfile?> LoadProfileForUpdateAsync(
+        Guid userId,
+        bool includeDetails,
+        CancellationToken ct)
+    {
+        var profile = await db.CustomerProfiles
+            .FromSqlInterpolated(
+                $"SELECT * FROM public.customer_profiles WHERE user_id = {userId} FOR UPDATE")
+            .SingleOrDefaultAsync(ct);
+        if (profile is null || !includeDetails)
+            return profile;
+
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT id FROM public.customer_nutrition_targets WHERE customer_profile_id = {profile.Id} FOR UPDATE",
+            ct);
+        await db.Entry(profile).Collection(x => x.NutritionTargets).LoadAsync(ct);
+        await db.Entry(profile).Collection(x => x.Preferences).LoadAsync(ct);
+        await db.Entry(profile).Collection(x => x.Allergens).Query()
+            .Include(x => x.Allergen)
+            .ThenInclude(x => x.Translations)
+            .LoadAsync(ct);
+        return profile;
+    }
+
+    private async Task SaveChangesWithConcurrencyDiagnosticsAsync(
+        Guid userId,
+        CancellationToken ct)
+    {
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException exception)
+        {
+            var conflictingEntries = exception.Entries.Select(entry =>
+            {
+                var primaryKey = entry.Metadata.FindPrimaryKey();
+                var key = primaryKey is null
+                    ? "unknown"
+                    : string.Join(",", primaryKey.Properties.Select(property =>
+                        entry.Property(property.Name).CurrentValue?.ToString() ?? "null"));
+                return $"{entry.Metadata.ClrType.Name}:{key}";
+            }).ToArray();
+            logger.LogWarning(
+                exception,
+                "Customer profile save encountered an optimistic concurrency conflict. UserId={UserId} ConflictingEntries={ConflictingEntries}",
+                userId, conflictingEntries);
+            throw;
+        }
     }
 
     private async Task<CustomerPersonalInfoResponse?> LoadPersonalInfoAsync(

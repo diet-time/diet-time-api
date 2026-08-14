@@ -345,22 +345,10 @@ public sealed class CustomerProfileApiTests : IAsyncLifetime
         Authenticate(userId);
         var apiClient = client!;
 
-        var firstRequest = apiClient.PutAsJsonAsync("/api/v1/customer/profile", new
-        {
-            goalCode = "LOSE_WEIGHT",
-            preferredLanguage = "en",
-            onboardingStatus = "IN_PROGRESS",
-            preferences = Array.Empty<object>(),
-            allergens = Array.Empty<object>()
-        });
-        var secondRequest = apiClient.PutAsJsonAsync("/api/v1/customer/profile", new
-        {
-            goalCode = "MAINTAIN_WEIGHT",
-            preferredLanguage = "en",
-            onboardingStatus = "IN_PROGRESS",
-            preferences = Array.Empty<object>(),
-            allergens = Array.Empty<object>()
-        });
+        var firstRequest = apiClient.PutAsJsonAsync(
+            "/api/v1/customer/profile", CompleteRequest());
+        var secondRequest = apiClient.PutAsJsonAsync(
+            "/api/v1/customer/profile", CompleteRequest());
 
         var responses = await Task.WhenAll(firstRequest, secondRequest);
 
@@ -368,8 +356,13 @@ public sealed class CustomerProfileApiTests : IAsyncLifetime
         using var verificationScope = factory!.Services.CreateScope();
         var verificationDb = verificationScope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
         var profile = await verificationDb.CustomerProfiles.SingleAsync(x => x.UserId == userId);
-        Assert.Contains(profile.GoalCode, new[] { "LOSE_WEIGHT", "MAINTAIN_WEIGHT" });
+        Assert.Equal("LOSE_WEIGHT", profile.GoalCode);
         Assert.Equal(2, profile.RowVersion);
+        var nutritionTargets = await verificationDb.CustomerNutritionTargets
+            .Where(x => x.CustomerProfileId == profile.Id)
+            .ToListAsync();
+        Assert.Equal(2, nutritionTargets.Count);
+        Assert.Single(nutritionTargets, target => target.IsCurrent);
     }
 
     [Fact]
