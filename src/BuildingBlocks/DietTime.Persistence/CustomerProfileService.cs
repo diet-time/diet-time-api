@@ -259,7 +259,7 @@ public sealed class CustomerProfileService(
             return $"{entry.Metadata.ClrType.Name}:{key}";
         }).ToArray();
 
-    private static async Task<bool> RefreshConcurrencyTokensAsync(
+    private async Task<bool> RefreshConcurrencyTokensAsync(
         DbUpdateConcurrencyException exception,
         CancellationToken ct)
     {
@@ -269,6 +269,56 @@ public sealed class CustomerProfileService(
             if (databaseValues is null)
             {
                 if (entry.State == EntityState.Deleted)
+                {
+                    entry.State = EntityState.Detached;
+                    continue;
+                }
+
+                if (entry.Entity is CustomerProfileAllergen allergen)
+                {
+                    var replacement = await db.CustomerProfileAllergens
+                        .SingleOrDefaultAsync(x =>
+                            x.Id != allergen.Id &&
+                            x.CustomerProfileId == allergen.CustomerProfileId &&
+                            x.AllergenId == allergen.AllergenId, ct);
+                    if (replacement is null)
+                    {
+                        entry.State = EntityState.Added;
+                    }
+                    else
+                    {
+                        replacement.SeverityCode = allergen.SeverityCode;
+                        replacement.MedicallyConfirmed = allergen.MedicallyConfirmed;
+                        replacement.Notes = allergen.Notes;
+                        replacement.UpdatedAt = allergen.UpdatedAt;
+                        replacement.UpdatedBy = allergen.UpdatedBy;
+                        entry.State = EntityState.Detached;
+                    }
+                    continue;
+                }
+
+                if (entry.Entity is CustomerProfilePreference preference)
+                {
+                    var replacement = await db.CustomerProfilePreferences
+                        .SingleOrDefaultAsync(x =>
+                            x.Id != preference.Id &&
+                            x.CustomerProfileId == preference.CustomerProfileId &&
+                            x.PreferenceCode == preference.PreferenceCode, ct);
+                    if (replacement is null)
+                    {
+                        entry.State = EntityState.Added;
+                    }
+                    else
+                    {
+                        replacement.PreferenceType = preference.PreferenceType;
+                        replacement.PreferencePriority = preference.PreferencePriority;
+                        replacement.UpdatedAt = preference.UpdatedAt;
+                        entry.State = EntityState.Detached;
+                    }
+                    continue;
+                }
+
+                if (entry.Entity is CustomerNutritionTarget)
                 {
                     entry.State = EntityState.Detached;
                     continue;
