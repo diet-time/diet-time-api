@@ -43,6 +43,7 @@ public sealed class CustomerProfileService(
             return new(null, invalidAllergenIds);
 
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await AcquireProfileWriteLockAsync(userId, ct);
         var now = clock.GetUtcNow();
         var today = DateOnly.FromDateTime(now.UtcDateTime);
         var profile = await ProfileQuery(tracking: true)
@@ -109,6 +110,8 @@ public sealed class CustomerProfileService(
         string preferredName,
         CancellationToken ct)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await AcquireProfileWriteLockAsync(userId, ct);
         var now = clock.GetUtcNow();
         var profile = await ProfileQuery(tracking: true)
             .SingleOrDefaultAsync(x => x.UserId == userId, ct);
@@ -135,12 +138,20 @@ public sealed class CustomerProfileService(
         profile.UpdatedAt = now;
         profile.UpdatedBy = userId;
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
 
         logger.LogInformation(
             "Preferred name was saved for customer profile {ProfileId} and authenticated user {UserId}",
             profile.Id,
             userId);
         return ToResponse(profile, DateOnly.FromDateTime(now.UtcDateTime));
+    }
+
+    private Task AcquireProfileWriteLockAsync(Guid userId, CancellationToken ct)
+    {
+        var lockKey = $"customer-profile:{userId:D}";
+        return db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))", ct);
     }
 
     private IQueryable<CustomerProfile> ProfileQuery(bool tracking)

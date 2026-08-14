@@ -266,6 +266,40 @@ public sealed class CustomerProfileApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Concurrent_profile_upserts_for_the_same_user_are_serialized()
+    {
+        if (!enabled) return;
+        Authenticate(userId);
+        var apiClient = client!;
+
+        var firstRequest = apiClient.PutAsJsonAsync("/api/v1/customer/profile", new
+        {
+            goalCode = "LOSE_WEIGHT",
+            preferredLanguage = "en",
+            onboardingStatus = "IN_PROGRESS",
+            preferences = Array.Empty<object>(),
+            allergens = Array.Empty<object>()
+        });
+        var secondRequest = apiClient.PutAsJsonAsync("/api/v1/customer/profile", new
+        {
+            goalCode = "MAINTAIN_WEIGHT",
+            preferredLanguage = "en",
+            onboardingStatus = "IN_PROGRESS",
+            preferences = Array.Empty<object>(),
+            allergens = Array.Empty<object>()
+        });
+
+        var responses = await Task.WhenAll(firstRequest, secondRequest);
+
+        Assert.All(responses, response => Assert.Equal(HttpStatusCode.OK, response.StatusCode));
+        using var verificationScope = factory!.Services.CreateScope();
+        var verificationDb = verificationScope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
+        var profile = await verificationDb.CustomerProfiles.SingleAsync(x => x.UserId == userId);
+        Assert.Contains(profile.GoalCode, new[] { "LOSE_WEIGHT", "MAINTAIN_WEIGHT" });
+        Assert.Equal(2, profile.RowVersion);
+    }
+
+    [Fact]
     public async Task Database_failure_rolls_back_the_entire_profile_transaction()
     {
         if (!enabled) return;
