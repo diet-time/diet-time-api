@@ -13,6 +13,10 @@ RUN dotnet publish src/Apis/DietTime.Meal.Api/DietTime.Meal.Api.csproj -c Releas
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
 WORKDIR /app
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
 ENV ASPNETCORE_ENVIRONMENT=Production PORT=8080
 EXPOSE 8080
 COPY --from=build /app/publish .

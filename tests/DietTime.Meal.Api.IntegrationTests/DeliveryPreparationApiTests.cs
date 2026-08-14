@@ -7,8 +7,10 @@ using DietTime.Domain;
 using DietTime.Meal.Api.Controllers;
 using DietTime.Persistence;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Testcontainers.PostgreSql;
 
 namespace DietTime.Meal.Api.IntegrationTests;
@@ -41,7 +43,10 @@ public sealed class DeliveryPreparationApiTests : IAsyncLifetime
     [Fact]
     public async Task Invalid_date_is_rejected_before_querying_the_service()
     {
-        var controller = new DeliveryPreparationController(new NeverCalledCalendarService());
+        var controller = new DeliveryPreparationController(
+            new NeverCalledCalendarService(),
+            new NeverCalledReportGenerator(),
+            NullLogger<DeliveryPreparationController>.Instance);
 
         var result = await controller.GetPreparationSummary("15-08-2026", default);
 
@@ -49,6 +54,76 @@ public sealed class DeliveryPreparationApiTests : IAsyncLifetime
         Assert.IsType<ValidationProblemDetails>(problem.Value);
         Assert.False(controller.ModelState.IsValid);
         Assert.Contains("date", controller.ModelState.Keys);
+    }
+
+    [Fact]
+    public async Task Invalid_report_date_is_rejected_before_querying_the_service()
+    {
+        var controller = new DeliveryPreparationController(
+            new NeverCalledCalendarService(),
+            new NeverCalledReportGenerator(),
+            NullLogger<DeliveryPreparationController>.Instance);
+
+        var result = await controller.GetPreparationReport("15-08-2026", default);
+
+        var problem = Assert.IsType<ObjectResult>(result);
+        Assert.IsType<ValidationProblemDetails>(problem.Value);
+        Assert.False(controller.ModelState.IsValid);
+    }
+
+    [Fact]
+    public async Task Json_and_pdf_flows_use_the_same_preparation_service_result()
+    {
+        var summary = new DeliveryPreparationSummaryResponse(
+            new(2026, 8, 16), "Scheduled", 1, 1, 2,
+            [new(Guid.NewGuid(), "Breakfast", 2,
+                [new(Guid.NewGuid(), "Oatmeal", 2)])],
+            [new(Guid.NewGuid(), "Balanced Living", 1)]);
+        var calendar = new RecordingCalendarService(summary);
+        var generator = new RecordingReportGenerator();
+        var controller = new DeliveryPreparationController(
+            calendar, generator, NullLogger<DeliveryPreparationController>.Instance);
+
+        await controller.GetPreparationSummary("2026-08-16", default);
+        var result = await controller.GetPreparationReport("2026-08-16", default);
+
+        var file = Assert.IsType<FileContentResult>(result);
+        Assert.Equal("application/pdf", file.ContentType);
+        Assert.Equal("Kitchen-Preparation-2026-08-16.pdf", file.FileDownloadName);
+        Assert.Equal([1, 2, 3, 4], file.FileContents);
+        Assert.Equal(2, calendar.CallCount);
+        Assert.All(calendar.RequestedDates, date => Assert.Equal(summary.Date, date));
+        Assert.Same(summary, generator.Summary);
+    }
+
+    [Fact]
+    public void Report_endpoint_uses_the_delivery_calendar_admin_authorization()
+    {
+        var authorization = Assert.Single(typeof(DeliveryPreparationController)
+            .GetCustomAttributes(typeof(AuthorizeAttribute), true)
+            .Cast<AuthorizeAttribute>());
+
+        Assert.Contains("Admin", authorization.Roles);
+        Assert.Contains("Operations", authorization.Roles);
+    }
+
+    [Fact]
+    public async Task Report_response_is_a_downloadable_pdf_for_scheduled_and_empty_days()
+    {
+        if (!enabled) return;
+
+        foreach (var date in new[] { "2026-08-15", "2026-08-14" })
+        {
+            var response = await client!.GetAsync(
+                $"/api/admin/delivery-calendar/{date}/preparation-report");
+            response.EnsureSuccessStatusCode();
+            var bytes = await response.Content.ReadAsByteArrayAsync();
+
+            Assert.Equal("application/pdf", response.Content.Headers.ContentType?.MediaType);
+            Assert.Equal($"Kitchen-Preparation-{date}.pdf",
+                response.Content.Headers.ContentDisposition?.FileNameStar);
+            Assert.Equal("%PDF-", System.Text.Encoding.ASCII.GetString(bytes, 0, 5));
+        }
     }
 
     [Fact]
@@ -251,5 +326,45 @@ public sealed class DeliveryPreparationApiTests : IAsyncLifetime
         public Task<DeliveryPreparationSummaryResponse> GetPreparationSummaryAsync(
             DateOnly date, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("Storage must not be queried for an invalid date.");
+    }
+
+    private sealed class NeverCalledReportGenerator : IKitchenPreparationReportGenerator
+    {
+        public Task<byte[]> GenerateAsync(
+            DeliveryPreparationSummaryResponse summary,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("Report generation must not run for an invalid date.");
+    }
+
+    private sealed class RecordingCalendarService(DeliveryPreparationSummaryResponse summary)
+        : IAdminDeliveryCalendarService
+    {
+        public int CallCount { get; private set; }
+        public List<DateOnly> RequestedDates { get; } = [];
+
+        public Task<AdminDeliveryCalendarResponse> GetMonthAsync(
+            DateOnly startDate, DateOnly endDate, Guid? planId, string? orderStatus,
+            CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public Task<DeliveryPreparationSummaryResponse> GetPreparationSummaryAsync(
+            DateOnly date, CancellationToken cancellationToken)
+        {
+            CallCount++;
+            RequestedDates.Add(date);
+            return Task.FromResult(summary);
+        }
+    }
+
+    private sealed class RecordingReportGenerator : IKitchenPreparationReportGenerator
+    {
+        public DeliveryPreparationSummaryResponse? Summary { get; private set; }
+
+        public Task<byte[]> GenerateAsync(
+            DeliveryPreparationSummaryResponse summary,
+            CancellationToken cancellationToken)
+        {
+            Summary = summary;
+            return Task.FromResult<byte[]>([1, 2, 3, 4]);
+        }
     }
 }

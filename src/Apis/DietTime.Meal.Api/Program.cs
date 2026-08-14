@@ -156,6 +156,7 @@ builder.Services.AddScoped<ICustomerAddressService, CustomerAddressService>();
 builder.Services.AddScoped<IDeliveryTimeSlotService, DeliveryTimeSlotService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<IAdminDeliveryCalendarService, AdminDeliveryCalendarService>();
+builder.Services.AddSingleton<IKitchenPreparationReportGenerator, KitchenPreparationPdfReportGenerator>();
 builder.Services.AddScoped<IOperationsDashboardService, OperationsDashboardService>();
 builder.Services.AddScoped<ICustomerMealPlanPurchaseService, CustomerMealPlanPurchaseService>();
 builder.Services.AddScoped<IUserProfileService, UserProfileService>(); 

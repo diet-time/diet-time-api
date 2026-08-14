@@ -15,6 +15,13 @@ public interface IAdminDeliveryCalendarService
         CancellationToken cancellationToken);
 }
 
+public interface IKitchenPreparationReportGenerator
+{
+    Task<byte[]> GenerateAsync(
+        DeliveryPreparationSummaryResponse summary,
+        CancellationToken cancellationToken);
+}
+
 public static class AdminDeliveryCalendarScheduling
 {
     public static bool IsScheduled(
