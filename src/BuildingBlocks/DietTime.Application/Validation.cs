@@ -115,7 +115,32 @@ public sealed class UpdateCustomerPreferredNameRequestValidator
 {
     public UpdateCustomerPreferredNameRequestValidator()
     {
-        RuleFor(x => x.PreferredName).NotEmpty().MaximumLength(100);
+        RuleFor(x => x.PreferredName).NotEmpty().MinimumLength(2).MaximumLength(150);
+    }
+}
+
+public sealed class UpdateCustomerPersonalInfoRequestValidator
+    : AbstractValidator<UpdateCustomerPersonalInfoRequest>
+{
+    public UpdateCustomerPersonalInfoRequestValidator(TimeProvider clock)
+    {
+        var today = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
+
+        RuleFor(x => x.FullName)
+            .NotEmpty().WithMessage("Full name is required.")
+            .Must(value => value is not null && value.Trim().Length >= 2)
+            .WithMessage("Full name must contain at least 2 characters.")
+            .Must(value => value is not null && value.Trim().Length <= 150)
+            .WithMessage("Full name must not exceed 150 characters.");
+        RuleFor(x => x.DateOfBirth)
+            .Must(value => value is null || value <= today)
+            .WithMessage("Date of birth cannot be in the future.")
+            .Must(value => value is null || value >= today.AddYears(-120))
+            .WithMessage("Date of birth cannot represent an age older than 120 years.");
+        RuleFor(x => x.Gender)
+            .NotEmpty()
+            .Must(value => value is not null && CustomerGenderCodes.All.Contains(value.Trim()))
+            .WithMessage("Gender must be Male or Female.");
     }
 }
 

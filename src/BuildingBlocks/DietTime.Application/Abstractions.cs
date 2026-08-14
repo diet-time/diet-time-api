@@ -78,7 +78,10 @@ public interface ICustomerMealPlanPurchaseService
 public interface ICustomerProfileService
 {
     Task<CustomerProfileResponse?> GetAsync(Guid userId, CancellationToken cancellationToken);
+    Task<CustomerPersonalInfoResponse?> GetPersonalInfoAsync(Guid userId, CancellationToken cancellationToken);
     Task<CustomerProfileUpsertResult> UpsertAsync(Guid userId, UpsertCustomerProfileRequest request, CancellationToken cancellationToken);
+    Task<CustomerPersonalInfoResponse?> UpdatePersonalInfoAsync(
+        Guid userId, UpdateCustomerPersonalInfoRequest request, CancellationToken cancellationToken);
     Task<CustomerProfileResponse> UpdatePreferredNameAsync(Guid userId, string preferredName, CancellationToken cancellationToken);
 }
 

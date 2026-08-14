@@ -160,6 +160,14 @@ public sealed class CustomerProfile : Entity
     public ICollection<CustomerAddress> Addresses { get; set; } = [];
 }
 
+public static class CustomerGenderCodes
+{
+    public const string Male = "MALE";
+    public const string Female = "FEMALE";
+    public static readonly IReadOnlySet<string> All = new HashSet<string>(
+        [Male, Female], StringComparer.OrdinalIgnoreCase);
+}
+
 public static class CustomerAddressTypes
 {
     public const string Home = "HOME";

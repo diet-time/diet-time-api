@@ -146,13 +146,52 @@ public sealed class CustomerProfileTests
     }
 
     [Fact]
-    public void Preferred_name_is_required_and_limited_to_100_characters()
+    public void Preferred_name_is_required_and_limited_to_150_characters()
     {
         var validator = new UpdateCustomerPreferredNameRequestValidator();
 
         Assert.False(validator.Validate(new UpdateCustomerPreferredNameRequest(" ")).IsValid);
-        Assert.False(validator.Validate(new UpdateCustomerPreferredNameRequest(new string('x', 101))).IsValid);
+        Assert.False(validator.Validate(new UpdateCustomerPreferredNameRequest("x")).IsValid);
+        Assert.False(validator.Validate(new UpdateCustomerPreferredNameRequest(new string('x', 151))).IsValid);
         Assert.True(validator.Validate(new UpdateCustomerPreferredNameRequest("Noor")).IsValid);
+    }
+
+    [Fact]
+    public void Personal_information_validation_accepts_supported_values_and_trimming()
+    {
+        var validator = new UpdateCustomerPersonalInfoRequestValidator(new FixedTimeProvider(Now));
+
+        var result = validator.Validate(new UpdateCustomerPersonalInfoRequest(
+            "  Noor Ali  ", new DateOnly(1990, 8, 13), "Female"));
+
+        Assert.True(result.IsValid);
+    }
+
+    [Theory]
+    [InlineData(" ", "Male")]
+    [InlineData("x", "Male")]
+    [InlineData("Valid Name", "Unknown")]
+    public void Personal_information_validation_rejects_invalid_name_or_gender(
+        string fullName,
+        string gender)
+    {
+        var validator = new UpdateCustomerPersonalInfoRequestValidator(new FixedTimeProvider(Now));
+
+        var result = validator.Validate(new UpdateCustomerPersonalInfoRequest(
+            fullName, new DateOnly(1990, 8, 13), gender));
+
+        Assert.False(result.IsValid);
+    }
+
+    [Fact]
+    public void Personal_information_validation_rejects_future_and_implausible_birth_dates()
+    {
+        var validator = new UpdateCustomerPersonalInfoRequestValidator(new FixedTimeProvider(Now));
+
+        Assert.False(validator.Validate(new UpdateCustomerPersonalInfoRequest(
+            "Noor Ali", new DateOnly(2026, 7, 31), "Female")).IsValid);
+        Assert.False(validator.Validate(new UpdateCustomerPersonalInfoRequest(
+            "Noor Ali", new DateOnly(1900, 1, 1), "Female")).IsValid);
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider

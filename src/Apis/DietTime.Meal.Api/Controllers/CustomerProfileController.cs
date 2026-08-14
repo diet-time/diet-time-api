@@ -42,6 +42,50 @@ public sealed class CustomerProfileController(
             : Ok(ApiResponse<CustomerProfileResponse>.Ok(profile));
     }
 
+    /// <summary>Gets editable personal information for the authenticated customer.</summary>
+    /// <remarks>Includes active delivery addresses and the read-only authentication mobile number.</remarks>
+    [HttpGet("~/api/customers/profile")]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(ApiResponse<CustomerPersonalInfoResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> GetPersonalInfo(CancellationToken ct)
+    {
+        if (!TryGetUserId(out var userId))
+            return Unauthorized();
+
+        var profile = await profiles.GetPersonalInfoAsync(userId, ct);
+        return profile is null
+            ? ProfileNotFound()
+            : Ok(ApiResponse<CustomerPersonalInfoResponse>.Ok(profile));
+    }
+
+    /// <summary>Updates editable personal information for the authenticated customer.</summary>
+    /// <remarks>
+    /// The mobile number is intentionally excluded because it is an OTP authentication identity.
+    /// Address changes continue to use the customer-address endpoints.
+    /// </remarks>
+    [HttpPut("~/api/customers/profile")]
+    [Consumes("application/json")]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(ApiResponse<CustomerPersonalInfoResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> UpdatePersonalInfo(
+        UpdateCustomerPersonalInfoRequest request,
+        CancellationToken ct)
+    {
+        if (!TryGetUserId(out var userId))
+            return Unauthorized();
+
+        var profile = await profiles.UpdatePersonalInfoAsync(userId, request, ct);
+        return profile is null
+            ? ProfileNotFound()
+            : Ok(ApiResponse<CustomerPersonalInfoResponse>.Ok(profile));
+    }
+
     /// <summary>Creates or updates the authenticated customer's profile.</summary>
     /// <remarks>
     /// Uses replace-all semantics for preferences and allergens. Missing or null collections
@@ -138,4 +182,9 @@ public sealed class CustomerProfileController(
             ?? User.FindFirstValue("sub");
         return Guid.TryParse(value, out userId);
     }
+
+    private NotFoundObjectResult ProfileNotFound() => NotFound(new ApiResponse<object>
+    {
+        Errors = [new("profile_not_found", "An active customer profile was not found.")]
+    });
 }

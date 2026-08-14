@@ -113,6 +113,79 @@ public sealed class CustomerProfileApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Personal_profile_endpoint_updates_only_editable_fields_and_returns_active_addresses()
+    {
+        if (!enabled) return;
+        Authenticate(userId);
+        var apiClient = client!;
+        await apiClient.PutAsJsonAsync("/api/v1/customer/profile", CompleteRequest());
+
+        using (var setupScope = factory!.Services.CreateScope())
+        {
+            var setupDb = setupScope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
+            var profileId = await setupDb.CustomerProfiles
+                .Where(x => x.UserId == userId)
+                .Select(x => x.Id)
+                .SingleAsync();
+            var now = DateTimeOffset.UtcNow;
+            setupDb.CustomerAddresses.AddRange(
+                new CustomerAddress
+                {
+                    Id = Guid.NewGuid(), CustomerProfileId = profileId,
+                    AddressName = "Office", AddressType = CustomerAddressTypes.Office,
+                    UnitNumber = "6", BuildingNo = "126", StreetNo = "35", ZoneNo = "35",
+                    Area = "Oqba Bin Nafie", FormattedAddress = "Pinned location, Qatar",
+                    Latitude = 25.2854m, Longitude = 51.5310m, IsDefault = true, IsActive = true,
+                    CreatedAt = now, UpdatedAt = now, RowVersion = 1
+                },
+                new CustomerAddress
+                {
+                    Id = Guid.NewGuid(), CustomerProfileId = profileId,
+                    AddressName = "Old", AddressType = CustomerAddressTypes.Home,
+                    Area = "Doha", IsDefault = false, IsActive = false,
+                    CreatedAt = now, UpdatedAt = now, RowVersion = 1
+                });
+            await setupDb.SaveChangesAsync();
+        }
+
+        var update = await apiClient.PutAsJsonAsync("/api/customers/profile", new
+        {
+            fullName = "  Customer Name  ",
+            dateOfBirth = "1990-08-13",
+            gender = "Female",
+            mobileNumber = "+97400000000"
+        });
+
+        Assert.Equal(HttpStatusCode.OK, update.StatusCode);
+        using (var updateJson = JsonDocument.Parse(await update.Content.ReadAsStringAsync()))
+        {
+            var data = updateJson.RootElement.GetProperty("data");
+            Assert.Equal("Customer Name", data.GetProperty("fullName").GetString());
+            Assert.Equal("+97433116397", data.GetProperty("mobileNumber").GetString());
+            Assert.Equal("1990-08-13", data.GetProperty("dateOfBirth").GetString());
+            Assert.Equal("Female", data.GetProperty("gender").GetString());
+            var address = Assert.Single(data.GetProperty("addresses").EnumerateArray());
+            Assert.Equal("Office", address.GetProperty("label").GetString());
+            Assert.True(address.GetProperty("isDefault").GetBoolean());
+            Assert.Equal("Pinned location, Qatar", address.GetProperty("locationDescription").GetString());
+        }
+
+        var read = await apiClient.GetAsync("/api/customers/profile");
+        Assert.Equal(HttpStatusCode.OK, read.StatusCode);
+        using var readJson = JsonDocument.Parse(await read.Content.ReadAsStringAsync());
+        Assert.Single(readJson.RootElement.GetProperty("data").GetProperty("addresses").EnumerateArray());
+
+        using var verificationScope = factory.Services.CreateScope();
+        var verificationDb = verificationScope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
+        var savedProfile = await verificationDb.CustomerProfiles.SingleAsync(x => x.UserId == userId);
+        var savedUser = await verificationDb.Users.SingleAsync(x => x.Id == userId);
+        Assert.Equal("Customer Name", savedProfile.PreferredName);
+        Assert.Equal("FEMALE", savedProfile.GenderCode);
+        Assert.Equal("LOSE_WEIGHT", savedProfile.GoalCode);
+        Assert.Equal("+97433116397", savedUser.PhoneNumber);
+    }
+
+    [Fact]
     public async Task Temporary_phone_reuses_the_same_user_and_profile()
     {
         if (!enabled) return;
@@ -365,8 +438,8 @@ public sealed class CustomerProfileApiTests : IAsyncLifetime
         allergenId = Guid.NewGuid();
         var now = DateTimeOffset.UtcNow;
         db.Users.AddRange(
-            new ApplicationUser { Id = userId, UserName = "profile-one@example.test", NormalizedUserName = "PROFILE-ONE@EXAMPLE.TEST", Email = "profile-one@example.test", NormalizedEmail = "PROFILE-ONE@EXAMPLE.TEST" },
-            new ApplicationUser { Id = secondUserId, UserName = "profile-two@example.test", NormalizedUserName = "PROFILE-TWO@EXAMPLE.TEST", Email = "profile-two@example.test", NormalizedEmail = "PROFILE-TWO@EXAMPLE.TEST" });
+            new ApplicationUser { Id = userId, UserName = "profile-one@example.test", NormalizedUserName = "PROFILE-ONE@EXAMPLE.TEST", Email = "profile-one@example.test", NormalizedEmail = "PROFILE-ONE@EXAMPLE.TEST", PhoneNumber = "+97433116397", PhoneNumberConfirmed = true },
+            new ApplicationUser { Id = secondUserId, UserName = "profile-two@example.test", NormalizedUserName = "PROFILE-TWO@EXAMPLE.TEST", Email = "profile-two@example.test", NormalizedEmail = "PROFILE-TWO@EXAMPLE.TEST", PhoneNumber = "+97433116398", PhoneNumberConfirmed = true });
         db.Allergens.Add(new Allergen
         {
             Id = allergenId,

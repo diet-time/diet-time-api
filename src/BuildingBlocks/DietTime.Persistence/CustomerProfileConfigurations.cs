@@ -13,7 +13,7 @@ public sealed class CustomerProfileConfiguration : IEntityTypeConfiguration<Cust
 
         entity.Property(x => x.Id).HasColumnName("id");
         entity.Property(x => x.UserId).HasColumnName("user_id").IsRequired(false);
-        entity.Property(x => x.PreferredName).HasColumnName("preferred_name").HasMaxLength(100);
+        entity.Property(x => x.PreferredName).HasColumnName("preferred_name").HasMaxLength(150);
         entity.Property(x => x.GenderCode).HasColumnName("gender_code").HasMaxLength(30);
         entity.Property(x => x.DateOfBirth).HasColumnName("date_of_birth");
         entity.Property(x => x.HeightCm).HasColumnName("height_cm").HasPrecision(6, 2);

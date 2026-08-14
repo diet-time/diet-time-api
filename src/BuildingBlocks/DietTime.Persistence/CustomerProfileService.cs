@@ -21,6 +21,11 @@ public sealed class CustomerProfileService(
         return profile is null ? null : ToResponse(profile, Today());
     }
 
+    public Task<CustomerPersonalInfoResponse?> GetPersonalInfoAsync(
+        Guid userId,
+        CancellationToken ct) =>
+        LoadPersonalInfoAsync(userId, ct);
+
     public async Task<CustomerProfileUpsertResult> UpsertAsync(
         Guid userId,
         UpsertCustomerProfileRequest request,
@@ -105,6 +110,35 @@ public sealed class CustomerProfileService(
         return new(ToResponse(profile, today), []);
     }
 
+    public async Task<CustomerPersonalInfoResponse?> UpdatePersonalInfoAsync(
+        Guid userId,
+        UpdateCustomerPersonalInfoRequest request,
+        CancellationToken ct)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await AcquireProfileWriteLockAsync(userId, ct);
+        var profile = await db.CustomerProfiles.SingleOrDefaultAsync(
+            x => x.UserId == userId && x.IsActive, ct);
+        if (profile is null)
+            return null;
+
+        var now = clock.GetUtcNow();
+        profile.PreferredName = request.FullName.Trim();
+        profile.DateOfBirth = request.DateOfBirth;
+        profile.GenderCode = request.Gender.Trim().ToUpperInvariant();
+        profile.UpdatedAt = now;
+        profile.UpdatedBy = userId;
+        profile.RowVersion++;
+
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+
+        logger.LogInformation(
+            "Customer personal information was updated. ProfileId={ProfileId} UserId={UserId}",
+            profile.Id, userId);
+        return await LoadPersonalInfoAsync(userId, ct);
+    }
+
     public async Task<CustomerProfileResponse> UpdatePreferredNameAsync(
         Guid userId,
         string preferredName,
@@ -153,6 +187,56 @@ public sealed class CustomerProfileService(
         return db.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT pg_advisory_xact_lock(hashtextextended({lockKey}, 0))", ct);
     }
+
+    private async Task<CustomerPersonalInfoResponse?> LoadPersonalInfoAsync(
+        Guid userId,
+        CancellationToken ct)
+    {
+        var profile = await db.CustomerProfiles.AsNoTracking()
+            .Include(x => x.Addresses.Where(address => address.IsActive))
+            .SingleOrDefaultAsync(x => x.UserId == userId && x.IsActive, ct);
+        if (profile is null)
+            return null;
+
+        var mobileNumber = await db.Users.AsNoTracking()
+            .Where(user => user.Id == userId)
+            .Select(user => user.PhoneNumber)
+            .SingleOrDefaultAsync(ct);
+        return new CustomerPersonalInfoResponse(
+            profile.Id,
+            profile.PreferredName?.Trim() ?? string.Empty,
+            mobileNumber,
+            profile.DateOfBirth,
+            GenderDisplayName(profile.GenderCode),
+            profile.Addresses
+                .OrderByDescending(address => address.IsDefault)
+                .ThenByDescending(address => address.UpdatedAt)
+                .ThenBy(address => address.Id)
+                .Select(address => new CustomerProfileAddressResponse(
+                    address.Id,
+                    address.AddressName,
+                    address.IsDefault,
+                    address.UnitNumber,
+                    address.BuildingNo,
+                    address.StreetNo,
+                    address.ZoneNo,
+                    address.Area,
+                    FirstNonEmpty(address.FormattedAddress, address.Directions),
+                    address.Latitude,
+                    address.Longitude))
+                .ToArray());
+    }
+
+    private static string GenderDisplayName(string? genderCode) =>
+        genderCode?.Trim().ToUpperInvariant() switch
+        {
+            CustomerGenderCodes.Male => "Male",
+            CustomerGenderCodes.Female => "Female",
+            _ => string.Empty
+        };
+
+    private static string? FirstNonEmpty(params string?[] values) =>
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
 
     private IQueryable<CustomerProfile> ProfileQuery(bool tracking)
     {

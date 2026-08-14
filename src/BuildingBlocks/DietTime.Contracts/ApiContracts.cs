@@ -192,6 +192,29 @@ public sealed record CustomerAllergenRequest(
     bool MedicallyConfirmed,
     string? Notes);
 public sealed record UpdateCustomerPreferredNameRequest(string PreferredName);
+public sealed record UpdateCustomerPersonalInfoRequest(
+    string FullName,
+    DateOnly? DateOfBirth,
+    string Gender);
+public sealed record CustomerProfileAddressResponse(
+    Guid Id,
+    string? Label,
+    bool IsDefault,
+    string? Unit,
+    string? Building,
+    string? Street,
+    string? Zone,
+    string Area,
+    string? LocationDescription,
+    decimal? Latitude,
+    decimal? Longitude);
+public sealed record CustomerPersonalInfoResponse(
+    Guid Id,
+    string FullName,
+    string? MobileNumber,
+    DateOnly? DateOfBirth,
+    string Gender,
+    IReadOnlyList<CustomerProfileAddressResponse> Addresses);
 public sealed record CustomerNutritionTargetResponse(
     int? DailyCaloriesKcal,
     decimal? DailyProteinG,
