@@ -58,23 +58,49 @@ public sealed class TwilioWhatsAppService(
         CancellationToken cancellationToken = default)
     {
         var configuration = options.Value;
+        var validationFailure = Validate(notification);
+        if (validationFailure is not null)
+        {
+            logger.LogWarning(
+                "Twilio WhatsApp new-order notification was not sent because required data is invalid. OrderId={OrderId} OrderNumber={OrderNumber} InvalidField={InvalidField}",
+                notification.OrderId, notification.OrderNumber, validationFailure.Value.Field);
+            return Task.FromResult(Failure(
+                "invalid_new_order_notification",
+                $"The new-order WhatsApp notification has an invalid {validationFailure.Value.Field}."));
+        }
+
+        var startDate = notification.StartDate.ToString("dd MMM yyyy", CultureInfo.InvariantCulture);
+        var duration = notification.Duration.Trim();
+        var mealsPerDay = $"{notification.MealsPerDay.ToString(CultureInfo.InvariantCulture)} Meals";
+        var total = $"{notification.Currency.Trim().ToUpperInvariant()} {notification.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture)}";
+        var status = ToDisplayStatus(notification.OrderStatus);
+        var variables = new Dictionary<string, string>
+        {
+            ["1"] = notification.OrderNumber.Trim(),
+            ["2"] = notification.CustomerName.Trim(),
+            ["3"] = notification.CustomerMobile.Trim(),
+            ["4"] = notification.MealPlanName.Trim(),
+            ["5"] = startDate,
+            ["6"] = duration,
+            ["7"] = mealsPerDay,
+            ["8"] = notification.DeliveryDays.Trim(),
+            ["9"] = notification.DeliveryAddress.Trim(),
+            ["10"] = total,
+            ["11"] = status
+        };
+
+        logger.LogInformation(
+            "Sending Twilio WhatsApp new-order notification. OrderId={OrderId} OrderNumber={OrderNumber} Customer={Customer} Plan={Plan} StartDate={StartDate} Duration={Duration} MealsPerDay={MealsPerDay} DeliveryDays={DeliveryDays} Address={Address} Total={Total} Status={Status} ContentSid={ContentSid} TwilioVariables={TwilioVariables}",
+            notification.OrderId, variables["1"], variables["2"], variables["4"],
+            variables["5"], variables["6"], variables["7"], variables["8"],
+            variables["9"], variables["10"], variables["11"],
+            configuration.NewOrderContentSid,
+            JsonSerializer.Serialize(variables));
+
         return SendTemplateAsync(new TwilioWhatsAppTemplateMessage(
             configuration.OperationsNumber,
             configuration.NewOrderContentSid,
-            new Dictionary<string, string>
-            {
-                ["1"] = notification.OrderNumber,
-                ["2"] = notification.CustomerName,
-                ["3"] = notification.CustomerMobile,
-                ["4"] = notification.MealPlanName,
-                ["5"] = notification.Duration,
-                ["6"] = notification.MealsPerDay.ToString(CultureInfo.InvariantCulture),
-                ["7"] = notification.StartDate.ToString("dd MMM yyyy", CultureInfo.InvariantCulture),
-                ["8"] = notification.DeliveryDays,
-                ["9"] = notification.DeliveryAddress,
-                ["10"] = $"{notification.Currency.Trim().ToUpperInvariant()} {notification.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture)}",
-                ["11"] = ToDisplayStatus(notification.OrderStatus)
-            }), cancellationToken);
+            variables), cancellationToken);
     }
 
     public async Task<WhatsAppSendResult> SendTemplateAsync(
@@ -141,6 +167,33 @@ public sealed class TwilioWhatsAppService(
     private static bool IsTransient(HttpStatusCode statusCode) =>
         statusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests ||
         (int)statusCode >= 500;
+
+    private static (string Field, string? Value)? Validate(NewOrderWhatsAppNotification notification)
+    {
+        if (string.IsNullOrWhiteSpace(notification.OrderNumber))
+            return ("order number", notification.OrderNumber);
+        if (string.IsNullOrWhiteSpace(notification.CustomerName))
+            return ("customer name", notification.CustomerName);
+        if (!TwilioWhatsAppPhoneNumber.IsValid(notification.CustomerMobile))
+            return ("customer mobile number", notification.CustomerMobile);
+        if (string.IsNullOrWhiteSpace(notification.MealPlanName))
+            return ("meal plan name", notification.MealPlanName);
+        if (notification.StartDate == default)
+            return ("start date", null);
+        if (string.IsNullOrWhiteSpace(notification.Duration))
+            return ("duration display name", notification.Duration);
+        if (notification.MealsPerDay <= 0)
+            return ("meals per day", notification.MealsPerDay.ToString(CultureInfo.InvariantCulture));
+        if (string.IsNullOrWhiteSpace(notification.DeliveryDays))
+            return ("delivery days", notification.DeliveryDays);
+        if (string.IsNullOrWhiteSpace(notification.DeliveryAddress))
+            return ("delivery address", notification.DeliveryAddress);
+        if (notification.TotalAmount <= 0m || string.IsNullOrWhiteSpace(notification.Currency))
+            return ("total", notification.TotalAmount.ToString(CultureInfo.InvariantCulture));
+        if (string.IsNullOrWhiteSpace(notification.OrderStatus))
+            return ("order status", notification.OrderStatus);
+        return null;
+    }
 
     private static string ToDisplayStatus(string status)
     {

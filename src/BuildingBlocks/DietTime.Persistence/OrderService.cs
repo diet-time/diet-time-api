@@ -314,7 +314,7 @@ public sealed class OrderService(
             var notification = new NewOrderWhatsAppNotification(
                 order.Id,
                 order.OrderNumber,
-                FirstNonEmpty(customer.PreferredName, customer.UserName, "Customer"),
+                FirstNonEmpty(customer.PreferredName, customer.UserName),
                 customer.PhoneNumber?.Trim() ?? string.Empty,
                 order.PlanName,
                 order.PlanDurationName,
@@ -374,15 +374,18 @@ public sealed class OrderService(
             Labeled("Zone", order.DeliveryZoneNo),
             order.DeliveryArea
         };
-        return string.Join(", ", parts.Where(x => !string.IsNullOrWhiteSpace(x))
+        var displayAddress = string.Join(", ", parts.Where(x => !string.IsNullOrWhiteSpace(x))
             .Select(x => x!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase));
+        return !string.IsNullOrWhiteSpace(displayAddress)
+            ? displayAddress
+            : order.DeliveryDirections?.Trim() ?? string.Empty;
     }
 
     private static string? Labeled(string label, string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : $"{label} {value.Trim()}";
 
     private static string FirstNonEmpty(params string?[] values) =>
-        values.First(value => !string.IsNullOrWhiteSpace(value))!.Trim();
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
 
     private static string LocalizedName(IEnumerable<NameRow> names, string language, string fallback)
     {

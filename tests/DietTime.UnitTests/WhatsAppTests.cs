@@ -135,9 +135,10 @@ public sealed class WhatsAppTests
             NullLogger<TwilioWhatsAppService>.Instance);
 
         var result = await service.SendNewOrderNotificationAsync(new(
-            Guid.NewGuid(), "ORD-001", "Ahmed Ali", "+97450123456",
-            "Weight Loss", "12 Days", 3, new DateOnly(2026, 8, 15),
-            "Sat, Sun, Mon", "Doha, Qatar", 499m, "QAR", "CONFIRMED"));
+            Guid.NewGuid(), "ORD-20260814-000015", "Rugma", "+97433116397",
+            "Balanced Living", "Monthly", 3, new DateOnly(2026, 8, 22),
+            "Sat, Sun, Mon, Tue, Wed, Thu", "Pinned location, Qatar",
+            3200m, "QAR", "CONFIRMED"));
 
         Assert.True(result.Success);
         var form = ParseForm(handler.Body!);
@@ -145,10 +146,44 @@ public sealed class WhatsAppTests
         Assert.Equal("HXneworder", form["ContentSid"]);
         using var variables = JsonDocument.Parse(form["ContentVariables"]);
         Assert.Equal(11, variables.RootElement.EnumerateObject().Count());
-        Assert.Equal("ORD-001", variables.RootElement.GetProperty("1").GetString());
-        Assert.Equal("+97450123456", variables.RootElement.GetProperty("3").GetString());
-        Assert.Equal("QAR 499.00", variables.RootElement.GetProperty("10").GetString());
+        Assert.Equal("ORD-20260814-000015", variables.RootElement.GetProperty("1").GetString());
+        Assert.Equal("Rugma", variables.RootElement.GetProperty("2").GetString());
+        Assert.Equal("+97433116397", variables.RootElement.GetProperty("3").GetString());
+        Assert.Equal("Balanced Living", variables.RootElement.GetProperty("4").GetString());
+        Assert.Equal("22 Aug 2026", variables.RootElement.GetProperty("5").GetString());
+        Assert.Equal("Monthly", variables.RootElement.GetProperty("6").GetString());
+        Assert.Equal("3 Meals", variables.RootElement.GetProperty("7").GetString());
+        Assert.Equal("Sat, Sun, Mon, Tue, Wed, Thu", variables.RootElement.GetProperty("8").GetString());
+        Assert.Equal("Pinned location, Qatar", variables.RootElement.GetProperty("9").GetString());
+        Assert.Equal("QAR 3200.00", variables.RootElement.GetProperty("10").GetString());
         Assert.Equal("Confirmed", variables.RootElement.GetProperty("11").GetString());
+    }
+
+    [Fact]
+    public async Task Invalid_new_order_data_is_rejected_before_calling_Twilio()
+    {
+        var handler = new RecordingHandler((_, _) => throw new InvalidOperationException());
+        var service = new TwilioWhatsAppService(
+            new HttpClient(handler) { BaseAddress = new Uri("https://api.twilio.com/") },
+            Options.Create(new TwilioWhatsAppOptions
+            {
+                Enabled = true,
+                AccountSid = "ACaccount",
+                AuthToken = "secret-token",
+                FromNumber = "+14155238886",
+                OperationsNumber = "+97474452435",
+                NewOrderContentSid = "HXneworder"
+            }),
+            NullLogger<TwilioWhatsAppService>.Instance);
+
+        var result = await service.SendNewOrderNotificationAsync(new(
+            Guid.NewGuid(), "ORD-001", "Ahmed Ali", "+97450123456",
+            "Weight Loss", "", 3, new DateOnly(2026, 8, 15),
+            "Sat, Sun, Mon", "Doha, Qatar", 499m, "QAR", "CONFIRMED"));
+
+        Assert.False(result.Success);
+        Assert.Equal("invalid_new_order_notification", result.ErrorCode);
+        Assert.Equal(0, handler.CallCount);
     }
 
     private static IReadOnlyDictionary<string, string> ParseForm(string body) =>
