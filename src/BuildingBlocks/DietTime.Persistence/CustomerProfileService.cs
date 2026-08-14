@@ -201,6 +201,12 @@ public sealed class CustomerProfileService(
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT id FROM public.customer_nutrition_targets WHERE customer_profile_id = {profile.Id} FOR UPDATE",
             ct);
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT id FROM public.customer_profile_preferences WHERE customer_profile_id = {profile.Id} FOR UPDATE",
+            ct);
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT id FROM public.customer_profile_allergens WHERE customer_profile_id = {profile.Id} FOR UPDATE",
+            ct);
         await db.Entry(profile).Collection(x => x.NutritionTargets).LoadAsync(ct);
         await db.Entry(profile).Collection(x => x.Preferences).LoadAsync(ct);
         await db.Entry(profile).Collection(x => x.Allergens).Query()
@@ -214,27 +220,67 @@ public sealed class CustomerProfileService(
         Guid userId,
         CancellationToken ct)
     {
-        try
+        const int maximumAttempts = 3;
+        for (var attempt = 1; attempt <= maximumAttempts; attempt++)
         {
-            await db.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateConcurrencyException exception)
-        {
-            var conflictingEntries = exception.Entries.Select(entry =>
+            try
             {
-                var primaryKey = entry.Metadata.FindPrimaryKey();
-                var key = primaryKey is null
-                    ? "unknown"
-                    : string.Join(",", primaryKey.Properties.Select(property =>
-                        entry.Property(property.Name).CurrentValue?.ToString() ?? "null"));
-                return $"{entry.Metadata.ClrType.Name}:{key}";
-            }).ToArray();
-            logger.LogWarning(
-                exception,
-                "Customer profile save encountered an optimistic concurrency conflict. UserId={UserId} ConflictingEntries={ConflictingEntries}",
-                userId, conflictingEntries);
-            throw;
+                await db.SaveChangesAsync(ct);
+                return;
+            }
+            catch (DbUpdateConcurrencyException exception)
+            {
+                var conflictingEntries = DescribeEntries(exception);
+                if (attempt == maximumAttempts ||
+                    !await RefreshConcurrencyTokensAsync(exception, ct))
+                {
+                    logger.LogWarning(
+                        exception,
+                        "Customer profile save failed after concurrency handling. UserId={UserId} Attempt={Attempt} ConflictingEntries={ConflictingEntries}",
+                        userId, attempt, conflictingEntries);
+                    throw;
+                }
+
+                logger.LogWarning(
+                    "Retrying customer profile save after an optimistic concurrency conflict. UserId={UserId} Attempt={Attempt} ConflictingEntries={ConflictingEntries}",
+                    userId, attempt, conflictingEntries);
+            }
         }
+    }
+
+    private static string[] DescribeEntries(DbUpdateConcurrencyException exception) =>
+        exception.Entries.Select(entry =>
+        {
+            var primaryKey = entry.Metadata.FindPrimaryKey();
+            var key = primaryKey is null
+                ? "unknown"
+                : string.Join(",", primaryKey.Properties.Select(property =>
+                    entry.Property(property.Name).CurrentValue?.ToString() ?? "null"));
+            return $"{entry.Metadata.ClrType.Name}:{key}";
+        }).ToArray();
+
+    private static async Task<bool> RefreshConcurrencyTokensAsync(
+        DbUpdateConcurrencyException exception,
+        CancellationToken ct)
+    {
+        foreach (var entry in exception.Entries)
+        {
+            var databaseValues = await entry.GetDatabaseValuesAsync(ct);
+            if (databaseValues is null)
+            {
+                if (entry.State == EntityState.Deleted)
+                {
+                    entry.State = EntityState.Detached;
+                    continue;
+                }
+
+                return false;
+            }
+
+            entry.OriginalValues.SetValues(databaseValues);
+        }
+
+        return true;
     }
 
     private async Task<CustomerPersonalInfoResponse?> LoadPersonalInfoAsync(
