@@ -59,7 +59,23 @@ Apply `20260730000000_AddRefreshSessions` to environments that do not already ha
 
 ## Database assumptions
 
-The supplied meal tables, indexes, `pgcrypto`/`gen_random_uuid()`, and `set_updated_at()` trigger function already exist. Entity mappings preserve their names and constraints. Database changes are managed outside this repository.
+The supplied meal tables, indexes, `pgcrypto`/`gen_random_uuid()`, and `set_updated_at()` trigger function already exist. Entity mappings preserve their names and constraints.
+
+## PostgreSQL scripts
+
+PostgreSQL database scripts are stored under [`database/scripts`](database/scripts). The current script is:
+
+- [`database/scripts/pg_dump.sql`](database/scripts/pg_dump.sql): schema-only snapshot containing the public tables, primary and foreign keys, indexes, checks, Identity tables, and sequences used by the API. It does not contain seed or customer data.
+
+Restore the snapshot into a new, empty PostgreSQL database from the repository root:
+
+```powershell
+psql --set ON_ERROR_STOP=on --dbname "postgresql://postgres:<password>@localhost:5432/diet_time" --file "database/scripts/pg_dump.sql"
+```
+
+The dump is not idempotent: running it against a database that already contains these objects will fail with duplicate-object errors. It also contains `OWNER TO postgres` statements, so restore it as the `postgres` role or adjust the ownership statements for the target environment. Ensure the target database provides `gen_random_uuid()` before restoring.
+
+Treat the dump as a database snapshot rather than an EF Core migration. Review and back up an existing environment before applying database changes; do not run the full dump over production data.
 
 ## Public and customer endpoints
 
