@@ -18,8 +18,6 @@ public sealed class MealConfigurationModelTests
     [Theory]
     [InlineData(typeof(MealPackageOption), "meal_package_options")]
     [InlineData(typeof(MealPackageOptionType), "meal_package_option_types")]
-    [InlineData(typeof(MealPlanWeekday), "meal_plan_weekdays")]
-    [InlineData(typeof(MealPlanDayItem), "meal_plan_day_items")]
     public void Configuration_entities_map_to_existing_tables(Type entityType, string table)
     {
         using var db = CreateContext();
@@ -27,13 +25,15 @@ public sealed class MealConfigurationModelTests
     }
 
     [Fact]
-    public void Day_items_reference_the_existing_meal_item_master()
+    public void Weekly_menu_reuses_existing_template_tables_and_meal_item_master()
     {
         using var db = CreateContext();
-        var entity = db.Model.FindEntityType(typeof(MealPlanDayItem))!;
-        var foreignKey = entity.GetForeignKeys().Single(x => x.Properties.Single().Name == nameof(MealPlanDayItem.MenuItemId));
+        var entity = db.Model.FindEntityType(typeof(MealPlanSlotOption))!;
+        var foreignKey = entity.GetForeignKeys().Single(x => x.Properties.Single().Name == nameof(MealPlanSlotOption.MealItemId));
         Assert.Equal(typeof(MealItem), foreignKey.PrincipalEntityType.ClrType);
         Assert.Equal("meal_items", foreignKey.PrincipalEntityType.GetTableName());
+        Assert.DoesNotContain(db.Model.GetEntityTypes(), x => x.GetTableName() == "meal_plan_weekdays");
+        Assert.DoesNotContain(db.Model.GetEntityTypes(), x => x.GetTableName() == "meal_plan_day_items");
     }
 
     [Fact]

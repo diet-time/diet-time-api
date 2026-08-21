@@ -41,8 +41,6 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
     public DbSet<MealPlanPricePackage> MealPlanPricePackages => Set<MealPlanPricePackage>();
     public DbSet<MealPackageOption> MealPackageOptions => Set<MealPackageOption>();
     public DbSet<MealPackageOptionType> MealPackageOptionTypes => Set<MealPackageOptionType>();
-    public DbSet<MealPlanWeekday> MealPlanWeekdays => Set<MealPlanWeekday>();
-    public DbSet<MealPlanDayItem> MealPlanDayItems => Set<MealPlanDayItem>();
     public DbSet<CustomerProfile> CustomerProfiles => Set<CustomerProfile>();
     public DbSet<CustomerNutritionTarget> CustomerNutritionTargets => Set<CustomerNutritionTarget>();
     public DbSet<CustomerProfilePreference> CustomerProfilePreferences => Set<CustomerProfilePreference>();
@@ -160,24 +158,6 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
             e.HasOne(x => x.MealPackageOption).WithMany(x => x.MealTypes).HasForeignKey(x => x.PackageOptionId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(x => x.MealType).WithMany(x => x.PackageOptions).HasForeignKey(x => x.MealTypeId).OnDelete(DeleteBehavior.Restrict);
             e.ToTable(t => t.HasCheckConstraint("ck_meal_package_option_types_max_quantity", "max_quantity > 0"));
-        });
-        b.Entity<MealPlanWeekday>(e =>
-        {
-            e.ToTable("meal_plan_weekdays");
-            e.HasIndex(x => new { x.MealPlanId, x.DayOfWeek }).IsUnique().HasDatabaseName("ux_meal_plan_weekdays_plan_day");
-            e.HasOne(x => x.MealPlan).WithMany(x => x.Weekdays).HasForeignKey(x => x.MealPlanId).OnDelete(DeleteBehavior.Restrict);
-            e.ToTable(t => t.HasCheckConstraint("ck_meal_plan_weekdays_day_of_week", "day_of_week BETWEEN 0 AND 6"));
-        });
-        b.Entity<MealPlanDayItem>(e =>
-        {
-            e.ToTable("meal_plan_day_items");
-            e.HasIndex(x => new { x.MealPlanWeekdayId, x.MealTypeId, x.MenuItemId }).IsUnique()
-                .HasDatabaseName("ux_meal_plan_day_items_day_type_item");
-            e.HasIndex(x => new { x.MealPlanWeekdayId, x.MealTypeId }).IsUnique()
-                .HasFilter("is_default = true AND is_active = true").HasDatabaseName("ux_meal_plan_day_items_default");
-            e.HasOne(x => x.MealPlanWeekday).WithMany(x => x.DayItems).HasForeignKey(x => x.MealPlanWeekdayId).OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(x => x.MealType).WithMany(x => x.PlanDayItems).HasForeignKey(x => x.MealTypeId).OnDelete(DeleteBehavior.Restrict);
-            e.HasOne(x => x.MenuItem).WithMany().HasForeignKey(x => x.MenuItemId).OnDelete(DeleteBehavior.Restrict);
         });
         Translation<MealPlanPriceTranslation>(b, "meal_plan_price_translations", 10);
         b.Entity<MealPlanPriceTranslation>(e =>
