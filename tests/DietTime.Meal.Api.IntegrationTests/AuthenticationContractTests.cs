@@ -15,6 +15,12 @@ namespace DietTime.Meal.Api.IntegrationTests;
 public sealed class AuthenticationContractTests
 {
     [Fact]
+    public void Jwt_access_token_lifetime_defaults_to_configured_admin_session_length()
+    {
+        Assert.Equal(3569, new JwtOptions().AccessTokenMinutes);
+    }
+
+    [Fact]
     public void Customer_purchase_contract_exposes_routes_without_recommendation_fields()
     {
         var route = Assert.Single(typeof(CustomerMealPlansController)
