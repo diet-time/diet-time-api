@@ -84,10 +84,10 @@ public sealed class Allergen : Entity { public string Code { get; set; } = ""; p
 public sealed class AllergenTranslation : Translation { public Guid AllergenId { get; set; } public Allergen Allergen { get; set; } = null!; public string Name { get; set; } = ""; public string? Description { get; set; } }
 public sealed class MealItemAllergen { public Guid MealItemId { get; set; } public MealItem MealItem { get; set; } = null!; public Guid AllergenId { get; set; } public Allergen Allergen { get; set; } = null!; public string AllergenLevel { get; set; } = "CONTAINS"; public DateTimeOffset CreatedAt { get; set; } }
 public sealed class MealPrice : Entity { public Guid MealItemId { get; set; } public MealItem MealItem { get; set; } = null!; public Guid? BranchId { get; set; } public string PriceType { get; set; } = "INDIVIDUAL"; public string CurrencyCode { get; set; } = "QAR"; public decimal Amount { get; set; } public DateTimeOffset EffectiveFrom { get; set; } public DateTimeOffset? EffectiveUntil { get; set; } public bool IsActive { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } }
-public sealed class MealType : Entity { public string Code { get; set; } = ""; public int DisplayOrder { get; set; } public bool IsActive { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } public ICollection<MealTypeTranslation> Translations { get; set; } = []; }
+public sealed class MealType : Entity { public string Code { get; set; } = ""; public int DisplayOrder { get; set; } public bool IsActive { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } public ICollection<MealTypeTranslation> Translations { get; set; } = []; public ICollection<MealPackageOptionType> PackageOptions { get; set; } = []; public ICollection<MealPlanDayItem> PlanDayItems { get; set; } = []; }
 public sealed class MealTypeTranslation : Translation { public Guid MealTypeId { get; set; } public MealType MealType { get; set; } = null!; public string Name { get; set; } = ""; public string? Description { get; set; } }
 
-public sealed class MealPlanTemplate : Entity { public Guid VersionGroupId { get; set; } public int VersionNumber { get; set; } = 1; public bool IsLatest { get; set; } = true; public Guid? SupersedesId { get; set; } public string Code { get; set; } = ""; public string PlanType { get; set; } = "STANDARD"; public int DurationDays { get; set; } public Guid? CustomerId { get; set; } public bool IsCustomizable { get; set; } public bool IsPublished { get; set; } public bool IsActive { get; set; } public DateOnly? ValidFrom { get; set; } public DateOnly? ValidUntil { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } public long RowVersion { get; set; } public ICollection<MealPlanTemplateTranslation> Translations { get; set; } = []; public ICollection<MealPlanTemplateDay> Days { get; set; } = []; public ICollection<MealPlanPrice> Prices { get; set; } = []; }
+public sealed class MealPlanTemplate : Entity { public Guid VersionGroupId { get; set; } public int VersionNumber { get; set; } = 1; public bool IsLatest { get; set; } = true; public Guid? SupersedesId { get; set; } public string Code { get; set; } = ""; public string PlanType { get; set; } = "STANDARD"; public int DurationDays { get; set; } public Guid? CustomerId { get; set; } public bool IsCustomizable { get; set; } public bool IsPublished { get; set; } public bool IsActive { get; set; } public DateOnly? ValidFrom { get; set; } public DateOnly? ValidUntil { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } public long RowVersion { get; set; } public ICollection<MealPlanTemplateTranslation> Translations { get; set; } = []; public ICollection<MealPlanTemplateDay> Days { get; set; } = []; public ICollection<MealPlanWeekday> Weekdays { get; set; } = []; public ICollection<MealPlanPrice> Prices { get; set; } = []; }
 public sealed class MealPlanTemplateTranslation : Translation { public Guid MealPlanTemplateId { get; set; } public MealPlanTemplate Plan { get; set; } = null!; public string Name { get; set; } = ""; public string? ShortDescription { get; set; } public string? FullDescription { get; set; } }
 public sealed class MealPlanTemplateDay : Entity { public Guid MealPlanTemplateId { get; set; } public MealPlanTemplate Plan { get; set; } = null!; public MenuWeekday MenuWeekday { get; set; } public int DisplayOrder { get; set; } public bool IsActive { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } public ICollection<MealPlanTemplateSlot> Slots { get; set; } = []; }
 public sealed class MealPlanTemplateSlot : Entity { public Guid MealPlanTemplateDayId { get; set; } public MealPlanTemplateDay Day { get; set; } = null!; public Guid MealTypeId { get; set; } public MealType MealType { get; set; } = null!; public int DisplayOrder { get; set; } public int MinimumSelection { get; set; } public int MaximumSelection { get; set; } public bool IsRequired { get; set; } public TimeOnly? SelectionCutoffTime { get; set; } public bool AllowsPaidUpgrade { get; set; } public bool IsActive { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } public long RowVersion { get; set; } public ICollection<MealPlanTemplateSlotTranslation> Translations { get; set; } = []; public ICollection<MealPlanSlotOption> Options { get; set; } = []; }
@@ -107,6 +107,10 @@ public sealed class MealPlanPrice : Entity
 {
     public Guid MealPlanTemplateId { get; set; }
     public MealPlanTemplate Plan { get; set; } = null!;
+    public Guid? DurationId { get; set; }
+    public MealPlanDuration? Duration { get; set; }
+    public Guid? PackageOptionId { get; set; }
+    public MealPackageOption? PackageOption { get; set; }
     public int DurationDays { get; set; }
     public int MealsPerDay { get; set; }
     public int SnacksPerDay { get; set; }
@@ -158,6 +162,76 @@ public sealed class CustomerProfile : Entity
     public ICollection<CustomerProfilePreference> Preferences { get; set; } = [];
     public ICollection<CustomerProfileAllergen> Allergens { get; set; } = [];
     public ICollection<CustomerAddress> Addresses { get; set; } = [];
+}
+
+public sealed class MealPlanDuration : Entity
+{
+    public string Name { get; set; } = "";
+    public int DurationDays { get; set; }
+    public int DisplayOrder { get; set; }
+    public bool IsActive { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+public sealed class MealPackageOption : Entity
+{
+    public string Name { get; set; } = "";
+    public int MealCount { get; set; }
+    public int SnackCount { get; set; }
+    public int DisplayOrder { get; set; }
+    public bool IsActive { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public Guid? UpdatedBy { get; set; }
+    public ICollection<MealPackageOptionType> MealTypes { get; set; } = [];
+    public ICollection<MealPlanPrice> Prices { get; set; } = [];
+}
+
+public sealed class MealPackageOptionType : Entity
+{
+    public Guid PackageOptionId { get; set; }
+    public MealPackageOption MealPackageOption { get; set; } = null!;
+    public Guid MealTypeId { get; set; }
+    public MealType MealType { get; set; } = null!;
+    public bool IsRequired { get; set; }
+    public int MaxQuantity { get; set; }
+    public int DisplayOrder { get; set; }
+    public bool IsActive { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+public sealed class MealPlanWeekday : Entity
+{
+    public Guid MealPlanId { get; set; }
+    public MealPlanTemplate MealPlan { get; set; } = null!;
+    public int DayOfWeek { get; set; }
+    public int DisplayOrder { get; set; }
+    public bool IsActive { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public Guid? UpdatedBy { get; set; }
+    public ICollection<MealPlanDayItem> DayItems { get; set; } = [];
+}
+
+public sealed class MealPlanDayItem : Entity
+{
+    public Guid MealPlanWeekdayId { get; set; }
+    public MealPlanWeekday MealPlanWeekday { get; set; } = null!;
+    public Guid MealTypeId { get; set; }
+    public MealType MealType { get; set; } = null!;
+    public Guid MenuItemId { get; set; }
+    public MealItem MenuItem { get; set; } = null!;
+    public bool IsDefault { get; set; }
+    public int DisplayOrder { get; set; }
+    public bool IsActive { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public Guid? UpdatedBy { get; set; }
 }
 
 public static class CustomerGenderCodes

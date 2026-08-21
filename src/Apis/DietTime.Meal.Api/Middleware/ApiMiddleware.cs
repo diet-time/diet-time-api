@@ -46,6 +46,17 @@ public sealed class ExceptionMiddleware(RequestDelegate next, ILogger<ExceptionM
         try { await next(context); }
         catch (Exception ex)
         {
+            if (ex is MealConfigurationException configuration)
+            {
+                logger.LogWarning(ex, "Meal configuration request rejected");
+                context.Response.StatusCode = configuration.StatusCode;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsJsonAsync(new ApiResponse<object>
+                {
+                    Errors = [new(configuration.Code, configuration.Message)]
+                });
+                return;
+            }
             if (ex is TemplateDayException templateDay)
             {
                 logger.LogWarning(ex, "Template weekday request rejected");
