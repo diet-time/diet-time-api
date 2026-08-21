@@ -25,10 +25,3 @@ public interface IMealPlanPricingService
     Task<Guid> CreateAsync(UpsertMealPlanPricingRequest request, Guid? userId, CancellationToken cancellationToken);
     Task UpdateAsync(Guid id, UpsertMealPlanPricingRequest request, Guid? userId, CancellationToken cancellationToken);
 }
-
-public interface IWeeklyMenuService
-{
-    Task<WeeklyMenuResponse> GetAsync(Guid mealPlanId, CancellationToken cancellationToken);
-    Task<WeeklyMenuDayResponse> GetDayAsync(Guid mealPlanId, int dayOfWeek, CancellationToken cancellationToken);
-    Task UpdateDayAsync(Guid mealPlanId, int dayOfWeek, UpdateWeeklyMenuDayRequest request, Guid? userId, CancellationToken cancellationToken);
-}

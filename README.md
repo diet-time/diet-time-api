@@ -79,7 +79,7 @@ Treat the dump as a database snapshot rather than an EF Core migration. Review a
 
 Meal-plan pricing uses `meal_plan_price_packages.code` as the duration identifier. The corresponding code is stored in `meal_plan_prices.package_code`; there is no separate `durations` table in this schema.
 
-The recurring weekly-menu API reuses `meal_plan_template_days`, `meal_plan_template_slots`, and `meal_plan_slot_options`. The schema does not contain separate `meal_plan_weekdays` or `meal_plan_day_items` tables.
+Recurring menu configuration uses the existing meal-plan template editor and the `meal_plan_template_days`, `meal_plan_template_slots`, and `meal_plan_slot_options` tables. The schema does not use separate `meal_plan_weekdays` or `meal_plan_day_items` tables.
 
 ## Public and customer endpoints
 

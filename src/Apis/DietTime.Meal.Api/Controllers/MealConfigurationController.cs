@@ -12,7 +12,6 @@ namespace DietTime.Meal.Api.Controllers;
 public sealed class MealConfigurationController(
     IMealPackageService packages,
     IMealPlanPricingService pricing,
-    IWeeklyMenuService weeklyMenus,
     DietTimeDbContext db) : ControllerBase
 {
     private Guid? UserId => Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : null;
@@ -76,19 +75,6 @@ public sealed class MealConfigurationController(
     public async Task<IActionResult> UpdatePrice(Guid id, UpsertMealPlanPricingRequest request, CancellationToken ct)
     {
         await pricing.UpdateAsync(id, request, UserId, ct);
-        return NoContent();
-    }
-
-    [HttpGet("meal-plans/{mealPlanId:guid}/weekly-menu")]
-    public Task<WeeklyMenuResponse> GetWeeklyMenu(Guid mealPlanId, CancellationToken ct) => weeklyMenus.GetAsync(mealPlanId, ct);
-
-    [HttpGet("meal-plans/{mealPlanId:guid}/weekly-menu/{dayOfWeek:int}")]
-    public Task<WeeklyMenuDayResponse> GetWeeklyMenuDay(Guid mealPlanId, int dayOfWeek, CancellationToken ct) => weeklyMenus.GetDayAsync(mealPlanId, dayOfWeek, ct);
-
-    [HttpPut("meal-plans/{mealPlanId:guid}/weekly-menu/{dayOfWeek:int}")]
-    public async Task<IActionResult> UpdateWeeklyMenuDay(Guid mealPlanId, int dayOfWeek, UpdateWeeklyMenuDayRequest request, CancellationToken ct)
-    {
-        await weeklyMenus.UpdateDayAsync(mealPlanId, dayOfWeek, request, UserId, ct);
         return NoContent();
     }
 

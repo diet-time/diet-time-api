@@ -145,7 +145,6 @@ builder.Services.AddScoped<IMealSelectionService, MealSelectionService>();
 builder.Services.AddScoped<IAdminMealService, AdminMealService>(); 
 builder.Services.AddScoped<IMealPackageService, MealPackageService>();
 builder.Services.AddScoped<IMealPlanPricingService, MealPlanPricingService>();
-builder.Services.AddScoped<IWeeklyMenuService, WeeklyMenuService>();
 builder.Services.AddScoped<ITemplateMenuReader>(services => (AdminMealService)services.GetRequiredService<IAdminMealService>()); 
 builder.Services.AddScoped<IOperationalCalendarService, DefaultOperationalCalendarService>(); 
 builder.Services.AddScoped<IDeliverySchedulingService, DeliverySchedulingService>(); 

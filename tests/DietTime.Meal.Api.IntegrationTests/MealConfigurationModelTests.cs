@@ -25,7 +25,7 @@ public sealed class MealConfigurationModelTests
     }
 
     [Fact]
-    public void Weekly_menu_reuses_existing_template_tables_and_meal_item_master()
+    public void Existing_menu_configuration_uses_template_tables_and_meal_item_master()
     {
         using var db = CreateContext();
         var entity = db.Model.FindEntityType(typeof(MealPlanSlotOption))!;

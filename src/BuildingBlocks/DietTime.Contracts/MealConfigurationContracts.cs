@@ -24,11 +24,4 @@ public sealed record UpsertMealPlanPricingRequest(
     Guid MealPlanId, string DurationId, Guid PackageOptionId, decimal Price,
     string CurrencyCode = "QAR", bool IsActive = true);
 
-public sealed record WeeklyMenuItemRequest(Guid MenuItemId, bool IsDefault, int DisplayOrder);
-public sealed record WeeklyMenuMealTypeRequest(Guid MealTypeId, IReadOnlyList<WeeklyMenuItemRequest> Items);
-public sealed record UpdateWeeklyMenuDayRequest(bool IsActive, IReadOnlyList<WeeklyMenuMealTypeRequest> MealTypes);
-public sealed record WeeklyMenuItemResponse(Guid MenuItemId, string Name, bool IsDefault, int DisplayOrder);
-public sealed record WeeklyMenuMealTypeResponse(Guid MealTypeId, string Code, IReadOnlyList<WeeklyMenuItemResponse> Items);
-public sealed record WeeklyMenuDayResponse(int DayOfWeek, string DayName, bool IsActive, IReadOnlyList<WeeklyMenuMealTypeResponse> MealTypes);
-public sealed record WeeklyMenuResponse(Guid MealPlanId, string MealPlanName, IReadOnlyList<WeeklyMenuDayResponse> Days);
 public sealed record AdminMealTypeLookupResponse(Guid Id, string Code, int DisplayOrder, bool IsActive);
