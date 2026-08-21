@@ -107,8 +107,7 @@ public sealed class MealPlanPrice : Entity
 {
     public Guid MealPlanTemplateId { get; set; }
     public MealPlanTemplate Plan { get; set; } = null!;
-    public Guid? DurationId { get; set; }
-    public MealPlanDuration? Duration { get; set; }
+    public string? PackageCode { get; set; }
     public Guid? PackageOptionId { get; set; }
     public MealPackageOption? PackageOption { get; set; }
     public int DurationDays { get; set; }
@@ -162,16 +161,6 @@ public sealed class CustomerProfile : Entity
     public ICollection<CustomerProfilePreference> Preferences { get; set; } = [];
     public ICollection<CustomerProfileAllergen> Allergens { get; set; } = [];
     public ICollection<CustomerAddress> Addresses { get; set; } = [];
-}
-
-public sealed class MealPlanDuration : Entity
-{
-    public string Name { get; set; } = "";
-    public int DurationDays { get; set; }
-    public int DisplayOrder { get; set; }
-    public bool IsActive { get; set; }
-    public DateTimeOffset CreatedAt { get; set; }
-    public DateTimeOffset UpdatedAt { get; set; }
 }
 
 public sealed class MealPackageOption : Entity

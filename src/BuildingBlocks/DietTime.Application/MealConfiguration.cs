@@ -21,7 +21,7 @@ public interface IMealPackageService
 
 public interface IMealPlanPricingService
 {
-    Task<IReadOnlyList<MealPlanPricingResponse>> GetAsync(Guid? mealPlanId, Guid? durationId, Guid? packageOptionId, bool activeOnly, CancellationToken cancellationToken);
+    Task<IReadOnlyList<MealPlanPricingResponse>> GetAsync(Guid? mealPlanId, string? durationId, Guid? packageOptionId, bool activeOnly, CancellationToken cancellationToken);
     Task<Guid> CreateAsync(UpsertMealPlanPricingRequest request, Guid? userId, CancellationToken cancellationToken);
     Task UpdateAsync(Guid id, UpsertMealPlanPricingRequest request, Guid? userId, CancellationToken cancellationToken);
 }

@@ -39,7 +39,6 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
     public DbSet<MealPlanPrice> MealPlanPrices => Set<MealPlanPrice>();
     public DbSet<MealPlanPriceTranslation> MealPlanPriceTranslations => Set<MealPlanPriceTranslation>();
     public DbSet<MealPlanPricePackage> MealPlanPricePackages => Set<MealPlanPricePackage>();
-    public DbSet<MealPlanDuration> MealPlanDurations => Set<MealPlanDuration>();
     public DbSet<MealPackageOption> MealPackageOptions => Set<MealPackageOption>();
     public DbSet<MealPackageOptionType> MealPackageOptionTypes => Set<MealPackageOptionType>();
     public DbSet<MealPlanWeekday> MealPlanWeekdays => Set<MealPlanWeekday>();
@@ -134,19 +133,13 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
             e.ToTable("meal_plan_prices");
             e.Property(x => x.Amount).HasPrecision(12, 2);
             e.Property(x => x.CurrencyCode).HasColumnType("char(3)");
+            e.Property(x => x.PackageCode).HasColumnName("package_code").HasMaxLength(30);
             e.HasIndex(x => new { x.MealPlanTemplateId, x.DurationDays, x.MealsPerDay, x.SnacksPerDay, x.CurrencyCode }).HasDatabaseName("ix_meal_plan_prices_package");
             e.HasOne(x => x.Plan).WithMany(x => x.Prices).HasForeignKey(x => x.MealPlanTemplateId).OnDelete(DeleteBehavior.Restrict);
-            e.HasOne(x => x.Duration).WithMany().HasForeignKey(x => x.DurationId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne(x => x.PackageOption).WithMany(x => x.Prices).HasForeignKey(x => x.PackageOptionId).OnDelete(DeleteBehavior.Restrict);
-            e.HasIndex(x => new { x.MealPlanTemplateId, x.DurationId, x.PackageOptionId })
-                .IsUnique().HasFilter("is_active = true AND duration_id IS NOT NULL AND package_option_id IS NOT NULL")
+            e.HasIndex(x => new { x.MealPlanTemplateId, x.PackageCode, x.PackageOptionId })
+                .IsUnique().HasFilter("is_active = true AND package_code IS NOT NULL AND package_option_id IS NOT NULL")
                 .HasDatabaseName("ux_meal_plan_prices_active_configuration");
-        });
-        b.Entity<MealPlanDuration>(e =>
-        {
-            e.ToTable("durations");
-            e.Property(x => x.Name).HasMaxLength(100).IsRequired();
-            e.HasIndex(x => x.Name).IsUnique();
         });
         b.Entity<MealPackageOption>(e =>
         {

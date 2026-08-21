@@ -77,6 +77,8 @@ The dump is not idempotent: running it against a database that already contains 
 
 Treat the dump as a database snapshot rather than an EF Core migration. Review and back up an existing environment before applying database changes; do not run the full dump over production data.
 
+Meal-plan pricing uses `meal_plan_price_packages.code` as the duration identifier. The corresponding code is stored in `meal_plan_prices.package_code`; there is no separate `durations` table in this schema.
+
 ## Public and customer endpoints
 
 ```text

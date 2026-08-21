@@ -61,7 +61,7 @@ public sealed class MealConfigurationController(
     }
 
     [HttpGet("meal-plan-prices")]
-    public Task<IReadOnlyList<MealPlanPricingResponse>> GetPrices([FromQuery] Guid? mealPlanId, [FromQuery] Guid? durationId,
+    public Task<IReadOnlyList<MealPlanPricingResponse>> GetPrices([FromQuery] Guid? mealPlanId, [FromQuery] string? durationId,
         [FromQuery] Guid? packageOptionId, [FromQuery] bool activeOnly = false, CancellationToken ct = default) =>
         pricing.GetAsync(mealPlanId, durationId, packageOptionId, activeOnly, ct);
 

@@ -37,13 +37,15 @@ public sealed class MealConfigurationModelTests
     }
 
     [Fact]
-    public void Pricing_has_package_and_duration_foreign_keys_without_removing_legacy_fields()
+    public void Pricing_uses_existing_package_code_for_duration_without_removing_legacy_fields()
     {
         using var db = CreateContext();
         var entity = db.Model.FindEntityType(typeof(MealPlanPrice))!;
         Assert.NotNull(entity.FindProperty(nameof(MealPlanPrice.PackageOptionId)));
-        Assert.NotNull(entity.FindProperty(nameof(MealPlanPrice.DurationId)));
+        Assert.Equal("package_code", entity.FindProperty(nameof(MealPlanPrice.PackageCode))!.GetColumnName());
         Assert.NotNull(entity.FindProperty(nameof(MealPlanPrice.DurationDays)));
         Assert.NotNull(entity.FindProperty(nameof(MealPlanPrice.MealPlanTemplateId)));
+        Assert.DoesNotContain(db.Model.GetEntityTypes(), x => x.GetTableName() == "durations");
+        Assert.DoesNotContain(entity.GetProperties(), x => x.GetColumnName() == "duration_id");
     }
 }

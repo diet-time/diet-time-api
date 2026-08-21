@@ -16,12 +16,12 @@ public sealed record PackageMealTypeRequest(Guid MealTypeId, bool IsRequired, in
 public sealed record UpdatePackageMealTypesRequest(IReadOnlyList<PackageMealTypeRequest> MealTypes);
 
 public sealed record MealPlanPricingResponse(
-    Guid Id, Guid MealPlanId, string MealPlanName, Guid DurationId, string DurationName,
+    Guid Id, Guid MealPlanId, string MealPlanName, string DurationId, string DurationName,
     Guid PackageOptionId, string PackageName, int MealCount, int SnackCount,
     decimal Price, string CurrencyCode, bool IsActive);
 
 public sealed record UpsertMealPlanPricingRequest(
-    Guid MealPlanId, Guid DurationId, Guid PackageOptionId, decimal Price,
+    Guid MealPlanId, string DurationId, Guid PackageOptionId, decimal Price,
     string CurrencyCode = "QAR", bool IsActive = true);
 
 public sealed record WeeklyMenuItemRequest(Guid MenuItemId, bool IsDefault, int DisplayOrder);
