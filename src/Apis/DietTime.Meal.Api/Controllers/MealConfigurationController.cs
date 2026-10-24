@@ -49,16 +49,6 @@ public sealed class MealConfigurationController(
         return NoContent();
     }
 
-    [HttpGet("package-options/{packageOptionId:guid}/meal-types")]
-    public Task<IReadOnlyList<PackageMealTypeResponse>> GetPackageMealTypes(Guid packageOptionId, CancellationToken ct) => packages.GetMealTypesAsync(packageOptionId, ct);
-
-    [HttpPut("package-options/{packageOptionId:guid}/meal-types")]
-    public async Task<IActionResult> UpdatePackageMealTypes(Guid packageOptionId, UpdatePackageMealTypesRequest request, CancellationToken ct)
-    {
-        await packages.UpdateMealTypesAsync(packageOptionId, request, ct);
-        return NoContent();
-    }
-
     [HttpGet("meal-plan-prices")]
     public Task<IReadOnlyList<MealPlanPricingResponse>> GetPrices([FromQuery] Guid? mealPlanId, [FromQuery] string? durationId,
         [FromQuery] Guid? packageOptionId, [FromQuery] bool activeOnly = false, CancellationToken ct = default) =>

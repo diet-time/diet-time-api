@@ -84,7 +84,7 @@ public sealed class Allergen : Entity { public string Code { get; set; } = ""; p
 public sealed class AllergenTranslation : Translation { public Guid AllergenId { get; set; } public Allergen Allergen { get; set; } = null!; public string Name { get; set; } = ""; public string? Description { get; set; } }
 public sealed class MealItemAllergen { public Guid MealItemId { get; set; } public MealItem MealItem { get; set; } = null!; public Guid AllergenId { get; set; } public Allergen Allergen { get; set; } = null!; public string AllergenLevel { get; set; } = "CONTAINS"; public DateTimeOffset CreatedAt { get; set; } }
 public sealed class MealPrice : Entity { public Guid MealItemId { get; set; } public MealItem MealItem { get; set; } = null!; public Guid? BranchId { get; set; } public string PriceType { get; set; } = "INDIVIDUAL"; public string CurrencyCode { get; set; } = "QAR"; public decimal Amount { get; set; } public DateTimeOffset EffectiveFrom { get; set; } public DateTimeOffset? EffectiveUntil { get; set; } public bool IsActive { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } }
-public sealed class MealType : Entity { public string Code { get; set; } = ""; public int DisplayOrder { get; set; } public bool IsActive { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } public ICollection<MealTypeTranslation> Translations { get; set; } = []; public ICollection<MealPackageOptionType> PackageOptions { get; set; } = []; }
+public sealed class MealType : Entity { public string Code { get; set; } = ""; public int DisplayOrder { get; set; } public bool IsActive { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } public ICollection<MealTypeTranslation> Translations { get; set; } = []; }
 public sealed class MealTypeTranslation : Translation { public Guid MealTypeId { get; set; } public MealType MealType { get; set; } = null!; public string Name { get; set; } = ""; public string? Description { get; set; } }
 
 public sealed class MealPlanTemplate : Entity { public Guid VersionGroupId { get; set; } public int VersionNumber { get; set; } = 1; public int CycleWeeks { get; set; } = 1; public bool IsLatest { get; set; } = true; public Guid? SupersedesId { get; set; } public string Code { get; set; } = ""; public string PlanType { get; set; } = "STANDARD"; public int DurationDays { get; set; } public Guid? CustomerId { get; set; } public bool IsCustomizable { get; set; } public bool IsPublished { get; set; } public bool IsActive { get; set; } public DateOnly? ValidFrom { get; set; } public DateOnly? ValidUntil { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } public long RowVersion { get; set; } public ICollection<MealPlanTemplateTranslation> Translations { get; set; } = []; public ICollection<MealPlanTemplateDay> Days { get; set; } = []; public ICollection<MealPlanPrice> Prices { get; set; } = []; }
@@ -174,22 +174,7 @@ public sealed class MealPackageOption : Entity
     public DateTimeOffset UpdatedAt { get; set; }
     public Guid? CreatedBy { get; set; }
     public Guid? UpdatedBy { get; set; }
-    public ICollection<MealPackageOptionType> MealTypes { get; set; } = [];
     public ICollection<MealPlanPrice> Prices { get; set; } = [];
-}
-
-public sealed class MealPackageOptionType : Entity
-{
-    public Guid PackageOptionId { get; set; }
-    public MealPackageOption MealPackageOption { get; set; } = null!;
-    public Guid MealTypeId { get; set; }
-    public MealType MealType { get; set; } = null!;
-    public bool IsRequired { get; set; }
-    public int MaxQuantity { get; set; }
-    public int DisplayOrder { get; set; }
-    public bool IsActive { get; set; }
-    public DateTimeOffset CreatedAt { get; set; }
-    public DateTimeOffset UpdatedAt { get; set; }
 }
 
 public static class CustomerGenderCodes

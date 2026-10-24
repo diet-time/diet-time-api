@@ -15,13 +15,12 @@ public sealed class MealConfigurationModelTests
         return new(options);
     }
 
-    [Theory]
-    [InlineData(typeof(MealPackageOption), "meal_package_options")]
-    [InlineData(typeof(MealPackageOptionType), "meal_package_option_types")]
-    public void Configuration_entities_map_to_existing_tables(Type entityType, string table)
+    [Fact]
+    public void Package_options_map_to_the_existing_table_without_a_meal_type_join()
     {
         using var db = CreateContext();
-        Assert.Equal(table, db.Model.FindEntityType(entityType)!.GetTableName());
+        Assert.Equal("meal_package_options", db.Model.FindEntityType(typeof(MealPackageOption))!.GetTableName());
+        Assert.DoesNotContain(db.Model.GetEntityTypes(), entity => entity.GetTableName() == "meal_package_option_types");
     }
 
     [Fact]

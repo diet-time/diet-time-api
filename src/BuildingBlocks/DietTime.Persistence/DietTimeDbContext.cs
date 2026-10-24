@@ -40,7 +40,6 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
     public DbSet<MealPlanPriceTranslation> MealPlanPriceTranslations => Set<MealPlanPriceTranslation>();
     public DbSet<MealPlanPricePackage> MealPlanPricePackages => Set<MealPlanPricePackage>();
     public DbSet<MealPackageOption> MealPackageOptions => Set<MealPackageOption>();
-    public DbSet<MealPackageOptionType> MealPackageOptionTypes => Set<MealPackageOptionType>();
     public DbSet<CustomerProfile> CustomerProfiles => Set<CustomerProfile>();
     public DbSet<CustomerNutritionTarget> CustomerNutritionTargets => Set<CustomerNutritionTarget>();
     public DbSet<CustomerProfilePreference> CustomerProfilePreferences => Set<CustomerProfilePreference>();
@@ -149,15 +148,6 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
                 t.HasCheckConstraint("ck_meal_package_options_meal_count", "meal_count > 0");
                 t.HasCheckConstraint("ck_meal_package_options_snack_count", "snack_count >= 0");
             });
-        });
-        b.Entity<MealPackageOptionType>(e =>
-        {
-            e.ToTable("meal_package_option_types");
-            e.HasIndex(x => new { x.PackageOptionId, x.MealTypeId }).IsUnique()
-                .HasDatabaseName("ux_meal_package_option_types_package_meal_type");
-            e.HasOne(x => x.MealPackageOption).WithMany(x => x.MealTypes).HasForeignKey(x => x.PackageOptionId).OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(x => x.MealType).WithMany(x => x.PackageOptions).HasForeignKey(x => x.MealTypeId).OnDelete(DeleteBehavior.Restrict);
-            e.ToTable(t => t.HasCheckConstraint("ck_meal_package_option_types_max_quantity", "max_quantity > 0"));
         });
         Translation<MealPlanPriceTranslation>(b, "meal_plan_price_translations", 10);
         b.Entity<MealPlanPriceTranslation>(e =>
