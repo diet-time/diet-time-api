@@ -533,7 +533,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         if (!string.IsNullOrWhiteSpace(search))
         {
             var term = search.Trim();
-            query = query.Where(x => EF.Functions.ILike(x.Sku, $"%{term}%") || x.Translations.Any(t => EF.Functions.ILike(t.Name, $"%{term}%")));
+            query = query.Where(x => EF.Functions.ILike(x.Sku, $"%{term}%", "") || x.Translations.Any(t => EF.Functions.ILike(t.Name, $"%{term}%", "")));
         }
         var count = await query.CountAsync(ct);
         var rows = await query
@@ -581,7 +581,9 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
                     .Select(p => new MoneyResponse(p.Amount, p.CurrencyCode.Trim()))
                     .FirstOrDefault(),
                 x.UpdatedAt,
-                x.VersionNumber))
+                x.VersionNumber,
+                null,
+                null))
             .ToListAsync(ct);
         return new(rows, new(page, pageSize, count, (int)Math.Ceiling(count / (double)pageSize)));
     }
