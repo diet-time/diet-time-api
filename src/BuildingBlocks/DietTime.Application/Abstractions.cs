@@ -258,3 +258,4 @@ public interface IPhoneOtpVerifier
 public enum PhoneOtpVerificationStatus { Valid, Invalid, Disabled }
 public enum PhoneOtpAuthStatus { Success, InvalidOtp, Disabled, Conflict }
 public sealed record PhoneOtpAuthResult(PhoneOtpAuthStatus Status, AuthSessionResponse? Session = null);
+

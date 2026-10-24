@@ -1505,7 +1505,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             .Where(x => x.MealPlanTemplateId == templateId)
             .OrderBy(x => x.DisplayOrder)
             .ThenBy(x => x.MenuWeekday)
-            .Select(x => new MealPlanTemplateDayResponse(x.Id, templateId, x.MenuWeekday, x.DisplayOrder, x.IsActive, x.Slots.Count))
+            .Select(x => new MealPlanTemplateDayResponse(x.Id, templateId, x.WeekNumber, x.MenuWeekday, x.DisplayOrder, x.IsActive, x.Slots.Count))
             .ToListAsync(ct);
     }
 
@@ -1632,6 +1632,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
     private static MealPlanTemplateDayDetailResponse ToTemplateDayDetail(MealPlanTemplateDay day) => new(
         day.Id,
         day.MealPlanTemplateId,
+        day.WeekNumber,
         day.MenuWeekday,
         day.DisplayOrder,
         day.IsActive,
@@ -1706,3 +1707,5 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         foreach (var x in request.Prices ?? []) meal.Prices.Add(new() { PriceType = x.PriceType, CurrencyCode = x.CurrencyCode, Amount = x.Amount, EffectiveFrom = x.EffectiveFrom, EffectiveUntil = x.EffectiveUntil, IsActive = x.IsActive, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId });
     }
 }
+
+

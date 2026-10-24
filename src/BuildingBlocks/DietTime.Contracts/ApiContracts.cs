@@ -562,11 +562,15 @@ public sealed record UpsertPlanOptionRequest(Guid MealItemId, decimal Additional
 public sealed record UpsertPlanSlotRequest(Guid MealTypeId, int DisplayOrder, int MinimumSelection, int MaximumSelection, bool IsRequired, TimeOnly? SelectionCutoffTime, bool AllowsPaidUpgrade, IReadOnlyList<UpsertPlanOptionRequest> Options);
 public sealed record UpsertPlanDayRequest(MenuWeekday? MenuWeekday, int DisplayOrder, bool IsActive, IReadOnlyList<UpsertPlanSlotRequest> Slots);
 public sealed record CreatePlanRequest(string Code, string PlanType, int DurationDays, bool IsCustomizable, DateOnly? ValidFrom, DateOnly? ValidUntil, IReadOnlyList<AdminTranslationRequest> Translations, IReadOnlyList<UpsertPlanDayRequest>? Days = null, bool Publish = false);
-public sealed record UpsertMealPlanTemplateDayRequest(MenuWeekday? MenuWeekday, int DisplayOrder, bool IsActive = true);
-public sealed record MealPlanTemplateDayResponse(Guid Id, Guid TemplateId, MenuWeekday MenuWeekday, int DisplayOrder, bool IsActive, int SlotCount);
+public sealed record UpsertMealPlanTemplateDayRequest(MenuWeekday? MenuWeekday, int DisplayOrder, bool IsActive = true, int WeekNumber = 1);
+public sealed record MealPlanTemplateDayResponse(Guid Id, Guid TemplateId, int WeekNumber, MenuWeekday MenuWeekday, int DisplayOrder, bool IsActive, int SlotCount);
 public sealed record TemplateMenuOptionResponse(Guid Id, Guid MealItemId, string MealName, decimal AdditionalPrice, bool IsDefault, bool IsAvailable, int DisplayOrder);
 public sealed record TemplateMenuSlotResponse(Guid Id, Guid MealTypeId, string MealTypeCode, string MealTypeName, int DisplayOrder, int MinimumSelection, int MaximumSelection, bool IsRequired, TimeOnly? SelectionCutoffTime, bool AllowsPaidUpgrade, bool IsActive, IReadOnlyList<TemplateMenuOptionResponse> Options);
-public sealed record MealPlanTemplateDayDetailResponse(Guid Id, Guid TemplateId, MenuWeekday MenuWeekday, int DisplayOrder, bool IsActive, int SlotCount, IReadOnlyList<TemplateMenuSlotResponse> Slots);
+public sealed record MealPlanTemplateDayDetailResponse(Guid Id, Guid TemplateId, int WeekNumber, MenuWeekday MenuWeekday, int DisplayOrder, bool IsActive, int SlotCount, IReadOnlyList<TemplateMenuSlotResponse> Slots);
+public sealed record CopyMenuWeekRequest(int SourceWeekNumber, int TargetWeekNumber, bool ReplaceTarget = false);
+public sealed record MenuWeekValidationError(int WeekNumber, MenuWeekday? Weekday, Guid? DayId, Guid? SlotId, string Code, string Message);
+public sealed record MenuWeekValidationResponse(int WeekNumber, bool IsComplete, IReadOnlyList<MenuWeekValidationError> Errors);
+public sealed record MenuValidationResponse(Guid TemplateId, Guid VersionGroupId, int VersionNumber, bool IsLatest, bool IsPublished, IReadOnlyList<MenuWeekValidationResponse> Weeks);
 public sealed record TemplateDayErrorResponse(string Code, string Message);
 public sealed record CreatePlanSlotRequest(Guid MealTypeId, int DisplayOrder, int MinimumSelection, int MaximumSelection, bool IsRequired, TimeOnly? SelectionCutoffTime, bool AllowsPaidUpgrade);
 public sealed record CreateSlotOptionRequest(Guid MealItemId, decimal AdditionalPrice, bool IsDefault, bool IsAvailable, int DisplayOrder);
