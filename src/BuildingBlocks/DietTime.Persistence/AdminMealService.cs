@@ -496,6 +496,30 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             translation.UpdatedAt = now;
         }
 
+        if (request.NameAr is not null)
+        {
+            var arabicTranslation = mealType.Translations.SingleOrDefault(x => x.LanguageCode == "ar");
+            if (string.IsNullOrWhiteSpace(request.NameAr))
+            {
+                if (arabicTranslation is not null) mealType.Translations.Remove(arabicTranslation);
+            }
+            else if (arabicTranslation is null)
+            {
+                mealType.Translations.Add(new MealTypeTranslation
+                {
+                    LanguageCode = "ar",
+                    Name = request.NameAr.Trim(),
+                    CreatedAt = now,
+                    UpdatedAt = now
+                });
+            }
+            else
+            {
+                arabicTranslation.Name = request.NameAr.Trim();
+                arabicTranslation.UpdatedAt = now;
+            }
+        }
+
         await db.SaveChangesAsync(ct);
         cache.Remove("meal-types:en");
         cache.Remove("meal-types:ar");

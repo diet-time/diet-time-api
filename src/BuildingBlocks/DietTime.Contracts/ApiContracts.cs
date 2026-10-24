@@ -430,7 +430,7 @@ public sealed record UpsertMealCategoryRequest(
     string? DescriptionAr,
     int DisplayOrder,
     bool IsActive = true);
-public sealed record UpsertMealTypeRequest(string Code, string NameEn, int DisplayOrder, bool IsActive = true);
+public sealed record UpsertMealTypeRequest(string Code, string NameEn, int DisplayOrder, bool IsActive = true, string? NameAr = null);
 public sealed record AdminMealTypeResponse(
     Guid Id,
     string Code,

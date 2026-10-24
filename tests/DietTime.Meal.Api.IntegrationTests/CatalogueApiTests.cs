@@ -45,6 +45,21 @@ public sealed class CatalogueApiTests : IAsyncLifetime
     [Fact] public async Task Inactive_meal_is_excluded() { if (!enabled) return; using var scope = factory!.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>(); var meal = await db.MealItems.FindAsync(mealId); meal!.Status = "INACTIVE"; await db.SaveChangesAsync(); Assert.Equal(System.Net.HttpStatusCode.NotFound, (await client!.GetAsync($"/api/v1/meals/{mealId}")).StatusCode); }
     [Fact] public async Task Unpublished_plan_is_excluded() { if (!enabled) return; using var scope = factory!.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>(); var plan = await db.MealPlanTemplates.FindAsync(planId); plan!.IsPublished = false; await db.SaveChangesAsync(); Assert.Equal(System.Net.HttpStatusCode.NotFound, (await client!.GetAsync($"/api/v1/meal-plans/{planId}")).StatusCode); }
     [Fact] public async Task Template_days_are_ordered_and_use_uppercase_weekdays() { if (!enabled) return; var body = await client!.GetStringAsync($"/api/meal-plan-templates/{planId}/days"); Assert.True(body.IndexOf("WEDNESDAY", StringComparison.Ordinal) < body.IndexOf("THURSDAY", StringComparison.Ordinal)); Assert.DoesNotContain("dayNumber", body); }
+    [Fact]
+    public async Task Updating_meal_type_persists_arabic_translation()
+    {
+        if (!enabled) return;
+        using var scope = factory!.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
+        var mealType = await db.MealTypes.SingleAsync(type => type.Code == "BREAKFAST");
+        var response = await client!.PutAsJsonAsync($"/api/v1/admin/meal-types/{mealType.Id}", new UpsertMealTypeRequest("BREAKFAST", "Breakfast Updated", mealType.DisplayOrder, true, "فطور جديد"));
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        db.ChangeTracker.Clear();
+        var arabicName = await db.MealTypeTranslations.Where(translation => translation.MealTypeId == mealType.Id && translation.LanguageCode == "ar").Select(translation => translation.Name).SingleAsync();
+        Assert.Equal("فطور جديد", arabicName);
+        var list = await client!.GetStringAsync("/api/v1/admin/meal-types");
+        Assert.Contains("فطور جديد", list);
+    }
     [Fact] public async Task Creating_weekday_menu_succeeds() { if (!enabled) return; var response = await client!.PostAsJsonAsync($"/api/meal-plan-templates/{planId}/days", new { menuWeekday = "SUNDAY", displayOrder = 2, isActive = true }); Assert.Equal(HttpStatusCode.Created, response.StatusCode); Assert.Contains("id", await response.Content.ReadAsStringAsync()); }
     [Fact] public async Task Creating_duplicate_weekday_returns_clear_conflict() { if (!enabled) return; var response = await client!.PostAsJsonAsync($"/api/meal-plan-templates/{planId}/days", new { menuWeekday = "WEDNESDAY", displayOrder = 5, isActive = true }); Assert.Equal(HttpStatusCode.Conflict, response.StatusCode); Assert.Contains("DUPLICATE_TEMPLATE_WEEKDAY", await response.Content.ReadAsStringAsync()); }
     [Fact] public async Task Wednesday_menu_contains_slots_and_options() { if (!enabled) return; var body = await client!.GetStringAsync($"/api/meal-plan-templates/{planId}/days/by-weekday/WEDNESDAY"); Assert.Contains(wednesdayDayId.ToString(), body, StringComparison.OrdinalIgnoreCase); Assert.Contains(mealId.ToString(), body, StringComparison.OrdinalIgnoreCase); Assert.Contains("minimumSelection", body); }
