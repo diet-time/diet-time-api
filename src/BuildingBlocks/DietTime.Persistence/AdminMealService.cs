@@ -901,7 +901,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             .Select(media => new { media.EntityId, media.PublicUrl, media.ThumbnailUrl, media.ObjectKey })
             .ToListAsync(ct);
         var mealImageUrls = mealMedia.GroupBy(media => media.EntityId)
-            .ToDictionary(group => group.Key, group => group.Select(media => media.ThumbnailUrl ?? media.PublicUrl ?? storage.GetPublicUrl(media.ObjectKey)).FirstOrDefault());
+            .ToDictionary(group => group.Key, group => group.Select(media => media.PublicUrl ?? media.ThumbnailUrl ?? storage.GetPublicUrl(media.ObjectKey)).FirstOrDefault());
 
         return new(
             plan.Id,
