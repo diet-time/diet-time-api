@@ -246,7 +246,7 @@ public sealed class UpsertMealRequestValidator : AbstractValidator<UpsertMealReq
 public sealed class CreatePlanRequestValidator : AbstractValidator<CreatePlanRequest>
 {
     private static readonly string[] PlanTypes = ["STANDARD", "WEIGHT_LOSS", "WEIGHT_GAIN", "KETO", "DIABETIC", "VEGETARIAN", "VEGAN", "HIGH_PROTEIN", "LOW_CARB", "BALANCED", "CUSTOM"];
-    public CreatePlanRequestValidator() { RuleFor(x => x.Code).NotEmpty().MaximumLength(50); RuleFor(x => x.PlanType).Must(PlanTypes.Contains); RuleFor(x => x.DurationDays).InclusiveBetween(1, 365); RuleFor(x => x.Translations).NotEmpty(); }
+    public CreatePlanRequestValidator() { RuleFor(x => x.Code).NotEmpty().MaximumLength(50); RuleFor(x => x.PlanType).Must(PlanTypes.Contains); RuleFor(x => x.DurationDays).InclusiveBetween(1, 365); RuleFor(x => x.Translations).NotEmpty(); RuleFor(x => x.CycleWeeks).Must(value => value is null or >= 1 and <= 4); RuleFor(x => x.WeekNumber).Must(value => value is null or >= 1 and <= 4); }
 }
 
 public sealed class UpsertMealPlanTemplateDayRequestValidator : AbstractValidator<UpsertMealPlanTemplateDayRequest>
@@ -255,6 +255,7 @@ public sealed class UpsertMealPlanTemplateDayRequestValidator : AbstractValidato
     {
         RuleFor(x => x.MenuWeekday).NotNull().IsInEnum();
         RuleFor(x => x.DisplayOrder).GreaterThan(0);
+        RuleFor(x => x.WeekNumber).InclusiveBetween(1, 4);
     }
 }
 

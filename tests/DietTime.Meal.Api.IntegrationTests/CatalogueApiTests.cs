@@ -49,6 +49,98 @@ public sealed class CatalogueApiTests : IAsyncLifetime
     [Fact] public async Task Creating_duplicate_weekday_returns_clear_conflict() { if (!enabled) return; var response = await client!.PostAsJsonAsync($"/api/meal-plan-templates/{planId}/days", new { menuWeekday = "WEDNESDAY", displayOrder = 5, isActive = true }); Assert.Equal(HttpStatusCode.Conflict, response.StatusCode); Assert.Contains("DUPLICATE_TEMPLATE_WEEKDAY", await response.Content.ReadAsStringAsync()); }
     [Fact] public async Task Wednesday_menu_contains_slots_and_options() { if (!enabled) return; var body = await client!.GetStringAsync($"/api/meal-plan-templates/{planId}/days/by-weekday/WEDNESDAY"); Assert.Contains(wednesdayDayId.ToString(), body, StringComparison.OrdinalIgnoreCase); Assert.Contains(mealId.ToString(), body, StringComparison.OrdinalIgnoreCase); Assert.Contains("minimumSelection", body); }
     [Fact] public async Task Deleting_template_day_soft_deactivates_without_deleting_slots() { if (!enabled) return; var response = await client!.DeleteAsync($"/api/meal-plan-templates/{planId}/days/{wednesdayDayId}"); Assert.Equal(HttpStatusCode.NoContent, response.StatusCode); using var scope = factory!.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>(); var day = await db.MealPlanTemplateDays.Include(x => x.Slots).ThenInclude(x => x.Options).SingleAsync(x => x.Id == wednesdayDayId); Assert.False(day.IsActive); Assert.NotEmpty(day.Slots); Assert.NotEmpty(day.Slots.Single().Options); }
+    [Fact]
+    public async Task Same_weekday_can_be_created_and_fetched_in_another_week()
+    {
+        if (!enabled) return;
+        using (var scope = factory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
+            var plan = await db.MealPlanTemplates.FindAsync(planId);
+            plan!.CycleWeeks = 4;
+            await db.SaveChangesAsync();
+        }
+        var create = await client!.PostAsJsonAsync($"/api/meal-plan-templates/{planId}/days", new { menuWeekday = "SATURDAY", weekNumber = 2, displayOrder = 1, isActive = true });
+        Assert.Equal(HttpStatusCode.Created, create.StatusCode);
+        var weekTwo = await client!.GetStringAsync($"/api/meal-plan-templates/{planId}/days?weekNumber=2");
+        Assert.Contains("SATURDAY", weekTwo);
+        Assert.Contains("weekNumber", weekTwo);
+        var selectedDay = await client.GetStringAsync($"/api/meal-plan-templates/{planId}/days/by-weekday/SATURDAY?weekNumber=2");
+        Assert.Contains("weekNumber", selectedDay);
+        var validation = await client.GetStringAsync($"/api/meal-plan-templates/{planId}/validation");
+        Assert.Contains("MISSING_SERVICE_DAY", validation);
+        Assert.Contains("weekNumber", validation);
+        var sameWeekdayDifferentWeek = await client.PostAsJsonAsync($"/api/meal-plan-templates/{planId}/days", new { menuWeekday = "SATURDAY", weekNumber = 1, displayOrder = 1, isActive = true });
+        Assert.Equal(HttpStatusCode.Created, sameWeekdayDifferentWeek.StatusCode);
+        var duplicateInSameWeek = await client.PostAsJsonAsync($"/api/meal-plan-templates/{planId}/days", new { menuWeekday = "SATURDAY", weekNumber = 2, displayOrder = 2, isActive = true });
+        Assert.Equal(HttpStatusCode.Conflict, duplicateInSameWeek.StatusCode);
+    }
+    [Fact]
+    public async Task Copy_week_creates_new_day_slot_and_option_records()
+    {
+        if (!enabled) return;
+        using (var scope = factory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
+            var plan = await db.MealPlanTemplates.FindAsync(planId);
+            plan!.CycleWeeks = 4;
+            plan.IsPublished = false;
+            await db.SaveChangesAsync();
+        }
+        var response = await client!.PostAsJsonAsync($"/api/meal-plan-templates/{planId}/weeks/copy", new CopyMenuWeekRequest(1, 2));
+        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        using var verifyScope = factory!.Services.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
+        var days = await verifyDb.MealPlanTemplateDays.Include(day => day.Slots).ThenInclude(slot => slot.Options).Where(day => day.MealPlanTemplateId == planId).ToListAsync();
+        var sourceDay = days.Single(day => day.Id == wednesdayDayId);
+        var copiedDay = days.Single(day => day.WeekNumber == 2 && day.MenuWeekday == sourceDay.MenuWeekday);
+        Assert.NotEqual(sourceDay.Id, copiedDay.Id);
+        var sourceSlot = sourceDay.Slots.Single();
+        var copiedSlot = copiedDay.Slots.Single();
+        Assert.NotEqual(sourceSlot.Id, copiedSlot.Id);
+        Assert.Equal(sourceSlot.MinimumSelection, copiedSlot.MinimumSelection);
+        Assert.Equal(sourceSlot.IsRequired, copiedSlot.IsRequired);
+        Assert.NotEqual(sourceSlot.Options.Single().Id, copiedSlot.Options.Single().Id);
+        Assert.Equal(sourceSlot.Options.Single().MealItemId, copiedSlot.Options.Single().MealItemId);
+    }
+    [Fact]
+    public async Task Saving_one_week_to_a_published_plan_preserves_other_weeks_and_source_version()
+    {
+        if (!enabled) return;
+        using var scope = factory!.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
+        var now = DateTimeOffset.UtcNow;
+        var source = await db.MealPlanTemplates.Include(plan => plan.Translations).SingleAsync(plan => plan.Id == planId);
+        source.CycleWeeks = 4;
+        db.MealPlanTemplateDays.AddRange(
+            new MealPlanTemplateDay { Id = Guid.NewGuid(), MealPlanTemplateId = source.Id, WeekNumber = 3, MenuWeekday = MenuWeekday.Monday, DisplayOrder = 1, IsActive = true, CreatedAt = now, UpdatedAt = now },
+            new MealPlanTemplateDay { Id = Guid.NewGuid(), MealPlanTemplateId = source.Id, WeekNumber = 4, MenuWeekday = MenuWeekday.Tuesday, DisplayOrder = 2, IsActive = true, CreatedAt = now, UpdatedAt = now });
+        await db.SaveChangesAsync();
+        var request = new CreatePlanRequest(
+            source.Code,
+            source.PlanType,
+            source.DurationDays,
+            source.IsCustomizable,
+            source.ValidFrom,
+            source.ValidUntil,
+            source.Translations.Select(translation => new AdminTranslationRequest(translation.LanguageCode, translation.Name, translation.ShortDescription, translation.FullDescription)).ToArray(),
+            [new UpsertPlanDayRequest(MenuWeekday.Saturday, 1, true, [], 2)],
+            Publish: false,
+            CycleWeeks: 4,
+            WeekNumber: 2);
+        var result = await scope.ServiceProvider.GetRequiredService<IAdminMealService>().UpdatePlanAsync(source.Id, request, null, default);
+        Assert.NotNull(result);
+        Assert.True(result.CreatedDraft);
+        db.ChangeTracker.Clear();
+        var sourceVersion = await db.MealPlanTemplates.Include(plan => plan.Days).SingleAsync(plan => plan.Id == source.Id);
+        var draft = await db.MealPlanTemplates.Include(plan => plan.Days).SingleAsync(plan => plan.Id == result.Id);
+        Assert.True(sourceVersion.IsPublished);
+        Assert.Contains(sourceVersion.Days, day => day.MenuWeekday == MenuWeekday.Wednesday && day.WeekNumber == 1);
+        Assert.Contains(draft.Days, day => day.MenuWeekday == MenuWeekday.Wednesday && day.WeekNumber == 1);
+        Assert.Contains(draft.Days, day => day.MenuWeekday == MenuWeekday.Saturday && day.WeekNumber == 2);
+        Assert.Contains(draft.Days, day => day.MenuWeekday == MenuWeekday.Monday && day.WeekNumber == 3);
+        Assert.Contains(draft.Days, day => day.MenuWeekday == MenuWeekday.Tuesday && day.WeekNumber == 4);
+    }
     [Fact] public async Task Updating_active_meal_creates_latest_draft_version() { if (!enabled) return; using var scope = factory!.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>(); var source = await db.MealItems.Include(x => x.Translations).SingleAsync(x => x.Id == mealId); var request = new UpsertMealRequest(source.Sku, source.CategoryId, source.PreparationTimeMinutes, source.IsVegetarian, source.IsVegan, source.IsGlutenFree, source.IsDairyFree, source.IsAvailable, source.AvailableFrom, source.AvailableUntil, source.Translations.Select(x => new AdminTranslationRequest(x.LanguageCode, x.Name, x.ShortDescription, x.FullDescription)).ToArray(), null); var result = await scope.ServiceProvider.GetRequiredService<IAdminMealService>().UpdateMealAsync(mealId, request, null, default); Assert.NotNull(result); Assert.True(result.CreatedDraft); db.ChangeTracker.Clear(); var versions = await db.MealItems.Where(x => x.VersionGroupId == source.VersionGroupId).OrderBy(x => x.VersionNumber).ToListAsync(); Assert.Equal(2, versions.Count); Assert.Equal("ACTIVE", versions[0].Status); Assert.False(versions[0].IsLatest); Assert.Equal("DRAFT", versions[1].Status); Assert.True(versions[1].IsLatest); }
     [Fact]
     public async Task Activating_meal_version_repoints_current_plan_options_but_preserves_historical_plans()

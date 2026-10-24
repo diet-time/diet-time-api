@@ -207,10 +207,14 @@ public interface IAdminMealService
     Task<MealPlanPricePackageWriteResult> UpdateMealPlanPricePackageAsync(string packageId, UpsertMealPlanPricePackageRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<AdminWriteResult> SetMealPlanPricePackageStatusAsync(string packageId, bool isActive, Guid? userId, CancellationToken cancellationToken);
     Task<IReadOnlyList<MealPlanTemplateDayResponse>?> GetTemplateDaysAsync(Guid templateId, CancellationToken cancellationToken);
+    Task<IReadOnlyList<MealPlanTemplateDayResponse>?> GetTemplateDaysAsync(Guid templateId, int? weekNumber, CancellationToken cancellationToken);
     Task<Guid?> CreateTemplateDayAsync(Guid templateId, UpsertMealPlanTemplateDayRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<bool> UpdateTemplateDayAsync(Guid templateId, Guid dayId, UpsertMealPlanTemplateDayRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<bool> DeactivateTemplateDayAsync(Guid templateId, Guid dayId, Guid? userId, CancellationToken cancellationToken);
     Task<MealPlanTemplateDayDetailResponse?> GetTemplateDayByWeekdayAsync(Guid templateId, MenuWeekday weekday, CancellationToken cancellationToken);
+    Task<MealPlanTemplateDayDetailResponse?> GetTemplateDayByWeekdayAsync(Guid templateId, MenuWeekday weekday, int? weekNumber, CancellationToken cancellationToken);
+    Task<bool> CopyTemplateWeekAsync(Guid templateId, CopyMenuWeekRequest request, Guid? userId, CancellationToken cancellationToken);
+    Task<MenuValidationResponse?> ValidateMealPlanMenuAsync(Guid templateId, CancellationToken cancellationToken);
     Task<Guid?> AddPlanSlotAsync(Guid dayId, CreatePlanSlotRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<Guid?> AddSlotOptionAsync(Guid slotId, CreateSlotOptionRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<bool> DeleteSlotOptionAsync(Guid slotId, Guid optionId, CancellationToken cancellationToken);

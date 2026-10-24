@@ -907,7 +907,7 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             planImage?.PublicUrl,
             planImage?.MediaType,
             plan.Translations.Select(x => new AdminPlanTranslationResponse(x.LanguageCode, x.Name, x.ShortDescription, x.FullDescription)).ToArray(),
-            plan.Days.OrderBy(x => x.DisplayOrder).Select(day => new AdminPlanDayResponse(
+            plan.Days.OrderBy(x => x.WeekNumber).ThenBy(x => x.DisplayOrder).Select(day => new AdminPlanDayResponse(
                 day.Id,
                 plan.Id,
                 day.MenuWeekday,
@@ -926,30 +926,46 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
                         option.Id,
                         option.MealItemId,
                         option.MealItem.Translations.FirstOrDefault(x => x.LanguageCode == "en")?.Name ?? option.MealItem.Sku,
-                        option.IsDefault)).ToArray())).ToArray())).ToArray(),
+                        option.IsDefault,
+                        option.AdditionalPrice,
+                        option.IsAvailable,
+                        option.DisplayOrder)).ToArray(),
+                    slot.IsActive)).ToArray(),
+                day.WeekNumber)).ToArray(),
             plan.VersionGroupId,
             plan.VersionNumber,
-            plan.IsLatest);
+            plan.IsLatest,
+            plan.CycleWeeks);
     }
 
-    public async Task<Guid> CreatePlanAsync(CreatePlanRequest request, Guid? userId, CancellationToken ct) { var now = clock.GetUtcNow(); ValidatePlanDays(request.Days ?? []); if (request.Publish) ValidatePlanForPublication(request); var id = Guid.NewGuid(); var p = new MealPlanTemplate { Id = id, VersionGroupId = id, VersionNumber = 1, IsLatest = true, Code = request.Code, PlanType = request.PlanType, DurationDays = request.DurationDays, IsCustomizable = request.IsCustomizable, IsActive = true, IsPublished = request.Publish, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 }; foreach (var t in request.Translations) p.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now }); AddPlanStructure(p, request.Days ?? [], now, userId); db.Add(p); await db.SaveChangesAsync(ct); return p.Id; }
+    public async Task<Guid> CreatePlanAsync(CreatePlanRequest request, Guid? userId, CancellationToken ct) { var now = clock.GetUtcNow(); var cycleWeeks = request.CycleWeeks ?? 1; ValidateCycleWeeks(cycleWeeks); ValidatePlanDays(request.Days ?? [], cycleWeeks); if (request.Publish) ValidatePlanForPublication(request, request.Days ?? [], cycleWeeks); var id = Guid.NewGuid(); var p = new MealPlanTemplate { Id = id, VersionGroupId = id, VersionNumber = 1, CycleWeeks = cycleWeeks, IsLatest = true, Code = request.Code, PlanType = request.PlanType, DurationDays = request.DurationDays, IsCustomizable = request.IsCustomizable, IsActive = true, IsPublished = request.Publish, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 }; foreach (var t in request.Translations) p.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now }); AddPlanStructure(p, request.Days ?? [], now, userId); db.Add(p); await db.SaveChangesAsync(ct); return p.Id; }
     public async Task<VersionedUpdateResponse?> UpdatePlanAsync(Guid planId, CreatePlanRequest request, Guid? userId, CancellationToken ct)
     {
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         var requested = await db.MealPlanTemplates.AsNoTracking().Where(x => x.Id == planId).Select(x => new { x.VersionGroupId }).SingleOrDefaultAsync(ct);
         if (requested is null) return null;
-        var p = await db.MealPlanTemplates.Include(x => x.Translations).Include(x => x.Days).ThenInclude(x => x.Slots).ThenInclude(x => x.Options).SingleAsync(x => x.VersionGroupId == requested.VersionGroupId && x.IsLatest, ct);
+        var p = await db.MealPlanTemplates.Include(x => x.Translations)
+            .Include(x => x.Days).ThenInclude(x => x.Slots).ThenInclude(x => x.Options)
+            .Include(x => x.Days).ThenInclude(x => x.Slots).ThenInclude(x => x.Translations)
+            .SingleAsync(x => x.VersionGroupId == requested.VersionGroupId && x.IsLatest, ct);
         var sourcePlanMedia = await db.MealMedia.Include(x => x.Translations)
             .Where(x => x.EntityId == p.Id && x.MediaType == MealMediaTypes.MealPlan)
             .ToListAsync(ct);
-        if (request.Days is not null) ValidatePlanDays(request.Days);
-        if (request.Publish) ValidatePlanForPublication(request);
+        var cycleWeeks = request.CycleWeeks ?? p.CycleWeeks;
+        ValidateCycleWeeks(cycleWeeks);
+        if (request.WeekNumber is int selectedWeekNumber && (selectedWeekNumber < 1 || selectedWeekNumber > cycleWeeks))
+            throw new TemplateDayException("INVALID_WEEK_NUMBER", $"weekNumber must be between 1 and {cycleWeeks}.", 400);
+        if (request.Days is not null) ValidatePlanDays(request.Days, cycleWeeks);
+        var effectiveDays = request.WeekNumber.HasValue && request.Days is not null
+            ? MergeWeekRequest(p.Days, request.Days, request.WeekNumber.Value)
+            : request.Days ?? p.Days.Select(ToUpsertPlanDay).ToArray();
+        if (request.Publish) ValidatePlanForPublication(request, effectiveDays, cycleWeeks);
         var now = clock.GetUtcNow();
         if (p.IsPublished)
         {
             p.IsLatest = false;
             await db.SaveChangesAsync(ct);
-            var draft = new MealPlanTemplate { Id = Guid.NewGuid(), VersionGroupId = p.VersionGroupId, VersionNumber = p.VersionNumber + 1, IsLatest = true, SupersedesId = p.Id, Code = p.Code, PlanType = request.PlanType, DurationDays = request.DurationDays, IsCustomizable = request.IsCustomizable, IsActive = true, IsPublished = request.Publish, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 };
+            var draft = new MealPlanTemplate { Id = Guid.NewGuid(), VersionGroupId = p.VersionGroupId, VersionNumber = p.VersionNumber + 1, CycleWeeks = cycleWeeks, IsLatest = true, SupersedesId = p.Id, Code = p.Code, PlanType = request.PlanType, DurationDays = request.DurationDays, IsCustomizable = request.IsCustomizable, IsActive = true, IsPublished = request.Publish, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 };
             foreach (var t in request.Translations) draft.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now });
             foreach (var source in sourcePlanMedia.Where(x => x.Status == "ACTIVE"))
             {
@@ -957,12 +973,29 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
                 foreach (var t in source.Translations) copy.Translations.Add(new() { LanguageCode = t.LanguageCode, AltText = t.AltText, Caption = t.Caption, CreatedAt = now, UpdatedAt = now });
                 db.MealMedia.Add(copy);
             }
-            if (request.Days is not null) AddPlanStructure(draft, request.Days, now, userId); else ClonePlanStructure(draft, p.Days, now, userId);
+            if (request.Days is not null && request.WeekNumber is int selectedWeek)
+            {
+                ClonePlanStructure(draft, p.Days.Where(day => day.WeekNumber != selectedWeek), now, userId);
+                AddPlanStructure(draft, request.Days.Where(day => day.WeekNumber == selectedWeek), now, userId);
+            }
+            else if (request.Days is not null) AddPlanStructure(draft, request.Days, now, userId);
+            else ClonePlanStructure(draft, p.Days, now, userId);
             db.Add(draft); await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return new(draft.Id, true);
         }
-        p.Code = request.Code; p.PlanType = request.PlanType; p.DurationDays = request.DurationDays; p.IsCustomizable = request.IsCustomizable; p.IsPublished = request.Publish; p.ValidFrom = request.ValidFrom; p.ValidUntil = request.ValidUntil; p.UpdatedAt = now; p.UpdatedBy = userId; p.RowVersion++;
+        p.Code = request.Code; p.PlanType = request.PlanType; p.DurationDays = request.DurationDays; p.CycleWeeks = cycleWeeks; p.IsCustomizable = request.IsCustomizable; p.IsPublished = request.Publish; p.ValidFrom = request.ValidFrom; p.ValidUntil = request.ValidUntil; p.UpdatedAt = now; p.UpdatedBy = userId; p.RowVersion++;
         db.MealPlanTemplateTranslations.RemoveRange(p.Translations); foreach (var t in request.Translations) p.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now });
-        if (request.Days is not null) { await db.MealPlanTemplateDays.Where(x => x.MealPlanTemplateId == p.Id).ExecuteDeleteAsync(ct); AddPlanStructure(p, request.Days, now, userId); }
+        if (request.Days is not null)
+        {
+            var dayQuery = db.MealPlanTemplateDays.Where(x => x.MealPlanTemplateId == p.Id);
+            var daysToAdd = request.Days.AsEnumerable();
+            if (request.WeekNumber is int selectedWeek)
+            {
+                dayQuery = dayQuery.Where(day => day.WeekNumber == selectedWeek);
+                daysToAdd = daysToAdd.Where(day => day.WeekNumber == selectedWeek);
+            }
+            await dayQuery.ExecuteDeleteAsync(ct);
+            AddPlanStructure(p, daysToAdd, now, userId);
+        }
         await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return new(p.Id, false);
     }
     public async Task<AdminPlanImageResponse?> AddPlanImageAsync(Guid planId, SaveMediaRequest request, Guid? userId, CancellationToken ct)
@@ -1498,11 +1531,14 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         string.Join('_', code.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries))
             .ToUpperInvariant();
 
-    public async Task<IReadOnlyList<MealPlanTemplateDayResponse>?> GetTemplateDaysAsync(Guid templateId, CancellationToken ct)
+    public Task<IReadOnlyList<MealPlanTemplateDayResponse>?> GetTemplateDaysAsync(Guid templateId, CancellationToken ct) => GetTemplateDaysAsync(templateId, null, ct);
+
+    public async Task<IReadOnlyList<MealPlanTemplateDayResponse>?> GetTemplateDaysAsync(Guid templateId, int? weekNumber, CancellationToken ct)
     {
         if (!await db.MealPlanTemplates.AnyAsync(x => x.Id == templateId, ct)) return null;
-        return await db.MealPlanTemplateDays.AsNoTracking()
-            .Where(x => x.MealPlanTemplateId == templateId)
+        var query = db.MealPlanTemplateDays.AsNoTracking().Where(x => x.MealPlanTemplateId == templateId);
+        if (weekNumber.HasValue) query = query.Where(x => x.WeekNumber == weekNumber.Value);
+        return await query
             .OrderBy(x => x.DisplayOrder)
             .ThenBy(x => x.MenuWeekday)
             .Select(x => new MealPlanTemplateDayResponse(x.Id, templateId, x.WeekNumber, x.MenuWeekday, x.DisplayOrder, x.IsActive, x.Slots.Count))
@@ -1512,11 +1548,14 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
     public async Task<Guid?> CreateTemplateDayAsync(Guid templateId, UpsertMealPlanTemplateDayRequest request, Guid? userId, CancellationToken ct)
     {
         if (!await db.MealPlanTemplates.AnyAsync(x => x.Id == templateId, ct)) return null;
+        var cycleWeeks = await db.MealPlanTemplates.Where(x => x.Id == templateId).Select(x => x.CycleWeeks).SingleAsync(ct);
+        if (request.WeekNumber < 1 || request.WeekNumber > cycleWeeks)
+            throw new TemplateDayException("INVALID_WEEK_NUMBER", $"weekNumber must be between 1 and {cycleWeeks}.", 400);
         var weekday = RequireDeliveryWeekday(request.MenuWeekday);
-        if (await db.MealPlanTemplateDays.AnyAsync(x => x.MealPlanTemplateId == templateId && x.MenuWeekday == weekday, ct))
-            throw DuplicateWeekday(weekday);
+        if (await db.MealPlanTemplateDays.AnyAsync(x => x.MealPlanTemplateId == templateId && x.WeekNumber == request.WeekNumber && x.MenuWeekday == weekday, ct))
+            throw DuplicateWeekday(weekday, request.WeekNumber);
         var now = clock.GetUtcNow();
-        var day = new MealPlanTemplateDay { MealPlanTemplateId = templateId, MenuWeekday = weekday, DisplayOrder = request.DisplayOrder, IsActive = request.IsActive, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId };
+        var day = new MealPlanTemplateDay { MealPlanTemplateId = templateId, WeekNumber = request.WeekNumber, MenuWeekday = weekday, DisplayOrder = request.DisplayOrder, IsActive = request.IsActive, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId };
         db.Add(day);
         await db.SaveChangesAsync(ct);
         return day.Id;
@@ -1526,9 +1565,13 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
     {
         var day = await db.MealPlanTemplateDays.SingleOrDefaultAsync(x => x.Id == dayId && x.MealPlanTemplateId == templateId, ct);
         if (day is null) return false;
+        var cycleWeeks = await db.MealPlanTemplates.Where(x => x.Id == templateId).Select(x => x.CycleWeeks).SingleAsync(ct);
+        if (request.WeekNumber < 1 || request.WeekNumber > cycleWeeks)
+            throw new TemplateDayException("INVALID_WEEK_NUMBER", $"weekNumber must be between 1 and {cycleWeeks}.", 400);
         var weekday = RequireDeliveryWeekday(request.MenuWeekday);
-        if (await db.MealPlanTemplateDays.AnyAsync(x => x.MealPlanTemplateId == templateId && x.Id != dayId && x.MenuWeekday == weekday, ct))
-            throw DuplicateWeekday(weekday);
+        if (await db.MealPlanTemplateDays.AnyAsync(x => x.MealPlanTemplateId == templateId && x.Id != dayId && x.WeekNumber == request.WeekNumber && x.MenuWeekday == weekday, ct))
+            throw DuplicateWeekday(weekday, request.WeekNumber);
+        day.WeekNumber = request.WeekNumber;
         day.MenuWeekday = weekday;
         day.DisplayOrder = request.DisplayOrder;
         day.IsActive = request.IsActive;
@@ -1549,25 +1592,137 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         return true;
     }
 
-    public async Task<MealPlanTemplateDayDetailResponse?> GetTemplateDayByWeekdayAsync(Guid templateId, MenuWeekday weekday, CancellationToken ct)
+    public Task<MealPlanTemplateDayDetailResponse?> GetTemplateDayByWeekdayAsync(Guid templateId, MenuWeekday weekday, CancellationToken ct) => GetTemplateDayByWeekdayAsync(templateId, weekday, null, ct);
+
+    public async Task<MealPlanTemplateDayDetailResponse?> GetTemplateDayByWeekdayAsync(Guid templateId, MenuWeekday weekday, int? weekNumber, CancellationToken ct)
     {
-        var day = await db.MealPlanTemplateDays.AsNoTracking()
+        var query = db.MealPlanTemplateDays.AsNoTracking()
             .Include(x => x.Slots).ThenInclude(x => x.MealType).ThenInclude(x => x.Translations)
             .Include(x => x.Slots).ThenInclude(x => x.Options).ThenInclude(x => x.MealItem).ThenInclude(x => x.Translations)
-            .SingleOrDefaultAsync(x => x.MealPlanTemplateId == templateId && x.MenuWeekday == weekday && x.IsActive, ct);
+            .Where(x => x.MealPlanTemplateId == templateId && x.MenuWeekday == weekday && x.IsActive);
+        if (weekNumber.HasValue) query = query.Where(x => x.WeekNumber == weekNumber.Value);
+        var day = await query.OrderBy(x => x.WeekNumber).FirstOrDefaultAsync(ct);
         return day is null ? null : ToTemplateDayDetail(day);
     }
+
+    public async Task<bool> CopyTemplateWeekAsync(Guid templateId, CopyMenuWeekRequest request, Guid? userId, CancellationToken ct)
+    {
+        ValidateCycleWeeks(request.SourceWeekNumber);
+        ValidateCycleWeeks(request.TargetWeekNumber);
+        if (request.SourceWeekNumber == request.TargetWeekNumber)
+            throw new TemplateDayException("INVALID_WEEK_COPY", "Source and target weeks must be different.", 400);
+
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var groupId = await db.MealPlanTemplates.AsNoTracking().Where(x => x.Id == templateId).Select(x => (Guid?)x.VersionGroupId).SingleOrDefaultAsync(ct);
+        if (groupId is null) return false;
+        var plan = await db.MealPlanTemplates.Include(x => x.Days).ThenInclude(x => x.Slots).ThenInclude(x => x.Options)
+            .Include(x => x.Days).ThenInclude(x => x.Slots).ThenInclude(x => x.Translations)
+            .SingleAsync(x => x.VersionGroupId == groupId && x.IsLatest, ct);
+        if (plan.IsPublished)
+            throw new TemplateDayException("PUBLISHED_VERSION_READ_ONLY", "Copy menu weeks on a draft version so published subscriptions keep their assigned menu.", 409);
+        if (request.SourceWeekNumber > plan.CycleWeeks || request.TargetWeekNumber > plan.CycleWeeks)
+            throw new TemplateDayException("INVALID_WEEK_NUMBER", $"Week numbers must be between 1 and {plan.CycleWeeks}.", 400);
+
+        var sourceDays = plan.Days.Where(day => day.WeekNumber == request.SourceWeekNumber).ToArray();
+        if (sourceDays.Length == 0)
+            throw new TemplateDayException("SOURCE_WEEK_NOT_CONFIGURED", $"Week {request.SourceWeekNumber} has no menu to copy.", 404);
+        var targetDays = plan.Days.Where(day => day.WeekNumber == request.TargetWeekNumber).ToArray();
+        if (targetDays.Length > 0 && !request.ReplaceTarget)
+            throw new TemplateDayException("TARGET_WEEK_CONFIGURED", $"Week {request.TargetWeekNumber} already has menu data. Set replaceTarget to true to replace it.", 409);
+        if (targetDays.Length > 0)
+            await db.MealPlanTemplateDays.Where(day => day.MealPlanTemplateId == plan.Id && day.WeekNumber == request.TargetWeekNumber).ExecuteDeleteAsync(ct);
+
+        var now = clock.GetUtcNow();
+        foreach (var sourceDay in sourceDays)
+        {
+            var day = new MealPlanTemplateDay { MealPlanTemplateId = plan.Id, WeekNumber = request.TargetWeekNumber, MenuWeekday = sourceDay.MenuWeekday, DisplayOrder = sourceDay.DisplayOrder, IsActive = sourceDay.IsActive, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId };
+            foreach (var sourceSlot in sourceDay.Slots)
+            {
+                var slot = new MealPlanTemplateSlot { MealTypeId = sourceSlot.MealTypeId, DisplayOrder = sourceSlot.DisplayOrder, MinimumSelection = sourceSlot.MinimumSelection, MaximumSelection = sourceSlot.MaximumSelection, IsRequired = sourceSlot.IsRequired, SelectionCutoffTime = sourceSlot.SelectionCutoffTime, AllowsPaidUpgrade = sourceSlot.AllowsPaidUpgrade, IsActive = sourceSlot.IsActive, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 };
+                foreach (var translation in sourceSlot.Translations) slot.Translations.Add(new() { LanguageCode = translation.LanguageCode, Title = translation.Title, Instruction = translation.Instruction, CreatedAt = now, UpdatedAt = now });
+                foreach (var option in sourceSlot.Options) slot.Options.Add(new() { MealItemId = option.MealItemId, AdditionalPrice = option.AdditionalPrice, IsDefault = option.IsDefault, IsAvailable = option.IsAvailable, DisplayOrder = option.DisplayOrder, AvailableFrom = option.AvailableFrom, AvailableUntil = option.AvailableUntil, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId });
+                day.Slots.Add(slot);
+            }
+            plan.Days.Add(day);
+        }
+        plan.UpdatedAt = now;
+        plan.UpdatedBy = userId;
+        plan.RowVersion++;
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return true;
+    }
+
+    public async Task<MenuValidationResponse?> ValidateMealPlanMenuAsync(Guid templateId, CancellationToken ct)
+    {
+        var groupId = await db.MealPlanTemplates.AsNoTracking().Where(x => x.Id == templateId).Select(x => (Guid?)x.VersionGroupId).SingleOrDefaultAsync(ct);
+        if (groupId is null) return null;
+        var plan = await db.MealPlanTemplates.AsNoTracking()
+            .Include(x => x.Days).ThenInclude(x => x.Slots).ThenInclude(x => x.Options).ThenInclude(x => x.MealItem)
+            .SingleOrDefaultAsync(x => x.VersionGroupId == groupId && x.IsLatest, ct);
+        if (plan is null) return null;
+        var serviceDays = Enum.GetValues<MenuWeekday>().Where(deliverySchedule.Value.IsDeliveryDay).ToArray();
+        var weeks = new List<MenuWeekValidationResponse>();
+        for (var week = 1; week <= plan.CycleWeeks; week++)
+        {
+            var errors = new List<MenuWeekValidationError>();
+            var activeDays = plan.Days.Where(day => day.WeekNumber == week && day.IsActive).ToArray();
+            foreach (var weekday in serviceDays.Where(weekday => activeDays.All(day => day.MenuWeekday != weekday)))
+                errors.Add(new(week, weekday, null, null, "MISSING_SERVICE_DAY", $"{weekday} is not configured as an active service day."));
+            foreach (var day in activeDays)
+            {
+                var requiredSlots = day.Slots.Where(slot => slot.IsActive && slot.IsRequired).ToArray();
+                if (requiredSlots.Length == 0)
+                    errors.Add(new(week, day.MenuWeekday, day.Id, null, "MISSING_REQUIRED_SLOT", "This service day needs at least one active required slot."));
+                foreach (var slot in requiredSlots)
+                {
+                    var activeOptions = slot.Options.Count(option => option.IsAvailable && option.MealItem.Status == "ACTIVE");
+                    if (activeOptions < Math.Max(slot.MinimumSelection, 1))
+                        errors.Add(new(week, day.MenuWeekday, day.Id, slot.Id, "INSUFFICIENT_MEAL_OPTIONS", $"This required slot needs at least {Math.Max(slot.MinimumSelection, 1)} active meal option(s), but has {activeOptions}."));
+                }
+            }
+            weeks.Add(new(week, errors.Count == 0, errors));
+        }
+        return new(templateId, plan.VersionGroupId, plan.VersionNumber, plan.IsLatest, plan.IsPublished, weeks);
+    }
+
     public async Task<Guid?> AddPlanSlotAsync(Guid dayId, CreatePlanSlotRequest request, Guid? userId, CancellationToken ct) { if (!await db.MealPlanTemplateDays.AnyAsync(x => x.Id == dayId, ct)) return null; var now = clock.GetUtcNow(); var s = new MealPlanTemplateSlot { MealPlanTemplateDayId = dayId, MealTypeId = request.MealTypeId, DisplayOrder = request.DisplayOrder, MinimumSelection = request.MinimumSelection, MaximumSelection = request.MaximumSelection, IsRequired = request.IsRequired, SelectionCutoffTime = request.SelectionCutoffTime, AllowsPaidUpgrade = request.AllowsPaidUpgrade, IsActive = true, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 }; db.Add(s); await db.SaveChangesAsync(ct); return s.Id; }
     public async Task<Guid?> AddSlotOptionAsync(Guid slotId, CreateSlotOptionRequest request, Guid? userId, CancellationToken ct) { if (!await db.MealPlanTemplateSlots.AnyAsync(x => x.Id == slotId, ct)) return null; if (request.IsDefault) await db.MealPlanSlotOptions.Where(x => x.MealPlanTemplateSlotId == slotId && x.IsDefault).ExecuteUpdateAsync(s => s.SetProperty(x => x.IsDefault, false), ct); var now = clock.GetUtcNow(); var o = new MealPlanSlotOption { MealPlanTemplateSlotId = slotId, MealItemId = request.MealItemId, AdditionalPrice = request.AdditionalPrice, IsDefault = request.IsDefault, IsAvailable = request.IsAvailable, DisplayOrder = request.DisplayOrder, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId }; db.Add(o); await db.SaveChangesAsync(ct); return o.Id; }
     public async Task<bool> DeleteSlotOptionAsync(Guid slotId, Guid optionId, CancellationToken ct) => await db.MealPlanSlotOptions.Where(x => x.Id == optionId && x.MealPlanTemplateSlotId == slotId).ExecuteDeleteAsync(ct) > 0;
+    private static UpsertPlanDayRequest ToUpsertPlanDay(MealPlanTemplateDay day) => new(
+        day.MenuWeekday,
+        day.DisplayOrder,
+        day.IsActive,
+        day.Slots.OrderBy(slot => slot.DisplayOrder).Select(slot => new UpsertPlanSlotRequest(
+            slot.MealTypeId,
+            slot.DisplayOrder,
+            slot.MinimumSelection,
+            slot.MaximumSelection,
+            slot.IsRequired,
+            slot.SelectionCutoffTime,
+            slot.AllowsPaidUpgrade,
+            slot.Options.OrderBy(option => option.DisplayOrder).Select(option => new UpsertPlanOptionRequest(
+                option.MealItemId,
+                option.AdditionalPrice,
+                option.IsDefault,
+                option.IsAvailable,
+                option.DisplayOrder)).ToArray(),
+            slot.IsActive)).ToArray(),
+        day.WeekNumber);
+
+    private static IReadOnlyList<UpsertPlanDayRequest> MergeWeekRequest(IEnumerable<MealPlanTemplateDay> currentDays, IEnumerable<UpsertPlanDayRequest> requestedDays, int selectedWeek) =>
+        currentDays.Where(day => day.WeekNumber != selectedWeek).Select(ToUpsertPlanDay)
+            .Concat(requestedDays.Where(day => day.WeekNumber == selectedWeek)).ToArray();
+
     private static void ClonePlanStructure(MealPlanTemplate target, IEnumerable<MealPlanTemplateDay> sourceDays, DateTimeOffset now, Guid? userId)
     {
         foreach (var sourceDay in sourceDays)
         {
-            var day = new MealPlanTemplateDay { MenuWeekday = sourceDay.MenuWeekday, DisplayOrder = sourceDay.DisplayOrder, IsActive = sourceDay.IsActive, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId };
+            var day = new MealPlanTemplateDay { WeekNumber = sourceDay.WeekNumber, MenuWeekday = sourceDay.MenuWeekday, DisplayOrder = sourceDay.DisplayOrder, IsActive = sourceDay.IsActive, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId };
             foreach (var sourceSlot in sourceDay.Slots)
             {
                 var slot = new MealPlanTemplateSlot { MealTypeId = sourceSlot.MealTypeId, DisplayOrder = sourceSlot.DisplayOrder, MinimumSelection = sourceSlot.MinimumSelection, MaximumSelection = sourceSlot.MaximumSelection, IsRequired = sourceSlot.IsRequired, SelectionCutoffTime = sourceSlot.SelectionCutoffTime, AllowsPaidUpgrade = sourceSlot.AllowsPaidUpgrade, IsActive = sourceSlot.IsActive, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 };
+                foreach (var sourceTranslation in sourceSlot.Translations) slot.Translations.Add(new() { LanguageCode = sourceTranslation.LanguageCode, Title = sourceTranslation.Title, Instruction = sourceTranslation.Instruction, CreatedAt = now, UpdatedAt = now });
                 foreach (var sourceOption in sourceSlot.Options) slot.Options.Add(new() { MealItemId = sourceOption.MealItemId, AdditionalPrice = sourceOption.AdditionalPrice, IsDefault = sourceOption.IsDefault, IsAvailable = sourceOption.IsAvailable, DisplayOrder = sourceOption.DisplayOrder, AvailableFrom = sourceOption.AvailableFrom, AvailableUntil = sourceOption.AvailableUntil, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId });
                 day.Slots.Add(slot);
             }
@@ -1580,10 +1735,10 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         foreach (var requestDay in days)
         {
             var weekday = ResolveWeekday(requestDay);
-            var day = new MealPlanTemplateDay { MenuWeekday = weekday, DisplayOrder = requestDay.DisplayOrder, IsActive = requestDay.IsActive, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId };
+            var day = new MealPlanTemplateDay { WeekNumber = requestDay.WeekNumber, MenuWeekday = weekday, DisplayOrder = requestDay.DisplayOrder, IsActive = requestDay.IsActive, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId };
             foreach (var requestSlot in requestDay.Slots)
             {
-                var slot = new MealPlanTemplateSlot { MealTypeId = requestSlot.MealTypeId, DisplayOrder = requestSlot.DisplayOrder, MinimumSelection = requestSlot.MinimumSelection, MaximumSelection = requestSlot.MaximumSelection, IsRequired = requestSlot.IsRequired, SelectionCutoffTime = requestSlot.SelectionCutoffTime, AllowsPaidUpgrade = requestSlot.AllowsPaidUpgrade, IsActive = true, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 };
+                var slot = new MealPlanTemplateSlot { MealTypeId = requestSlot.MealTypeId, DisplayOrder = requestSlot.DisplayOrder, MinimumSelection = requestSlot.MinimumSelection, MaximumSelection = requestSlot.MaximumSelection, IsRequired = requestSlot.IsRequired, SelectionCutoffTime = requestSlot.SelectionCutoffTime, AllowsPaidUpgrade = requestSlot.AllowsPaidUpgrade, IsActive = requestSlot.IsActive, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 };
                 foreach (var requestOption in requestSlot.Options) slot.Options.Add(new() { MealItemId = requestOption.MealItemId, AdditionalPrice = requestOption.AdditionalPrice, IsDefault = requestOption.IsDefault, IsAvailable = requestOption.IsAvailable, DisplayOrder = requestOption.DisplayOrder, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId });
                 day.Slots.Add(slot);
             }
@@ -1591,26 +1746,57 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         }
     }
 
-    private void ValidatePlanDays(IEnumerable<UpsertPlanDayRequest> days)
+    private void ValidateCycleWeeks(int cycleWeeks)
+    {
+        if (cycleWeeks is < 1 or > 4)
+            throw new TemplateDayException("INVALID_CYCLE_WEEKS", "cycleWeeks must be between 1 and 4.", 400);
+    }
+
+    private void ValidatePlanDays(IEnumerable<UpsertPlanDayRequest> days, int cycleWeeks)
     {
         var requests = days.ToArray();
         if (requests.Any(x => x.DisplayOrder <= 0))
             throw new TemplateDayException("INVALID_DISPLAY_ORDER", "Display order must be greater than zero.", 400);
-        var resolved = requests.Select(ResolveWeekday).ToArray();
-        var duplicate = resolved.GroupBy(x => x).FirstOrDefault(x => x.Count() > 1);
-        if (duplicate is not null) throw DuplicateWeekday(duplicate.Key);
-        foreach (var weekday in resolved) RequireDeliveryWeekday(weekday);
+        if (requests.Any(x => x.WeekNumber < 1 || x.WeekNumber > cycleWeeks))
+            throw new TemplateDayException("INVALID_WEEK_NUMBER", $"Menu week numbers must be between 1 and {cycleWeeks}.", 400);
+        var resolved = requests.Select(x => (x.WeekNumber, Weekday: ResolveWeekday(x))).ToArray();
+        var duplicate = resolved.GroupBy(x => (x.WeekNumber, x.Weekday)).FirstOrDefault(x => x.Count() > 1);
+        if (duplicate is not null) throw DuplicateWeekday(duplicate.Key.Weekday, duplicate.Key.WeekNumber);
+        foreach (var (_, weekday) in resolved) RequireDeliveryWeekday(weekday);
     }
 
-    private static void ValidatePlanForPublication(CreatePlanRequest request)
+    private void ValidatePlanForPublication(CreatePlanRequest request, IReadOnlyCollection<UpsertPlanDayRequest> days, int cycleWeeks)
     {
-        var days = request.Days?.ToArray() ?? [];
-        if (request.Translations.Count == 0 ||
-            days.Length == 0 ||
-            days.Any(day => day.Slots.Count == 0 ||
-                day.Slots.Any(slot => slot.Options.Count == 0)))
+        if (request.Translations.Count == 0 || days.Count == 0)
             throw new InvalidOperationException(
                 "A plan requires translations, days, slots, and options before publication.");
+        if (cycleWeeks == 4)
+        {
+            var serviceDays = Enum.GetValues<MenuWeekday>().Where(deliverySchedule.Value.IsDeliveryDay).ToArray();
+            for (var week = 1; week <= cycleWeeks; week++)
+            {
+                var configured = days.Where(day => day.WeekNumber == week && day.IsActive).ToArray();
+                var missing = serviceDays.Where(weekday => configured.All(day => ResolveWeekday(day) != weekday)).ToArray();
+                if (missing.Length > 0)
+                    throw new TemplateDayException("INCOMPLETE_MENU_WEEK", $"Week {week} is missing active service days: {string.Join(", ", missing)}.", 422);
+                foreach (var day in configured)
+                {
+                    var requiredSlots = day.Slots.Where(slot => slot.IsRequired).ToArray();
+                    if (requiredSlots.Length == 0)
+                        throw new TemplateDayException("MISSING_REQUIRED_SLOT", $"Week {week} {ResolveWeekday(day)} must contain a required slot.", 422);
+                    foreach (var slot in requiredSlots)
+                    {
+                        var activeOptions = slot.Options.Count(option => option.IsAvailable);
+                        if (activeOptions < Math.Max(slot.MinimumSelection, 1))
+                            throw new TemplateDayException("INSUFFICIENT_MEAL_OPTIONS", $"Week {week} {ResolveWeekday(day)} has a required slot with too few available meal options.", 422);
+                    }
+                }
+            }
+        }
+        else if (days.Any(day => day.Slots.Count == 0 || day.Slots.Any(slot => slot.Options.Count == 0)))
+        {
+            throw new InvalidOperationException("A plan requires translations, days, slots, and options before publication.");
+        }
     }
 
     private MenuWeekday RequireDeliveryWeekday(MenuWeekday? weekday)
@@ -1621,9 +1807,9 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
         return weekday.Value;
     }
 
-    private static TemplateDayException DuplicateWeekday(MenuWeekday weekday) => new(
+    private static TemplateDayException DuplicateWeekday(MenuWeekday weekday, int weekNumber) => new(
         "DUPLICATE_TEMPLATE_WEEKDAY",
-        $"{weekday} already exists in this template.",
+        $"{weekday} already exists in Week {weekNumber} of this template.",
         409);
 
     private static MenuWeekday ResolveWeekday(UpsertPlanDayRequest request) => request.MenuWeekday

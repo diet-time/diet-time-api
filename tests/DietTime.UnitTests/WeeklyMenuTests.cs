@@ -88,7 +88,7 @@ public sealed class WeeklyMenuTests
         new(new StubCalendar(closures ?? []), new StubMenuReader(null));
 
     private static MealPlanTemplateDayDetailResponse Day(MenuWeekday weekday) =>
-        new(Guid.NewGuid(), Guid.NewGuid(), weekday, 5, true, 0, []);
+        new(Guid.NewGuid(), Guid.NewGuid(), 1, weekday, 5, true, 0, []);
 
     private sealed class StubCalendar(HashSet<DateOnly> closures) : IOperationalCalendarService
     {
