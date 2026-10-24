@@ -893,6 +893,15 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
             .OrderByDescending(x => x.IsPrimary)
             .ThenBy(x => x.DisplayOrder)
             .FirstOrDefaultAsync(ct);
+        var mealIds = plan.Days.SelectMany(day => day.Slots).SelectMany(slot => slot.Options).Select(option => option.MealItemId).Distinct().ToArray();
+        var mealMedia = await db.MealMedia.AsNoTracking()
+            .Where(media => mealIds.Contains(media.EntityId) && media.Status == "ACTIVE" && media.MediaType == MealMediaTypes.MealItem)
+            .OrderByDescending(media => media.IsPrimary)
+            .ThenBy(media => media.DisplayOrder)
+            .Select(media => new { media.EntityId, media.PublicUrl, media.ThumbnailUrl, media.ObjectKey })
+            .ToListAsync(ct);
+        var mealImageUrls = mealMedia.GroupBy(media => media.EntityId)
+            .ToDictionary(group => group.Key, group => group.Select(media => media.ThumbnailUrl ?? media.PublicUrl ?? storage.GetPublicUrl(media.ObjectKey)).FirstOrDefault());
 
         return new(
             plan.Id,
@@ -929,7 +938,8 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
                         option.IsDefault,
                         option.AdditionalPrice,
                         option.IsAvailable,
-                        option.DisplayOrder)).ToArray(),
+                        option.DisplayOrder,
+                        mealImageUrls.GetValueOrDefault(option.MealItemId))).ToArray(),
                     slot.IsActive)).ToArray(),
                 day.WeekNumber)).ToArray(),
             plan.VersionGroupId,
