@@ -387,7 +387,9 @@ public sealed record AdminMealSummaryResponse(
     NutritionResponse? Nutrition,
     MoneyResponse? Price,
     DateTimeOffset UpdatedAt,
-    int VersionNumber);
+    int VersionNumber,
+    string? ImageUrl = null,
+    string? ThumbnailUrl = null);
 public sealed record AdminMealResponse(Guid Id, string Status, UpsertMealRequest Meal, IReadOnlyList<AdminMediaResponse> Media, Guid VersionGroupId, int VersionNumber, bool IsLatest);
 public sealed record VersionedUpdateResponse(Guid Id, bool CreatedDraft);
 public sealed record AdminAllergenResponse(
