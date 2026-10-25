@@ -20,7 +20,8 @@ public sealed class OrderService(
     TimeProvider clock,
     IOptions<OrderOptions> options,
     ITwilioWhatsAppService whatsApp,
-    ILogger<OrderService> logger) : IOrderService
+    ILogger<OrderService> logger,
+    IUpcomingMealService upcomingMeals) : IOrderService
 {
     public async Task<PlaceOrderResult> PlaceAsync(
         PlaceOrderRequest request,
@@ -115,6 +116,8 @@ public sealed class OrderService(
             return Fail(PlaceOrderStatus.InvalidMealConfiguration,
                 $"Selection must contain {price.MealsPerDay} meal(s) and {price.SnacksPerDay} snack(s) per day.");
 
+        if (request.DeliveryDays.Contains(5))
+            return Fail(PlaceOrderStatus.InvalidDeliveryDays, "Friday is a non-delivery day.");
         var configuredDays = template.Days.Select(x => ToApiWeekday(x.MenuWeekday)).ToHashSet();
         if (request.DeliveryDays.Any(day => !configuredDays.Contains(day)))
             return Fail(PlaceOrderStatus.InvalidDeliveryDays, "A selected delivery weekday is not configured for this plan.");
@@ -217,6 +220,7 @@ public sealed class OrderService(
 
         db.Orders.Add(order);
         await db.SaveChangesAsync(cancellationToken);
+        await upcomingMeals.InitializeAsync(order, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         logger.LogInformation("Order {OrderNumber} placed for customer profile {CustomerProfileId}",
             order.OrderNumber, order.CustomerProfileId);

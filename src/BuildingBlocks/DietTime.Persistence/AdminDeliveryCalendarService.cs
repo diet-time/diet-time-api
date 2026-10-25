@@ -8,7 +8,8 @@ namespace DietTime.Persistence;
 
 public sealed class AdminDeliveryCalendarService(
     DietTimeDbContext db,
-    IOptions<MenuRotationOptions> rotationOptions) : IAdminDeliveryCalendarService
+    IOptions<MenuRotationOptions> rotationOptions,
+    TimeProvider clock) : IAdminDeliveryCalendarService
 {
     public async Task<AdminDeliveryCalendarResponse> GetMonthAsync(
         DateOnly startDate,
@@ -99,7 +100,7 @@ public sealed class AdminDeliveryCalendarService(
         var apiWeekday = OperationsDashboardScheduling.ToApiWeekday(date.DayOfWeek);
         var menuWeekday = MenuWeekdayExtensions.FromDate(date);
         var scheduledOrders = await db.Orders.AsNoTracking()
-            .Where(order => order.Status == OrderStatuses.Confirmed &&
+            .Where(order => (order.Status == OrderStatuses.Confirmed || order.Status == "ACTIVE") &&
                 order.StartDate <= date && order.EndDate >= date &&
                 order.DeliveryDays.Any(day => day.DayOfWeek == apiWeekday))
             .Select(order => new DeliveryPreparationOrderSource(
@@ -112,7 +113,39 @@ public sealed class AdminDeliveryCalendarService(
         if (scheduledOrders.Count == 0)
             return DeliveryPreparationAggregation.Build(date, [], []);
 
-        var orderIds = scheduledOrders.Select(order => order.OrderId).ToArray();
+        var now = clock.GetUtcNow();
+        // Finalization and customer edits acquire the same row locks. Already
+        // finalized days are unchanged, so report downloads are idempotent.
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE public.subscription_service_days SET selection_locked = TRUE, selection_status = 'LOCKED', revision = revision + 1, updated_at = {now} WHERE order_id IS NOT NULL AND service_date = {date} AND selection_cutoff_at <= {now} AND NOT selection_locked", cancellationToken);
+        var trackedDays = await db.Set<SubscriptionServiceDay>().AsNoTracking()
+            .Where(day => day.ServiceDate == date && day.OrderId != null)
+            .Select(day => new { day.OrderId, day.SelectionLocked, day.ReviewReason })
+            .ToListAsync(cancellationToken);
+        var trackedOrderIds = trackedDays.Select(day => day.OrderId!.Value).ToHashSet();
+        var scheduledIds = scheduledOrders.Select(order => order.OrderId).ToArray();
+        var persistedRows = await (
+            from selection in db.Set<CustomerMealSelection>().AsNoTracking()
+            join day in db.Set<SubscriptionServiceDay>().AsNoTracking() on selection.SubscriptionServiceDayId equals day.Id
+            join meal in db.MealItems.AsNoTracking() on selection.MenuItemId equals meal.Id
+            join type in db.MealTypes.AsNoTracking() on selection.MealTypeId equals type.Id
+            where day.ServiceDate == date && day.OrderId != null && scheduledIds.Contains(day.OrderId.Value) &&
+                day.ReviewReason == null && selection.Status != "CANCELLED"
+            select new DeliveryPreparationMenuSource(day.OrderId!.Value, type.Id,
+                selection.Category == "snack" ? "Snack" : "Meal", type.DisplayOrder, meal.Id,
+                meal.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? meal.Sku, 1))
+            .ToListAsync(cancellationToken);
+        DeliveryPreparationSummaryResponse Build(IReadOnlyCollection<DeliveryPreparationMenuSource> legacyRows)
+        {
+            var summary = DeliveryPreparationAggregation.Build(date, scheduledOrders,
+                legacyRows.Concat(persistedRows).ToArray());
+            return summary with { Status = trackedDays.Any(d => d.ReviewReason != null) ? "NeedsReview"
+                : trackedDays.Any(d => !d.SelectionLocked) ? "Provisional" : summary.Status };
+        }
+        // Legacy orders keep their historical reporting path; new service days
+        // always use the customer's persisted choices, never regenerated defaults.
+        var orderIds = scheduledOrders.Where(order => !trackedOrderIds.Contains(order.OrderId))
+            .Select(order => order.OrderId).ToArray();
         var templateIds = scheduledOrders.Select(order => order.MealPlanId).Distinct().ToArray();
         var templates = await db.MealPlanTemplates.AsNoTracking()
             .Where(template => templateIds.Contains(template.Id))
@@ -138,7 +171,7 @@ public sealed class AdminDeliveryCalendarService(
             .Select(day => day.Id)
             .ToArray();
         if (menuDayIds.Length == 0)
-            return DeliveryPreparationAggregation.Build(date, scheduledOrders, []);
+            return Build([]);
 
         var menuCandidates = await (
             from orderMeal in db.OrderMeals.AsNoTracking()
@@ -196,7 +229,7 @@ public sealed class AdminDeliveryCalendarService(
                 row.Quantity))
             .ToArray();
 
-        return DeliveryPreparationAggregation.Build(date, scheduledOrders, menuRows);
+        return Build(menuRows);
     }
 
     private static string ResolveCustomerName(
