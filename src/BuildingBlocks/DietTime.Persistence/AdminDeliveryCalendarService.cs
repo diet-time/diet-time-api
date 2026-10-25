@@ -2,10 +2,13 @@ using DietTime.Application;
 using DietTime.Contracts;
 using DietTime.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace DietTime.Persistence;
 
-public sealed class AdminDeliveryCalendarService(DietTimeDbContext db) : IAdminDeliveryCalendarService
+public sealed class AdminDeliveryCalendarService(
+    DietTimeDbContext db,
+    IOptions<MenuRotationOptions> rotationOptions) : IAdminDeliveryCalendarService
 {
     public async Task<AdminDeliveryCalendarResponse> GetMonthAsync(
         DateOnly startDate,
@@ -110,6 +113,33 @@ public sealed class AdminDeliveryCalendarService(DietTimeDbContext db) : IAdminD
             return DeliveryPreparationAggregation.Build(date, [], []);
 
         var orderIds = scheduledOrders.Select(order => order.OrderId).ToArray();
+        var templateIds = scheduledOrders.Select(order => order.MealPlanId).Distinct().ToArray();
+        var templates = await db.MealPlanTemplates.AsNoTracking()
+            .Where(template => templateIds.Contains(template.Id))
+            .Select(template => new { template.Id, template.CycleWeeks, template.ValidFrom })
+            .ToListAsync(cancellationToken);
+        var templateById = templates.ToDictionary(template => template.Id);
+        var templateDays = await db.MealPlanTemplateDays.AsNoTracking()
+            .Where(day => templateIds.Contains(day.MealPlanTemplateId) && day.IsActive)
+            .Select(day => new { day.Id, day.MealPlanTemplateId, day.WeekNumber, day.MenuWeekday })
+            .ToListAsync(cancellationToken);
+        var menuDayIds = templateDays
+            .Where(day =>
+            {
+                if (!templateById.TryGetValue(day.MealPlanTemplateId, out var template))
+                    return false;
+                var week = MenuRotationResolver.ResolveWeek(
+                    date,
+                    template.CycleWeeks,
+                    template.ValidFrom,
+                    rotationOptions.Value.AnchorDate);
+                return week.HasValue && day.WeekNumber == week.Value && day.MenuWeekday == menuWeekday;
+            })
+            .Select(day => day.Id)
+            .ToArray();
+        if (menuDayIds.Length == 0)
+            return DeliveryPreparationAggregation.Build(date, scheduledOrders, []);
+
         var menuCandidates = await (
             from orderMeal in db.OrderMeals.AsNoTracking()
             where orderIds.Contains(orderMeal.OrderId)
@@ -126,7 +156,7 @@ public sealed class AdminDeliveryCalendarService(DietTimeDbContext db) : IAdminD
                 on orderMeal.MealTypeId equals mealType.Id
             join menuItem in db.MealItems.AsNoTracking()
                 on option.MealItemId equals menuItem.Id
-            where day.MenuWeekday == menuWeekday
+            where menuDayIds.Contains(day.Id) && day.MenuWeekday == menuWeekday
             select new
             {
                 orderMeal.OrderId,

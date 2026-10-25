@@ -4,10 +4,16 @@ using DietTime.Contracts;
 using DietTime.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
 
 namespace DietTime.Persistence;
 
-public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService storage, IMemoryCache cache, TimeProvider clock) : IMealQueryService
+public sealed class MealQueryService(
+    DietTimeDbContext db,
+    IStorageUrlService storage,
+    IMemoryCache cache,
+    TimeProvider clock,
+    IOptions<MenuRotationOptions> rotationOptions) : IMealQueryService
 {
     public async Task<IReadOnlyList<PlanCategoryResponse>> GetPlanCategoriesAsync(string language, DateOnly today, CancellationToken ct)
     {
@@ -46,6 +52,7 @@ public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService st
                 planIds.Contains(option.Slot.Day.MealPlanTemplateId) &&
                 option.Slot.Day.IsActive &&
                 option.Slot.IsActive &&
+                option.Slot.MealType.IsActive &&
                 option.IsAvailable &&
                 (option.AvailableFrom == null || option.AvailableFrom <= now) &&
                 (option.AvailableUntil == null || option.AvailableUntil > now) &&
@@ -124,7 +131,16 @@ public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService st
     public async Task<MealPlanResponse?> GetPlanAsync(Guid planId, string language, DateOnly today, CancellationToken ct)
     {
         var plan = await db.MealPlanTemplates.AsNoTracking()
-            .Where(p => p.Id == planId && p.IsActive && p.IsPublished && (p.ValidFrom == null || p.ValidFrom <= today) && (p.ValidUntil == null || p.ValidUntil >= today))
+            .Where(p =>
+                p.Id == planId &&
+                p.IsActive &&
+                p.IsPublished &&
+                !db.MealPlanTemplates.Any(version =>
+                    version.VersionGroupId == p.VersionGroupId &&
+                    version.IsPublished &&
+                    version.VersionNumber > p.VersionNumber) &&
+                (p.ValidFrom == null || p.ValidFrom <= today) &&
+                (p.ValidUntil == null || p.ValidUntil >= today))
             .Select(p => new
             {
                 p.Id,
@@ -167,7 +183,11 @@ public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService st
             .ToListAsync(ct);
 
         var typeRows = await db.MealPlanTemplateSlots.AsNoTracking()
-            .Where(slot => slot.Day.MealPlanTemplateId == plan.Id && slot.IsActive)
+            .Where(slot =>
+                slot.Day.MealPlanTemplateId == plan.Id &&
+                slot.Day.IsActive &&
+                slot.IsActive &&
+                slot.MealType.IsActive)
             .Select(slot => new
             {
                 slot.MealType.Id,
@@ -207,15 +227,31 @@ public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService st
 
     public async Task<IReadOnlyList<CalendarDayResponse>?> GetCalendarAsync(Guid planId, DateOnly startDate, int numberOfDays, string language, CancellationToken ct)
     {
-        var plan = await db.MealPlanTemplates.AsNoTracking().Where(p => p.Id == planId && p.IsActive && p.IsPublished)
-            .Select(p => new { Days = p.Days.Where(d => d.IsActive).Select(d => new { d.Id, d.MenuWeekday }).ToList() }).SingleOrDefaultAsync(ct);
+        var plan = await db.MealPlanTemplates.AsNoTracking()
+            .Where(p =>
+                p.Id == planId &&
+                p.IsActive &&
+                p.IsPublished &&
+                !db.MealPlanTemplates.Any(version =>
+                    version.VersionGroupId == p.VersionGroupId &&
+                    version.IsPublished &&
+                    version.VersionNumber > p.VersionNumber))
+            .Select(p => new
+            {
+                p.CycleWeeks,
+                p.ValidFrom,
+                Days = p.Days.Where(d => d.IsActive).Select(d => new { d.Id, d.WeekNumber, d.MenuWeekday }).ToList()
+            })
+            .SingleOrDefaultAsync(ct);
         if (plan is null) return null;
         var culture = CultureInfo.GetCultureInfo(language == "ar" ? "ar-QA" : "en-US");
         var result = new List<CalendarDayResponse>(numberOfDays);
         for (var i = 0; i < numberOfDays; i++)
         {
             var date = startDate.AddDays(i); var weekday = MenuWeekdayExtensions.FromDate(date);
-            var day = plan.Days.FirstOrDefault(d => d.MenuWeekday == weekday);
+            var week = MenuRotationResolver.ResolveWeek(date, plan.CycleWeeks, plan.ValidFrom, rotationOptions.Value.AnchorDate);
+            if (week is null) continue;
+            var day = plan.Days.FirstOrDefault(d => d.WeekNumber == week && d.MenuWeekday == weekday);
             if (day is null) continue;
             result.Add(new CalendarDayResponse(day.Id, date, weekday, culture.DateTimeFormat.GetAbbreviatedDayName(date.DayOfWeek), culture.DateTimeFormat.GetDayName(date.DayOfWeek), true));
         }
@@ -225,18 +261,36 @@ public sealed class MealQueryService(DietTimeDbContext db, IStorageUrlService st
     public async Task<PagedResult<MealCardResponse>?> GetPlanMealsAsync(Guid planId, MealListQuery request, string language, DateTimeOffset now, CancellationToken ct)
     {
         var dayId = request.TemplateDayId;
-        if (dayId is null)
+        if (dayId is null || request.Date.HasValue)
         {
             if (request.Date is null) return null;
-            var plan = await db.MealPlanTemplates.AsNoTracking().Where(p => p.Id == planId && p.IsActive && p.IsPublished).Select(p => new { Days = p.Days.Where(d => d.IsActive).Select(d => new { d.Id, d.MenuWeekday }).ToList() }).SingleOrDefaultAsync(ct);
+            var plan = await db.MealPlanTemplates.AsNoTracking()
+                .Where(p =>
+                    p.Id == planId &&
+                    p.IsActive &&
+                    p.IsPublished &&
+                    !db.MealPlanTemplates.Any(version =>
+                        version.VersionGroupId == p.VersionGroupId &&
+                        version.IsPublished &&
+                        version.VersionNumber > p.VersionNumber))
+                .Select(p => new
+                {
+                    p.CycleWeeks,
+                    p.ValidFrom,
+                    Days = p.Days.Where(d => d.IsActive).Select(d => new { d.Id, d.WeekNumber, d.MenuWeekday }).ToList()
+                })
+                .SingleOrDefaultAsync(ct);
             if (plan is null) return null;
             var weekday = MenuWeekdayExtensions.FromDate(request.Date.Value);
-            dayId = plan.Days.FirstOrDefault(d => d.MenuWeekday == weekday)?.Id;
+            var week = MenuRotationResolver.ResolveWeek(request.Date.Value, plan.CycleWeeks, plan.ValidFrom, rotationOptions.Value.AnchorDate);
+            dayId = week is null
+                ? null
+                : plan.Days.FirstOrDefault(d => d.WeekNumber == week && d.MenuWeekday == weekday)?.Id;
         }
         if (dayId is null) return new PagedResult<MealCardResponse>([], new(request.Page, request.PageSize, 0, 0));
 
         var queryDate = request.Date ?? DateOnly.FromDateTime(now.UtcDateTime);
-        var q = db.MealPlanSlotOptions.AsNoTracking().Where(o => o.Slot.MealPlanTemplateDayId == dayId && o.Slot.Day.MealPlanTemplateId == planId && o.Slot.IsActive && o.Slot.Day.IsActive && o.Slot.Day.Plan.IsActive && o.Slot.Day.Plan.IsPublished && (o.Slot.Day.Plan.ValidFrom == null || o.Slot.Day.Plan.ValidFrom <= queryDate) && (o.Slot.Day.Plan.ValidUntil == null || o.Slot.Day.Plan.ValidUntil >= queryDate) && o.IsAvailable && (o.AvailableFrom == null || o.AvailableFrom <= now) && (o.AvailableUntil == null || o.AvailableUntil > now) && o.MealItem.Status == "ACTIVE" && o.MealItem.IsAvailable && (o.MealItem.AvailableFrom == null || o.MealItem.AvailableFrom <= now) && (o.MealItem.AvailableUntil == null || o.MealItem.AvailableUntil > now));
+        var q = db.MealPlanSlotOptions.AsNoTracking().Where(o => o.Slot.MealPlanTemplateDayId == dayId && o.Slot.Day.MealPlanTemplateId == planId && o.Slot.IsActive && o.Slot.MealType.IsActive && o.Slot.Day.IsActive && o.Slot.Day.Plan.IsActive && o.Slot.Day.Plan.IsPublished && !db.MealPlanTemplates.Any(version => version.VersionGroupId == o.Slot.Day.Plan.VersionGroupId && version.IsPublished && version.VersionNumber > o.Slot.Day.Plan.VersionNumber) && (o.Slot.Day.Plan.ValidFrom == null || o.Slot.Day.Plan.ValidFrom <= queryDate) && (o.Slot.Day.Plan.ValidUntil == null || o.Slot.Day.Plan.ValidUntil >= queryDate) && o.IsAvailable && (o.AvailableFrom == null || o.AvailableFrom <= now) && (o.AvailableUntil == null || o.AvailableUntil > now) && o.MealItem.Status == "ACTIVE" && o.MealItem.IsAvailable && (o.MealItem.AvailableFrom == null || o.MealItem.AvailableFrom <= now) && (o.MealItem.AvailableUntil == null || o.MealItem.AvailableUntil > now));
         if (!string.IsNullOrWhiteSpace(request.MealType) && request.MealType != "ALL") q = q.Where(o => o.Slot.MealType.Code == request.MealType.ToUpper());
         if (request.CategoryId.HasValue) q = q.Where(o => o.MealItem.CategoryId == request.CategoryId);
         if (!string.IsNullOrWhiteSpace(request.Search)) { var term = request.Search.Trim(); q = q.Where(o => o.MealItem.Translations.Any(t => t.LanguageCode == language && EF.Functions.ILike(t.Name, $"%{term}%"))); }

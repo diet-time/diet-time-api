@@ -104,5 +104,11 @@ public sealed class WeeklyMenuTests
             RequestedWeekday = weekday;
             return Task.FromResult(result);
         }
+
+        public Task<MealPlanTemplateDayDetailResponse?> GetTemplateDayForDeliveryDateAsync(Guid templateId, DateOnly deliveryDate, CancellationToken cancellationToken)
+        {
+            RequestedWeekday = MenuWeekdayExtensions.FromDate(deliveryDate);
+            return Task.FromResult(result);
+        }
     }
 }

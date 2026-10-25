@@ -240,6 +240,7 @@ public interface IOperationalCalendarService
 public interface ITemplateMenuReader
 {
     Task<MealPlanTemplateDayDetailResponse?> GetTemplateDayByWeekdayAsync(Guid templateId, MenuWeekday weekday, CancellationToken cancellationToken);
+    Task<MealPlanTemplateDayDetailResponse?> GetTemplateDayForDeliveryDateAsync(Guid templateId, DateOnly deliveryDate, CancellationToken cancellationToken);
 }
 public interface IDeliverySchedulingService
 {

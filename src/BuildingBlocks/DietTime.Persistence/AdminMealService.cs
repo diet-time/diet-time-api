@@ -7,7 +7,13 @@ using Microsoft.Extensions.Options;
 
 namespace DietTime.Persistence;
 
-public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, IMemoryCache cache, IOptions<DeliveryScheduleOptions> deliverySchedule, IStorageUrlService storage) : IAdminMealService, ITemplateMenuReader
+public sealed class AdminMealService(
+    DietTimeDbContext db,
+    TimeProvider clock,
+    IMemoryCache cache,
+    IOptions<DeliveryScheduleOptions> deliverySchedule,
+    IOptions<MenuRotationOptions> rotationOptions,
+    IStorageUrlService storage) : IAdminMealService, ITemplateMenuReader
 {
     private const int ExpiringMealHorizonDays = 7;
 
@@ -1629,6 +1635,29 @@ public sealed class AdminMealService(DietTimeDbContext db, TimeProvider clock, I
     }
 
     public Task<MealPlanTemplateDayDetailResponse?> GetTemplateDayByWeekdayAsync(Guid templateId, MenuWeekday weekday, CancellationToken ct) => GetTemplateDayByWeekdayAsync(templateId, weekday, null, ct);
+
+    public async Task<MealPlanTemplateDayDetailResponse?> GetTemplateDayForDeliveryDateAsync(Guid templateId, DateOnly deliveryDate, CancellationToken ct)
+    {
+        var plan = await db.MealPlanTemplates.AsNoTracking()
+            .Where(x => x.Id == templateId && x.IsActive && x.IsPublished)
+            .Select(x => new { x.CycleWeeks, x.ValidFrom })
+            .SingleOrDefaultAsync(ct);
+        if (plan is null)
+            return null;
+
+        var week = MenuRotationResolver.ResolveWeek(
+            deliveryDate,
+            plan.CycleWeeks,
+            plan.ValidFrom,
+            rotationOptions.Value.AnchorDate);
+        return week is null
+            ? null
+            : await GetTemplateDayByWeekdayAsync(
+                templateId,
+                MenuWeekdayExtensions.FromDate(deliveryDate),
+                week,
+                ct);
+    }
 
     public async Task<MealPlanTemplateDayDetailResponse?> GetTemplateDayByWeekdayAsync(Guid templateId, MenuWeekday weekday, int? weekNumber, CancellationToken ct)
     {

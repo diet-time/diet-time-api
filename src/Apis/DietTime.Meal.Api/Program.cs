@@ -55,6 +55,7 @@ builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
 builder.Services.Configure<PhoneOtpOptions>(builder.Configuration.GetSection(PhoneOtpOptions.SectionName));
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
 builder.Services.Configure<DeliveryScheduleOptions>(builder.Configuration.GetSection(DeliveryScheduleOptions.SectionName));
+builder.Services.Configure<MenuRotationOptions>(builder.Configuration.GetSection(MenuRotationOptions.SectionName));
 builder.Services.Configure<CustomerNutritionOptions>(builder.Configuration.GetSection(CustomerNutritionOptions.SectionName));
 builder.Services.Configure<OrderOptions>(builder.Configuration.GetSection(OrderOptions.SectionName));
 builder.Services.Configure<OperationsDashboardOptions>(builder.Configuration.GetSection(OperationsDashboardOptions.SectionName));

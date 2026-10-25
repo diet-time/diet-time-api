@@ -108,7 +108,10 @@ public sealed record GuestPlanSummaryResponse(
     string? IconUrl,
     int DisplayOrder,
     bool IsSelected,
-    IReadOnlyList<GuestSlotResponse> Slots);
+    IReadOnlyList<GuestSlotResponse> Slots,
+    int VersionNumber = 1,
+    long Revision = 0,
+    int RotationWeek = 1);
 public sealed record GuestCalendarDayResponse(DateOnly Date, int DayNumber, string DayName, string ShortDayName, bool IsToday, bool IsSelected, bool IsAvailable);
 public sealed record GuestSlotMealTimeResponse(Guid Id, string Code, string Name, int DisplayOrder);
 public sealed record GuestSlotResponse(
@@ -144,7 +147,10 @@ public sealed record GuestMenuResponse(
     Guid PlanId,
     string PlanCode,
     DateOnly Date,
-    IReadOnlyList<GuestMealSlotResponse> Slots);
+    IReadOnlyList<GuestMealSlotResponse> Slots,
+    int VersionNumber = 1,
+    long Revision = 0,
+    int RotationWeek = 1);
 public sealed record GuestHomeResponse(
     IReadOnlyList<GuestPlanSummaryResponse> MealPlans,
     IReadOnlyList<GuestCalendarDayResponse> WeeklyCalendar);

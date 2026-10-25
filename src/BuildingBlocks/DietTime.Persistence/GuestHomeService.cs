@@ -4,6 +4,7 @@ using DietTime.Contracts;
 using DietTime.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
 
 namespace DietTime.Persistence;
 
@@ -11,7 +12,8 @@ public sealed class GuestHomeService(
     DietTimeDbContext db,
     IMemoryCache cache,
     GuestHomeCacheVersion cacheVersion,
-    IStorageUrlService storage) : IGuestHomeService
+    IStorageUrlService storage,
+    IOptions<MenuRotationOptions> rotationOptions) : IGuestHomeService
 {
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(10);
     private const int GuestCalendarLeadTimeDays = 2;
@@ -28,11 +30,6 @@ public sealed class GuestHomeService(
         var businessDate = DateOnly.FromDateTime(now.UtcDateTime);
         var calendarStart = businessDate.AddDays(GuestCalendarLeadTimeDays);
         var requestedDate = request.Date ?? calendarStart;
-        var cacheKey =
-            $"guest-home-summary:{cacheVersion.Current}:{language}:{businessDate:yyyy-MM-dd}:{requestedDate:yyyy-MM-dd}:{planCode ?? "-"}";
-
-        if (cache.TryGetValue(cacheKey, out GuestHomeResponse? cached))
-            return cached;
 
         var plans = await ActivePlans(requestedDate, language).ToListAsync(ct);
         if (plans.Count == 0)
@@ -47,12 +44,11 @@ public sealed class GuestHomeService(
 
         var selectedPlanDays = await db.MealPlanTemplateDays.AsNoTracking()
             .Where(day => day.MealPlanTemplateId == selectedPlan.Id && day.IsActive)
-            .Select(day => new DayRow(day.Id, day.MenuWeekday))
+            .Select(day => new DayRow(day.Id, day.WeekNumber, day.MenuWeekday))
             .ToListAsync(ct);
 
         var selectedDate = requestedDate;
-        var selectedDay = selectedPlanDays.FirstOrDefault(day =>
-            day.MenuWeekday == MenuWeekdayExtensions.FromDate(selectedDate));
+        var selectedDay = FindDay(selectedPlan, selectedPlanDays, selectedDate);
 
         if (selectedDay is null && request.Date is null)
         {
@@ -62,8 +58,7 @@ public sealed class GuestHomeService(
                 if (selectedPlan.ValidUntil is not null && candidate > selectedPlan.ValidUntil)
                     break;
 
-                selectedDay = selectedPlanDays.FirstOrDefault(day =>
-                    day.MenuWeekday == MenuWeekdayExtensions.FromDate(candidate));
+                selectedDay = FindDay(selectedPlan, selectedPlanDays, candidate);
                 if (selectedDay is not null)
                     selectedDate = candidate;
             }
@@ -71,6 +66,13 @@ public sealed class GuestHomeService(
 
         if (selectedDay is null)
             return null;
+
+        var selectedWeek = ResolveWeek(selectedPlan, selectedDate);
+        var cacheKey =
+            $"guest-home-summary:{cacheVersion.Current}:{language}:{businessDate:yyyy-MM-dd}:{selectedPlan.Id}:{selectedPlan.VersionNumber}:{selectedPlan.Revision}:{selectedWeek?.ToString() ?? "-"}:{selectedDate:yyyy-MM-dd}";
+
+        if (cache.TryGetValue(cacheKey, out GuestHomeResponse? cached))
+            return cached;
 
         var culture = CultureInfo.GetCultureInfo(language == "ar" ? "ar-QA" : "en-US");
         var weeklyCalendar = Enumerable.Range(0, 7)
@@ -82,21 +84,45 @@ public sealed class GuestHomeService(
                 culture.DateTimeFormat.GetAbbreviatedDayName(date.DayOfWeek),
                 date == businessDate,
                 date == selectedDate,
-                selectedPlanDays.Any(day =>
-                    day.MenuWeekday == MenuWeekdayExtensions.FromDate(date))
+                FindDay(selectedPlan, selectedPlanDays, date) is not null
                     && (selectedPlan.ValidFrom is null || date >= selectedPlan.ValidFrom)
                     && (selectedPlan.ValidUntil is null || date <= selectedPlan.ValidUntil)))
             .ToArray();
 
         var planIds = plans.Select(plan => plan.Id).ToArray();
+        var planDays = await db.MealPlanTemplateDays.AsNoTracking()
+            .Where(day => planIds.Contains(day.MealPlanTemplateId) && day.IsActive)
+            .Select(day => new PlanDayRow(day.MealPlanTemplateId, day.Id, day.WeekNumber, day.MenuWeekday))
+            .ToListAsync(ct);
+        var selectedDayIds = plans
+            .SelectMany(plan =>
+            {
+                var week = ResolveWeek(plan, selectedDate);
+                return week is null
+                    ? []
+                    : planDays
+                        .Where(day =>
+                            day.PlanId == plan.Id &&
+                            day.WeekNumber == week &&
+                            day.MenuWeekday == MenuWeekdayExtensions.FromDate(selectedDate))
+                        .Select(day => day.Id);
+            })
+            .ToArray();
         var selectedWeekday = MenuWeekdayExtensions.FromDate(selectedDate);
         var slotRows = await db.MealPlanTemplateSlots.AsNoTracking()
             .Where(slot =>
-                planIds.Contains(slot.Day.MealPlanTemplateId) &&
-                slot.Day.IsActive &&
+                selectedDayIds.Contains(slot.MealPlanTemplateDayId) &&
                 slot.Day.MenuWeekday == selectedWeekday &&
                 slot.IsActive &&
-                slot.MealType.IsActive)
+                slot.MealType.IsActive &&
+                slot.Options.Any(option =>
+                    option.IsAvailable &&
+                    (option.AvailableFrom == null || option.AvailableFrom <= now) &&
+                    (option.AvailableUntil == null || option.AvailableUntil > now) &&
+                    option.MealItem.Status == "ACTIVE" &&
+                    option.MealItem.IsAvailable &&
+                    (option.MealItem.AvailableFrom == null || option.MealItem.AvailableFrom <= now) &&
+                    (option.MealItem.AvailableUntil == null || option.MealItem.AvailableUntil > now)))
             .OrderBy(slot => slot.MealType.DisplayOrder)
             .ThenBy(slot => slot.DisplayOrder)
             .ThenBy(slot => slot.Id)
@@ -138,7 +164,10 @@ public sealed class GuestHomeService(
                     .ThenBy(slot => slot.DisplayOrder)
                     .ThenBy(slot => slot.Id)
                     .Select(ToSlotResponse)
-                    .ToArray()))
+                    .ToArray(),
+                plan.VersionNumber,
+                plan.Revision,
+                ResolveWeek(plan, selectedDate) ?? 1))
                 .ToArray(),
             weeklyCalendar);
 
@@ -154,22 +183,28 @@ public sealed class GuestHomeService(
     {
         var language = request.Language.Trim().ToLowerInvariant();
         var normalizedPlanCode = planCode.Trim().ToUpperInvariant();
-        var cacheKey =
-            $"guest-menu:{cacheVersion.Current}:{language}:{request.Date:yyyy-MM-dd}:{normalizedPlanCode}";
-
-        if (cache.TryGetValue(cacheKey, out GuestMenuResponse? cached))
-            return cached;
 
         var plan = await ActivePlans(request.Date, language, normalizedPlanCode)
             .FirstOrDefaultAsync(ct);
         if (plan is null)
             return null;
 
+        var week = ResolveWeek(plan, request.Date);
+        if (week is null)
+            return null;
+
+        var cacheKey =
+            $"guest-menu:{cacheVersion.Current}:{language}:{plan.Id}:{plan.VersionNumber}:{plan.Revision}:{request.Date:yyyy-MM-dd}:{week.Value}";
+
+        if (cache.TryGetValue(cacheKey, out GuestMenuResponse? cached))
+            return cached;
+
         var weekday = MenuWeekdayExtensions.FromDate(request.Date);
         var dayId = await db.MealPlanTemplateDays.AsNoTracking()
             .Where(day =>
                 day.MealPlanTemplateId == plan.Id &&
                 day.IsActive &&
+                day.WeekNumber == week &&
                 day.MenuWeekday == weekday)
             .Select(day => (Guid?)day.Id)
             .FirstOrDefaultAsync(ct);
@@ -187,7 +222,10 @@ public sealed class GuestHomeService(
             plan.Id,
             plan.Code,
             request.Date,
-            BuildSlots(mealRows));
+            BuildSlots(mealRows),
+            plan.VersionNumber,
+            plan.Revision,
+            week.Value);
         cache.Set(cacheKey, response, CacheDuration);
         return response;
     }
@@ -287,6 +325,9 @@ public sealed class GuestHomeService(
                     .FirstOrDefault(),
                 plan.ValidFrom,
                 plan.ValidUntil,
+                plan.VersionNumber,
+                plan.RowVersion,
+                plan.CycleWeeks,
                 plan.Translations
                     .Where(t => t.LanguageCode.ToLower() == language && t.Name != "")
                     .Select(t => t.Name)
@@ -316,6 +357,23 @@ public sealed class GuestHomeService(
                         .Select(t => t.ShortDescription)
                         .FirstOrDefault()
                     ?? string.Empty));
+    }
+
+    private int? ResolveWeek(PlanRow plan, DateOnly date) =>
+        MenuRotationResolver.ResolveWeek(
+            date,
+            plan.CycleWeeks,
+            plan.ValidFrom,
+            rotationOptions.Value.AnchorDate);
+
+    private DayRow? FindDay(PlanRow plan, IEnumerable<DayRow> days, DateOnly date)
+    {
+        var week = ResolveWeek(plan, date);
+        return week is null
+            ? null
+            : days.FirstOrDefault(day =>
+                day.WeekNumber == week &&
+                day.MenuWeekday == MenuWeekdayExtensions.FromDate(date));
     }
 
     private IQueryable<MealPlanSlotOption> AvailableMealOptions(
@@ -510,10 +568,15 @@ public sealed class GuestHomeService(
         string? ImageObjectKey,
         DateOnly? ValidFrom,
         DateOnly? ValidUntil,
+        int VersionNumber,
+        long Revision,
+        int CycleWeeks,
         string Name,
         string Description);
 
-    private sealed record DayRow(Guid Id, MenuWeekday MenuWeekday);
+    private sealed record DayRow(Guid Id, int WeekNumber, MenuWeekday MenuWeekday);
+
+    private sealed record PlanDayRow(Guid PlanId, Guid Id, int WeekNumber, MenuWeekday MenuWeekday);
 
     private sealed record SlotRow(
         Guid PlanId,

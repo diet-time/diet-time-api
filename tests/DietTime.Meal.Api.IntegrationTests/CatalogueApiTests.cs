@@ -276,11 +276,112 @@ public sealed class CatalogueApiTests : IAsyncLifetime
     }
     [Fact] public async Task Updating_published_template_creates_latest_draft_version() { if (!enabled) return; using var scope = factory!.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>(); var source = await db.MealPlanTemplates.Include(x => x.Translations).SingleAsync(x => x.Id == planId); var request = new CreatePlanRequest(source.Code, source.PlanType, source.DurationDays, source.IsCustomizable, source.ValidFrom, source.ValidUntil, source.Translations.Select(x => new AdminTranslationRequest(x.LanguageCode, x.Name, x.ShortDescription, x.FullDescription)).ToArray()); var result = await scope.ServiceProvider.GetRequiredService<IAdminMealService>().UpdatePlanAsync(planId, request, null, default); Assert.NotNull(result); Assert.True(result.CreatedDraft); db.ChangeTracker.Clear(); var versions = await db.MealPlanTemplates.Include(x => x.Days).Where(x => x.VersionGroupId == source.VersionGroupId).OrderBy(x => x.VersionNumber).ToListAsync(); Assert.Equal(2, versions.Count); Assert.True(versions[0].IsPublished); Assert.False(versions[0].IsLatest); Assert.False(versions[1].IsPublished); Assert.True(versions[1].IsLatest); Assert.NotEmpty(versions[1].Days); }
     [Fact] public async Task Admin_meal_list_returns_translations_availability_price_category_and_nutrition() { if (!enabled) return; using var scope = factory!.Services.CreateScope(); var result = await scope.ServiceProvider.GetRequiredService<IAdminMealService>().GetMealsAsync(null, 1, 25, default); var meal = Assert.Single(result.Items); Assert.Equal("وجبة تجريبية", meal.NameAr); Assert.True(meal.IsAvailable); Assert.NotNull(meal.AvailableFrom); Assert.NotNull(meal.AvailableUntil); Assert.Equal("BREAKFAST", meal.Category.Code); Assert.Equal("Breakfast", meal.Category.Name); Assert.Equal(500, meal.Nutrition?.ServingQuantity); Assert.Equal(420, meal.Nutrition?.CaloriesKcal); Assert.Equal(25, meal.Price?.Amount); Assert.Equal("QAR", meal.Price?.CurrencyCode); }
-    [Fact] public async Task Guest_home_is_public_and_returns_plans_slots_and_dates_without_meals() { if (!enabled) return; var today = DateOnly.FromDateTime(DateTime.UtcNow); var response = await client!.GetAsync("/api/v1/guest/home?date=2026-07-23"); Assert.Equal(HttpStatusCode.OK, response.StatusCode); var body = await response.Content.ReadAsStringAsync(); using var json = System.Text.Json.JsonDocument.Parse(body); var data = json.RootElement.GetProperty("data"); Assert.Equal(2, data.GetProperty("mealPlans").GetArrayLength()); var selectedPlan = data.GetProperty("mealPlans").EnumerateArray().Single(x => x.GetProperty("isSelected").GetBoolean()); Assert.Equal("CLASSIC", selectedPlan.GetProperty("code").GetString()); Assert.Equal("Classic short description", selectedPlan.GetProperty("description").GetString()); Assert.Equal("https://cdn.test/plan.png", selectedPlan.GetProperty("imageUrl").GetString()); var slots = selectedPlan.GetProperty("slots").EnumerateArray().ToArray(); Assert.Equal(["BREAKFAST", "SNACK_DESSERT"], slots.Select(x => x.GetProperty("mealTime").GetProperty("code").GetString()).ToArray()); Assert.All(slots, slot => Assert.False(slot.TryGetProperty("meals", out _))); var calendar = data.GetProperty("weeklyCalendar").EnumerateArray().ToArray(); Assert.Equal(7, calendar.Length); Assert.Equal(today.AddDays(2), DateOnly.Parse(calendar[0].GetProperty("date").GetString()!)); Assert.False(data.TryGetProperty("menus", out _)); Assert.False(data.TryGetProperty("pagination", out _)); }
+    [Fact] public async Task Guest_home_is_public_and_returns_only_slots_with_active_meals() { if (!enabled) return; var today = DateOnly.FromDateTime(DateTime.UtcNow); var response = await client!.GetAsync("/api/v1/guest/home?date=2026-07-23"); Assert.Equal(HttpStatusCode.OK, response.StatusCode); var body = await response.Content.ReadAsStringAsync(); using var json = System.Text.Json.JsonDocument.Parse(body); var data = json.RootElement.GetProperty("data"); Assert.Equal(2, data.GetProperty("mealPlans").GetArrayLength()); var selectedPlan = data.GetProperty("mealPlans").EnumerateArray().Single(x => x.GetProperty("isSelected").GetBoolean()); Assert.Equal("CLASSIC", selectedPlan.GetProperty("code").GetString()); Assert.Equal("Classic short description", selectedPlan.GetProperty("description").GetString()); Assert.Equal("https://cdn.test/plan.png", selectedPlan.GetProperty("imageUrl").GetString()); var slots = selectedPlan.GetProperty("slots").EnumerateArray().ToArray(); Assert.Equal(["BREAKFAST"], slots.Select(x => x.GetProperty("mealTime").GetProperty("code").GetString()).ToArray()); Assert.All(slots, slot => Assert.False(slot.TryGetProperty("meals", out _))); var calendar = data.GetProperty("weeklyCalendar").EnumerateArray().ToArray(); Assert.Equal(7, calendar.Length); Assert.Equal(today.AddDays(2), DateOnly.Parse(calendar[0].GetProperty("date").GetString()!)); Assert.False(data.TryGetProperty("menus", out _)); Assert.False(data.TryGetProperty("pagination", out _)); }
     [Fact] public async Task Meal_plan_categories_return_daily_price_from_the_preferred_active_package() { if (!enabled) return; using var json = System.Text.Json.JsonDocument.Parse(await client!.GetStringAsync("/api/v1/meal-plan-categories?language=en")); var plans = json.RootElement.GetProperty("data").EnumerateArray().ToArray(); Assert.Equal(2, plans.Length); var classic = plans.Single(x => x.GetProperty("code").GetString() == "CLASSIC"); Assert.Equal("https://cdn.test/plan.png", classic.GetProperty("imageUrl").GetString()); Assert.Equal(420, classic.GetProperty("dailyCaloriesKcal").GetDecimal()); Assert.Equal(55, classic.GetProperty("startingPrice").GetDecimal()); Assert.Equal(55, classic.GetProperty("displayDailyPrice").GetDecimal()); Assert.Equal("QAR", classic.GetProperty("currencyCode").GetString()); Assert.Equal(1, classic.GetProperty("sourceDurationDays").GetInt32()); Assert.Equal(oneDayPriceId, classic.GetProperty("pricingRecordId").GetGuid()); Assert.True(classic.GetProperty("hasActivePrice").GetBoolean()); var premium = plans.Single(x => x.GetProperty("code").GetString() == "PREMIUM"); Assert.Equal(300, premium.GetProperty("startingPrice").GetDecimal()); Assert.Equal(50, premium.GetProperty("displayDailyPrice").GetDecimal()); Assert.Equal(6, premium.GetProperty("sourceDurationDays").GetInt32()); Assert.Equal(sixDayPriceId, premium.GetProperty("pricingRecordId").GetGuid()); }
     [Fact] public async Task Guest_home_localizes_plans_and_falls_back_to_english() { if (!enabled) return; var body = await client!.GetStringAsync("/api/v1/guest/home?date=2026-07-23&language=ar"); using var json = System.Text.Json.JsonDocument.Parse(body); var plans = json.RootElement.GetProperty("data").GetProperty("mealPlans").EnumerateArray().ToArray(); var classic = plans.Single(x => x.GetProperty("code").GetString() == "CLASSIC"); var premium = plans.Single(x => x.GetProperty("code").GetString() == "PREMIUM"); Assert.Equal("Arabic Classic", classic.GetProperty("name").GetString()); Assert.Equal("Arabic plan short description", classic.GetProperty("description").GetString()); Assert.Equal("Premium", premium.GetProperty("name").GetString()); }
     [Fact] public async Task Guest_home_selects_requested_plan() { if (!enabled) return; var body = await client!.GetStringAsync("/api/v1/guest/home?date=2026-07-23&planCode=premium"); using var json = System.Text.Json.JsonDocument.Parse(body); var selected = json.RootElement.GetProperty("data").GetProperty("mealPlans").EnumerateArray().Single(x => x.GetProperty("isSelected").GetBoolean()); Assert.Equal("PREMIUM", selected.GetProperty("code").GetString()); }
     [Fact] public async Task Guest_menu_returns_meals_for_specific_plan_and_date() { if (!enabled) return; var response = await client!.GetAsync("/api/v1/guest/meal-plans/CLASSIC/menu?date=2026-07-23"); Assert.Equal(HttpStatusCode.OK, response.StatusCode); var body = await response.Content.ReadAsStringAsync(); using var json = System.Text.Json.JsonDocument.Parse(body); var data = json.RootElement.GetProperty("data"); Assert.Equal("CLASSIC", data.GetProperty("planCode").GetString()); Assert.Equal("2026-07-23", data.GetProperty("date").GetString()); var slot = Assert.Single(data.GetProperty("slots").EnumerateArray()); var meal = Assert.Single(slot.GetProperty("meals").EnumerateArray()); Assert.Equal("DT-BRK-0001", meal.GetProperty("code").GetString()); }
+    [Fact]
+    public async Task Guest_menu_uses_only_the_resolved_rotation_week_and_omits_empty_slots()
+    {
+        if (!enabled) return;
+
+        var now = DateTimeOffset.UtcNow;
+        var anchor = new DateOnly(2024, 1, 6);
+        var date = Enumerable.Range(1, 60)
+            .Select(offset => DateOnly.FromDateTime(now.UtcDateTime).AddDays(offset))
+            .First(candidate =>
+                MenuRotationResolver.ResolveWeek(candidate, 4, null, anchor) == 2 &&
+                candidate.DayOfWeek == DayOfWeek.Thursday);
+
+        using (var scope = factory!.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
+            var plan = await db.MealPlanTemplates.SingleAsync(template => template.Id == planId);
+            var snackType = await db.MealTypes.SingleAsync(type => type.Code == "SNACK_DESSERT");
+            var breakfastType = await db.MealTypes.SingleAsync(type => type.Code == "BREAKFAST");
+            plan.CycleWeeks = 4;
+            plan.ValidFrom = null;
+
+            var weekTwoDay = new MealPlanTemplateDay
+            {
+                Id = Guid.NewGuid(),
+                MealPlanTemplateId = plan.Id,
+                WeekNumber = 2,
+                MenuWeekday = MenuWeekday.Thursday,
+                DisplayOrder = 1,
+                IsActive = true,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            var activeSlot = new MealPlanTemplateSlot
+            {
+                Id = Guid.NewGuid(),
+                Day = weekTwoDay,
+                MealType = snackType,
+                DisplayOrder = 1,
+                MinimumSelection = 1,
+                MaximumSelection = 1,
+                IsRequired = true,
+                IsActive = true,
+                CreatedAt = now,
+                UpdatedAt = now,
+                RowVersion = 1
+            };
+            activeSlot.Options.Add(new MealPlanSlotOption
+            {
+                Id = Guid.NewGuid(),
+                MealItemId = mealId,
+                IsAvailable = true,
+                AvailableFrom = now.AddMinutes(-5),
+                AvailableUntil = now.AddMinutes(5),
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+            var emptySlot = new MealPlanTemplateSlot
+            {
+                Id = Guid.NewGuid(),
+                Day = weekTwoDay,
+                MealType = breakfastType,
+                DisplayOrder = 2,
+                MinimumSelection = 1,
+                MaximumSelection = 1,
+                IsRequired = true,
+                IsActive = true,
+                CreatedAt = now,
+                UpdatedAt = now,
+                RowVersion = 1
+            };
+            emptySlot.Options.Add(new MealPlanSlotOption
+            {
+                Id = Guid.NewGuid(),
+                MealItemId = mealId,
+                IsAvailable = false,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
+            weekTwoDay.Slots.Add(activeSlot);
+            weekTwoDay.Slots.Add(emptySlot);
+            db.MealPlanTemplateDays.Add(weekTwoDay);
+            await db.SaveChangesAsync();
+        }
+
+        using var homeJson = System.Text.Json.JsonDocument.Parse(
+            await client!.GetStringAsync($"/api/v1/guest/home?date={date:yyyy-MM-dd}&planCode=CLASSIC"));
+        var homePlan = homeJson.RootElement.GetProperty("data").GetProperty("mealPlans")
+            .EnumerateArray().Single(plan => plan.GetProperty("isSelected").GetBoolean());
+        Assert.Equal(
+            ["SNACK_DESSERT"],
+            homePlan.GetProperty("slots").EnumerateArray()
+                .Select(slot => slot.GetProperty("mealTime").GetProperty("code").GetString())
+                .ToArray());
+
+        using var menuJson = System.Text.Json.JsonDocument.Parse(
+            await client.GetStringAsync($"/api/v1/guest/meal-plans/CLASSIC/menu?date={date:yyyy-MM-dd}"));
+        var menuSlots = menuJson.RootElement.GetProperty("data").GetProperty("slots").EnumerateArray().ToArray();
+        var menuSlot = Assert.Single(menuSlots);
+        Assert.Equal("SNACK_DESSERT", menuSlot.GetProperty("mealTime").GetProperty("code").GetString());
+    }
     [Fact] public async Task Guest_allergens_are_public_active_localized_and_cache_is_invalidated_on_update() { if (!enabled) return; var response = await client!.GetAsync("/api/v1/guest/allergens?language=ar"); Assert.Equal(HttpStatusCode.OK, response.StatusCode); using (var json = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync())) { var allergen = Assert.Single(json.RootElement.GetProperty("data").EnumerateArray()); Assert.Equal("TREE_NUTS", allergen.GetProperty("code").GetString()); Assert.Equal("Tree nuts Arabic", allergen.GetProperty("name").GetString()); Assert.NotEqual(Guid.Empty, allergen.GetProperty("id").GetGuid()); } using var scope = factory!.Services.CreateScope(); var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>(); var translation = await db.AllergenTranslations.SingleAsync(x => x.LanguageCode == "ar"); translation.Name = "Updated Arabic name"; await db.SaveChangesAsync(); using var updated = System.Text.Json.JsonDocument.Parse(await client.GetStringAsync("/api/v1/guest/allergens?language=ar")); Assert.Equal("Updated Arabic name", updated.RootElement.GetProperty("data")[0].GetProperty("name").GetString()); }
     [Fact]
     public async Task Purchase_options_localize_text_keep_the_same_plan_image_and_report_allergens()

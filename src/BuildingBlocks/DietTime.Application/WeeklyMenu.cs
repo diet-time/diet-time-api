@@ -57,7 +57,7 @@ public sealed class DeliverySchedulingService(
         CancellationToken cancellationToken)
     {
         var weekday = MenuWeekdayExtensions.FromDate(deliveryDate);
-        return await mealPlans.GetTemplateDayByWeekdayAsync(templateId, weekday, cancellationToken)
+        return await mealPlans.GetTemplateDayForDeliveryDateAsync(templateId, deliveryDate, cancellationToken)
             ?? throw new TemplateDayException(
                 "MENU_NOT_CONFIGURED_FOR_WEEKDAY",
                 $"No {weekday} menu is configured for this template.",
