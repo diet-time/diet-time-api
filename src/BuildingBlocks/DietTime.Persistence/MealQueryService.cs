@@ -182,12 +182,19 @@ public sealed class MealQueryService(
                         .FirstOrDefault()))
             .ToListAsync(ct);
 
+        var now = clock.GetUtcNow();
         var typeRows = await db.MealPlanTemplateSlots.AsNoTracking()
             .Where(slot =>
                 slot.Day.MealPlanTemplateId == plan.Id &&
                 slot.Day.IsActive &&
                 slot.IsActive &&
-                slot.MealType.IsActive)
+                slot.MealType.IsActive &&
+                slot.Options.Any(option => option.IsAvailable &&
+                    (option.AvailableFrom == null || option.AvailableFrom <= now) &&
+                    (option.AvailableUntil == null || option.AvailableUntil > now) &&
+                    option.MealItem.Status == "ACTIVE" && option.MealItem.IsAvailable &&
+                    (option.MealItem.AvailableFrom == null || option.MealItem.AvailableFrom <= now) &&
+                    (option.MealItem.AvailableUntil == null || option.MealItem.AvailableUntil > now)))
             .Select(slot => new
             {
                 slot.MealType.Id,
