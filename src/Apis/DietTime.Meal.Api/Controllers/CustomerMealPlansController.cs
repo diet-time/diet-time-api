@@ -16,6 +16,7 @@ public sealed class CustomerMealPlansController(
     ICustomerMealPlanPurchaseService purchases,
     ILanguageResolver languages) : ControllerBase
 {
+    [AllowAnonymous]
     [HttpGet("{mealPlanCode}/purchase-options")]
     [ProducesResponseType(typeof(ApiResponse<MealPlanPurchaseOptionsResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
@@ -25,8 +26,7 @@ public sealed class CustomerMealPlansController(
         [FromQuery] string? language,
         CancellationToken ct)
     {
-        if (!TryGetUserId(out var userId))
-            return Unauthorized();
+        TryGetUserId(out var userId); // Public configuration; anonymous callers receive no profile data.
 
         var resolvedLanguage = languages.Resolve(language, Request.Headers.AcceptLanguage);
         var options = await purchases.GetPurchaseOptionsAsync(
@@ -73,6 +73,8 @@ public sealed class CustomerMealPlansController(
                 UnprocessableEntity(Error("PRICE_PACKAGE_NOT_FOUND", "No package matches the selected price duration.")),
             MealPlanSelectionValidationStatus.PricePackageInactive =>
                 UnprocessableEntity(Error("PRICE_PACKAGE_INACTIVE", "The selected price package is inactive.")),
+            MealPlanSelectionValidationStatus.ConfigurationUnavailable =>
+                UnprocessableEntity(Error("CONFIGURATION_UNAVAILABLE", "The plan, package or duration is no longer purchasable.")),
             _ => throw new InvalidOperationException("Unsupported meal-plan selection validation status.")
         };
     }

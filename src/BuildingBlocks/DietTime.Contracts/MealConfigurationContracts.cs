@@ -9,8 +9,8 @@ public sealed record UpsertMealPackageOptionRequest(
 public sealed record SetActiveStatusRequest(bool IsActive);
 public sealed record MealPlanPricingResponse(
     Guid Id, Guid MealPlanId, string MealPlanName, string DurationId, string DurationName,
-    Guid PackageOptionId, string PackageName, int MealCount, int SnackCount,
-    decimal Price, string CurrencyCode, bool IsActive);
+    Guid? PackageOptionId, string PackageName, int MealCount, int SnackCount,
+    decimal Price, string CurrencyCode, bool IsActive, int ServiceDays = 0, bool IsAvailable = false);
 
 public sealed record UpsertMealPlanPricingRequest(
     Guid MealPlanId, string DurationId, Guid PackageOptionId, decimal Price,

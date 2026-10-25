@@ -18,6 +18,7 @@ public sealed class MealQueryService(
     public async Task<IReadOnlyList<PlanCategoryResponse>> GetPlanCategoriesAsync(string language, DateOnly today, CancellationToken ct)
     {
         var now = clock.GetUtcNow();
+        var availablePrices = PurchasablePlanPrices.Query(db, now).AsNoTracking();
         var rows = await db.MealPlanTemplates.AsNoTracking()
             .Where(p => p.IsActive && p.IsPublished && !db.MealPlanTemplates.Any(v => v.VersionGroupId == p.VersionGroupId && v.IsPublished && v.VersionNumber > p.VersionNumber) && (p.ValidFrom == null || p.ValidFrom <= today) && (p.ValidUntil == null || p.ValidUntil >= today))
             .OrderBy(p => p.PlanType).ThenBy(p => p.Code)
@@ -33,11 +34,7 @@ public sealed class MealQueryService(
                     .ThenBy(m => m.DisplayOrder)
                     .Select(m => new { m.PublicUrl, m.ObjectKey, m.ThumbnailUrl, m.ThumbnailObjectKey })
                     .FirstOrDefault(),
-                Prices = p.Prices
-                    .Where(price =>
-                        price.IsActive &&
-                        price.EffectiveFrom <= now &&
-                        (price.EffectiveUntil == null || price.EffectiveUntil > now))
+                Prices = availablePrices.Where(price => price.MealPlanTemplateId == p.Id)
                     .Select(price => new PlanCardPriceCandidate(
                         price.Id,
                         price.Amount,
@@ -155,8 +152,9 @@ public sealed class MealQueryService(
 
         if (plan is null) return null;
 
-        var prices = await db.MealPlanPrices.AsNoTracking()
-            .Where(price => price.MealPlanTemplateId == plan.Id && price.IsActive)
+        var now = clock.GetUtcNow();
+        var prices = await PurchasablePlanPrices.Query(db, now).AsNoTracking()
+            .Where(price => price.MealPlanTemplateId == plan.Id)
             .OrderBy(price => price.Amount)
             .Select(price => new PlanPriceResponse(
                 price.DurationDays,
@@ -182,7 +180,6 @@ public sealed class MealQueryService(
                         .FirstOrDefault()))
             .ToListAsync(ct);
 
-        var now = clock.GetUtcNow();
         var typeRows = await db.MealPlanTemplateSlots.AsNoTracking()
             .Where(slot =>
                 slot.Day.MealPlanTemplateId == plan.Id &&

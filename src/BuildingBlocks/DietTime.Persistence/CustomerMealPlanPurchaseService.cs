@@ -28,6 +28,9 @@ public sealed class CustomerMealPlanPurchaseService(
                 (plan.ValidFrom == null || plan.ValidFrom <= today) &&
                 (plan.ValidUntil == null || plan.ValidUntil >= today));
 
+        plans = plans.Where(plan => !db.MealPlanTemplates.Any(version =>
+            version.VersionGroupId == plan.VersionGroupId && version.IsPublished && version.VersionNumber > plan.VersionNumber));
+
         plans = isId
             ? plans.Where(plan => plan.Id == requestedId)
             : plans.Where(plan =>
@@ -89,42 +92,29 @@ public sealed class CustomerMealPlanPurchaseService(
             .FirstOrDefaultAsync(ct);
 
         var priceRows = await (
-            from price in db.MealPlanPrices.AsNoTracking()
-            join package in db.MealPlanPricePackages.AsNoTracking()
-                on price.DurationDays equals package.DurationDays
+            from price in PurchasablePlanPrices.Query(db, now).AsNoTracking()
+            join duration in db.MealPlanPricePackages.AsNoTracking() on price.PackageCode equals duration.Code
             where price.MealPlanTemplateId == plan.Id
-                && price.IsActive
-                && price.EffectiveFrom <= now
-                && (price.EffectiveUntil == null || price.EffectiveUntil > now)
-                && package.IsActive
-            orderby price.MealsPerDay, price.SnacksPerDay, package.DisplayOrder, price.Amount
+            orderby price.PackageOption!.DisplayOrder, duration.DisplayOrder
             select new PriceRow(
-                price.Id,
-                price.MealsPerDay,
-                price.SnacksPerDay,
-                price.CurrencyCode,
-                price.Amount,
-                package.Code,
-                language == "ar" ? package.NameAr : package.NameEn,
-                package.DurationDays,
-                package.DisplayOrder,
-                price.Translations
-                    .Where(translation => translation.LanguageCode == language)
-                    .Select(translation => translation.Name)
-                    .FirstOrDefault()
-                    ?? price.Translations
-                        .Where(translation => translation.LanguageCode == "en")
-                        .Select(translation => translation.Name)
-                        .FirstOrDefault(),
-                price.Translations
-                    .Where(translation => translation.LanguageCode == language)
-                    .Select(translation => translation.Description)
-                    .FirstOrDefault()
-                    ?? price.Translations
-                        .Where(translation => translation.LanguageCode == "en")
-                        .Select(translation => translation.Description)
-                        .FirstOrDefault()))
+                price.Id, price.MealsPerDay, price.SnacksPerDay, price.CurrencyCode,
+                price.Amount, duration.Code, language == "ar" ? duration.NameAr : duration.NameEn,
+                duration.DurationDays, duration.DisplayOrder,
+                price.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault()
+                    ?? price.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault(),
+                price.Translations.Where(t => t.LanguageCode == language).Select(t => t.Description).FirstOrDefault()
+                    ?? price.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Description).FirstOrDefault(),
+                price.PackageOption!.Id, price.PackageOption.Name, price.PackageOption.DisplayOrder))
             .ToListAsync(ct);
+
+        var typeRows = await db.MealPlanTemplateSlots.AsNoTracking()
+            .Where(slot => slot.Day.MealPlanTemplateId == plan.Id && slot.Day.IsActive && slot.IsActive && slot.MealType.IsActive)
+            .Select(slot => new { Id = slot.MealTypeId, slot.MealType.Code,
+                Name = slot.MealType.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault()
+                    ?? slot.MealType.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault()
+                    ?? slot.MealType.Code, slot.MealType.DisplayOrder })
+            .Distinct().OrderBy(type => type.DisplayOrder).ToListAsync(ct);
+        var supportedTypes = typeRows.Select(type => new MealTypeResponse(type.Id, type.Code, type.Name, type.DisplayOrder)).ToArray();
 
         var calorieRows = await db.MealPlanSlotOptions.AsNoTracking()
             .Where(option =>
@@ -165,17 +155,18 @@ public sealed class CustomerMealPlanPurchaseService(
                 0,
                 MidpointRounding.AwayFromZero);
 
-        var hasRecordedAllergens = await db.CustomerProfileAllergens.AsNoTracking()
+        var hasRecordedAllergens = userId != Guid.Empty && await db.CustomerProfileAllergens.AsNoTracking()
             .AnyAsync(item => item.CustomerProfile.UserId == userId, ct);
 
         var configurations = priceRows
-            .GroupBy(row => new { row.MealsPerDay, row.SnacksPerDay })
-            .OrderBy(group => group.Key.MealsPerDay)
+            .GroupBy(row => new { row.PackageOptionId, row.PackageOptionName, row.OptionDisplayOrder, row.MealsPerDay, row.SnacksPerDay })
+            .OrderBy(group => group.Key.OptionDisplayOrder)
+            .ThenBy(group => group.Key.MealsPerDay)
             .ThenBy(group => group.Key.SnacksPerDay)
             .Select(group => new MealPlanMealConfigurationResponse(
                 group.Key.MealsPerDay,
                 group.Key.SnacksPerDay,
-                ConfigurationName(group.Key.MealsPerDay, group.Key.SnacksPerDay, language),
+                group.Key.PackageOptionName,
                 IncludedText(group.Key.MealsPerDay, group.Key.SnacksPerDay, language),
                 group
                     .OrderBy(row => row.PackageDisplayOrder)
@@ -191,8 +182,9 @@ public sealed class CustomerMealPlanPurchaseService(
                         row.Amount,
                         DailyPrice(row.Amount, row.ServiceDays),
                         row.Name,
-                        row.Description))
-                    .ToArray()))
+                        row.Description,
+                        row.PackageCode, row.PackageName, plan.Id, row.PackageOptionId))
+                    .ToArray(), group.Key.PackageOptionId, group.Key.PackageOptionName))
             .ToArray();
 
         return new MealPlanPurchaseOptionsResponse(
@@ -204,7 +196,7 @@ public sealed class CustomerMealPlanPurchaseService(
                 ResolveImage(media?.ThumbnailUrl, media?.ThumbnailObjectKey, media?.PublicUrl, media?.ObjectKey),
                 estimatedCalories),
             configurations,
-            hasRecordedAllergens);
+            hasRecordedAllergens, supportedTypes);
     }
 
     public async Task<MealPlanSelectionValidationResult> ValidateSelectionAsync(
@@ -218,6 +210,7 @@ public sealed class CustomerMealPlanPurchaseService(
                 item.Id,
                 item.MealPlanTemplateId,
                 item.DurationDays,
+                item.PackageCode,
                 item.MealsPerDay,
                 item.SnacksPerDay,
                 item.CurrencyCode,
@@ -242,7 +235,7 @@ public sealed class CustomerMealPlanPurchaseService(
             return new(MealPlanSelectionValidationStatus.PriceExpired);
 
         var package = await db.MealPlanPricePackages.AsNoTracking()
-            .Where(item => item.DurationDays == price.DurationDays)
+            .Where(item => item.Code == price.PackageCode && item.DurationDays == price.DurationDays)
             .OrderBy(item => item.DisplayOrder)
             .Select(item => new { item.DurationDays, item.IsActive })
             .FirstOrDefaultAsync(ct);
@@ -251,6 +244,9 @@ public sealed class CustomerMealPlanPurchaseService(
             return new(MealPlanSelectionValidationStatus.PricePackageNotFound);
         if (!package.IsActive)
             return new(MealPlanSelectionValidationStatus.PricePackageInactive);
+
+        if (!await PurchasablePlanPrices.Query(db, now).AnyAsync(item => item.Id == price.Id, ct))
+            return new(MealPlanSelectionValidationStatus.ConfigurationUnavailable);
 
         return new(
             MealPlanSelectionValidationStatus.Valid,
@@ -310,5 +306,8 @@ public sealed class CustomerMealPlanPurchaseService(
         int ServiceDays,
         int PackageDisplayOrder,
         string? Name,
-        string? Description);
+        string? Description,
+        Guid PackageOptionId,
+        string PackageOptionName,
+        int OptionDisplayOrder);
 }

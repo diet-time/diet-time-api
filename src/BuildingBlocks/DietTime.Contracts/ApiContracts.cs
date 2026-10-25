@@ -61,17 +61,26 @@ public sealed record MealPlanPurchasePackageResponse(
     decimal Amount,
     decimal PricePerServiceDay,
     string? Name = null,
-    string? Description = null);
+    string? Description = null,
+    string? DurationId = null,
+    string? DurationName = null,
+    Guid? MealPlanId = null,
+    Guid? PackageOptionId = null,
+    bool IsActive = true,
+    bool IsAvailable = true);
 public sealed record MealPlanMealConfigurationResponse(
     int MealsPerDay,
     int SnacksPerDay,
     string DisplayName,
     string IncludedText,
-    IReadOnlyList<MealPlanPurchasePackageResponse> Packages);
+    IReadOnlyList<MealPlanPurchasePackageResponse> Packages,
+    Guid? PackageOptionId = null,
+    string? PackageOptionName = null);
 public sealed record MealPlanPurchaseOptionsResponse(
     MealPlanPurchasePlanResponse Plan,
     IReadOnlyList<MealPlanMealConfigurationResponse> MealConfigurations,
-    bool HasRecordedAllergens);
+    bool HasRecordedAllergens,
+    IReadOnlyList<MealTypeResponse>? SupportedMealTypes = null);
 public sealed record ValidateMealPlanSelectionRequest(
     Guid MealPlanTemplateId,
     Guid MealPlanPriceId);

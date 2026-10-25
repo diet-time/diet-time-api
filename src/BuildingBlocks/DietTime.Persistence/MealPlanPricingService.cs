@@ -10,7 +10,6 @@ public sealed class MealPlanPricingService(DietTimeDbContext db, TimeProvider cl
     public async Task<IReadOnlyList<MealPlanPricingResponse>> GetAsync(Guid? mealPlanId, string? durationId, Guid? packageOptionId, bool activeOnly, CancellationToken ct)
     {
         var query = db.MealPlanPrices.AsNoTracking()
-            .Where(x => x.PackageOptionId != null)
             .Include(x => x.Plan).ThenInclude(x => x.Translations)
             .Include(x => x.PackageOption).AsQueryable();
         if (mealPlanId.HasValue) query = query.Where(x => x.MealPlanTemplateId == mealPlanId);
@@ -25,9 +24,10 @@ public sealed class MealPlanPricingService(DietTimeDbContext db, TimeProvider cl
         if (activeOnly) query = query.Where(x => x.IsActive);
         var rows = await query.OrderBy(x => x.Plan.Code).ThenBy(x => x.DurationDays).ThenBy(x => x.PackageOption!.DisplayOrder).ToListAsync(ct);
         var durations = await db.MealPlanPricePackages.AsNoTracking().OrderBy(x => x.DisplayOrder).ToListAsync(ct);
+        var rowIds = rows.Select(row => row.Id).ToArray();
+        var availableIds = (await PurchasablePlanPrices.Query(db, clock.GetUtcNow()).Where(price => rowIds.Contains(price.Id)).Select(price => price.Id).ToListAsync(ct)).ToHashSet();
         return rows.Select(row => (Row: row, Duration: ResolveDuration(row, durations)))
-            .Where(x => x.Duration is not null)
-            .Select(x => Map(x.Row, x.Duration!)).ToArray();
+            .Select(x => Map(x.Row, x.Duration, availableIds.Contains(x.Row.Id))).ToArray();
     }
 
     public async Task<Guid> CreateAsync(UpsertMealPlanPricingRequest request, Guid? userId, CancellationToken ct)
@@ -82,10 +82,11 @@ public sealed class MealPlanPricingService(DietTimeDbContext db, TimeProvider cl
             throw new MealConfigurationException(409, "duplicate_package_pricing", "A price already exists for this meal plan, duration and package.");
     }
 
-    private static MealPlanPricingResponse Map(MealPlanPrice x, MealPlanPricePackage duration) => new(x.Id, x.MealPlanTemplateId,
+    private static MealPlanPricingResponse Map(MealPlanPrice x, MealPlanPricePackage? duration, bool isAvailable) => new(x.Id, x.MealPlanTemplateId,
         x.Plan.Translations.FirstOrDefault(t => t.LanguageCode == "en")?.Name ?? x.Plan.Code,
-        duration.Code, duration.NameEn, x.PackageOptionId!.Value, x.PackageOption!.Name,
-        x.PackageOption.MealCount, x.PackageOption.SnackCount, x.Amount, x.CurrencyCode.Trim(), x.IsActive);
+        duration?.Code ?? x.PackageCode ?? "", duration?.NameEn ?? "Missing duration mapping", x.PackageOptionId,
+        x.PackageOption?.Name ?? "Missing package mapping", x.MealsPerDay, x.SnacksPerDay,
+        x.Amount, x.CurrencyCode.Trim(), x.IsActive, duration?.DurationDays ?? x.DurationDays, isAvailable);
     private static string NormalizeCurrency(string value) => value.Trim().ToUpperInvariant();
     private static string NormalizeDurationId(string value) => string.Join('_', value.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries)).ToUpperInvariant();
     private static MealPlanPricePackage? ResolveDuration(MealPlanPrice price, IReadOnlyList<MealPlanPricePackage> durations) =>

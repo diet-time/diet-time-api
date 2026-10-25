@@ -64,7 +64,9 @@ public sealed class OrderService(
             .SingleOrDefaultAsync(x => x.Id == request.MealPlanTemplateId, cancellationToken);
         if (template is null)
             return Fail(PlaceOrderStatus.TemplateNotFound, "Meal plan template was not found.");
-        if (!template.IsActive || !template.IsPublished || !template.IsLatest ||
+        if (!template.IsActive || !template.IsPublished ||
+            await db.MealPlanTemplates.AnyAsync(version => version.VersionGroupId == template.VersionGroupId &&
+                version.IsPublished && version.VersionNumber > template.VersionNumber, cancellationToken) ||
             (template.ValidFrom.HasValue && today < template.ValidFrom.Value) ||
             (template.ValidUntil.HasValue && today > template.ValidUntil.Value))
             return Fail(PlaceOrderStatus.TemplateUnavailable, "Meal plan template is not currently available.");
@@ -77,6 +79,9 @@ public sealed class OrderService(
         if (!price.IsActive || price.EffectiveFrom > now ||
             (price.EffectiveUntil.HasValue && price.EffectiveUntil.Value <= now))
             return Fail(PlaceOrderStatus.PriceUnavailable, "Meal plan price is not currently effective.");
+
+        if (!await PurchasablePlanPrices.Query(db, now).AnyAsync(item => item.Id == price.Id, cancellationToken))
+            return Fail(PlaceOrderStatus.PriceUnavailable, "The selected plan, package or duration is no longer purchasable.");
 
         if (request.CouponCode is not null)
             return Fail(PlaceOrderStatus.CouponNotSupported, "Coupons are not supported yet; couponCode must be null.");

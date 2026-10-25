@@ -55,7 +55,8 @@ public enum MealPlanSelectionValidationStatus
     PriceNotEffective,
     PriceExpired,
     PricePackageNotFound,
-    PricePackageInactive
+    PricePackageInactive,
+    ConfigurationUnavailable
 }
 
 public sealed record MealPlanSelectionValidationResult(
