@@ -19,6 +19,8 @@ public sealed class CustomerAddressService(DietTimeDbContext db, TimeProvider cl
         if (!await LockOwnedProfileAsync(customerProfileId, userId, cancellationToken))
             return new(CustomerAddressWriteStatus.CustomerNotFound);
 
+        if (!await ValidSlotAsync(request.DeliveryTimeSlotId, cancellationToken))
+            return new(CustomerAddressWriteStatus.InvalidDeliveryTimeSlot);
         var hasActiveAddress = await db.CustomerAddresses
             .AnyAsync(x => x.CustomerProfileId == customerProfileId && x.IsActive, cancellationToken);
         var makeDefault = request.IsDefault || !hasActiveAddress;
@@ -89,6 +91,9 @@ public sealed class CustomerAddressService(DietTimeDbContext db, TimeProvider cl
         if (address is null)
             return new(CustomerAddressWriteStatus.AddressNotFound);
 
+        // Omission on legacy updates retains the previously saved choice.
+        if (request.DeliveryTimeSlotId.HasValue && !await ValidSlotAsync(request.DeliveryTimeSlotId, cancellationToken))
+            return new(CustomerAddressWriteStatus.InvalidDeliveryTimeSlot);
         if (request.IsDefault)
             await UnsetDefaultsAsync(customerProfileId, addressId, cancellationToken);
 
@@ -190,6 +195,7 @@ public sealed class CustomerAddressService(DietTimeDbContext db, TimeProvider cl
 
     private static void Apply(CustomerAddress address, UpsertCustomerAddressRequest request)
     {
+        if (request.DeliveryTimeSlotId.HasValue) address.DeliveryTimeSlotId = request.DeliveryTimeSlotId;
         address.AddressName = Clean(request.AddressName);
         address.AddressType = request.AddressType;
         address.BuildingNo = Clean(request.BuildingNo);
@@ -203,13 +209,16 @@ public sealed class CustomerAddressService(DietTimeDbContext db, TimeProvider cl
         address.FormattedAddress = Clean(request.FormattedAddress);
     }
 
+    private Task<bool> ValidSlotAsync(Guid? id, CancellationToken ct) =>
+        db.DeliveryTimeSlots.AnyAsync(x => x.Id == id && x.IsActive, ct);
+
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static CustomerAddressResponse Map(CustomerAddress address) => new(
         address.Id, address.CustomerProfileId, address.AddressName, address.AddressType,
         address.BuildingNo, address.StreetNo, address.UnitNumber, address.ZoneNo,
         address.Area, address.Directions, address.Latitude, address.Longitude,
-        address.FormattedAddress, address.IsDefault);
+        address.FormattedAddress, address.IsDefault, address.DeliveryTimeSlotId);
 }
 
 public sealed class DeliveryTimeSlotService(DietTimeDbContext db) : IDeliveryTimeSlotService

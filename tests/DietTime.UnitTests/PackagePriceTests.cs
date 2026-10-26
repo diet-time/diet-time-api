@@ -7,10 +7,12 @@ namespace DietTime.UnitTests;
 public sealed class PackagePriceTests
 {
     [Theory]
-    [InlineData(999, 799, 200, 20.02)]
+    [InlineData(999, 799, 200, 20)]
     [InlineData(100, 0, 100, 100)]
-    [InlineData(10.01, 9.99, 0.02, 0.20)]
-    [InlineData(3, 2, 1, 33.33)]
+    [InlineData(599, 500, 99, 17)]
+    [InlineData(200, 167, 33, 17)]
+    [InlineData(10.01, 9.99, 0.02, 0)]
+    [InlineData(3, 2, 1, 33)]
     public void Computes_exact_decimal_savings(decimal regular, decimal discounted, decimal saving, decimal percentage)
     {
         var value = PackagePriceRules.Calculate(regular, discounted);

@@ -78,7 +78,8 @@ public sealed record MealPlanPurchasePackageResponse(
     Guid? PackageOptionId = null,
     bool IsActive = true,
     bool IsAvailable = true,
-    decimal? DiscountedPrice = null, decimal? OriginalPrice = null)
+    decimal? DiscountedPrice = null, decimal? OriginalPrice = null,
+    DateTimeOffset? ServerNow = null, DateOnly? EarliestStartDate = null, int StartDateLeadTimeDays = 1)
 {
     public decimal RegularPrice => OriginalPrice ?? Amount;
     public decimal EffectivePrice => PackagePriceRules.Calculate(RegularPrice, DiscountedPrice).EffectivePrice;
@@ -221,6 +222,8 @@ public sealed class UpsertCustomerProfileRequest
     public string? ActivityLevelCode { get; init; }
     public string PreferredLanguage { get; init; } = "en";
     public string OnboardingStatus { get; init; } = "IN_PROGRESS";
+    public bool? AllergensConfirmed { get; init; }
+    public bool? PreferencesConfirmed { get; init; }
     public List<CustomerPreferenceRequest> Preferences { get => preferences; init => preferences = value ?? []; }
     public List<CustomerAllergenRequest> Allergens { get => allergens; init => allergens = value ?? []; }
 }
@@ -304,7 +307,8 @@ public sealed record CustomerProfileResponse(
     IReadOnlyList<CustomerAllergenResponse> Allergens,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    long RowVersion);
+    long RowVersion,
+    bool AllergensConfirmed = false, bool PreferencesConfirmed = false);
 
 public sealed record UpsertCustomerAddressRequest(
     string? AddressName,
@@ -318,7 +322,7 @@ public sealed record UpsertCustomerAddressRequest(
     decimal? Latitude,
     decimal? Longitude,
     string? FormattedAddress,
-    bool IsDefault = false);
+    bool IsDefault = false, Guid? DeliveryTimeSlotId = null);
 
 public sealed record CustomerAddressResponse(
     Guid Id,
@@ -334,7 +338,7 @@ public sealed record CustomerAddressResponse(
     decimal? Latitude,
     decimal? Longitude,
     string? FormattedAddress,
-    bool IsDefault);
+    bool IsDefault, Guid? DeliveryTimeSlotId = null);
 
 public sealed record CustomerAddressListResponse(IReadOnlyList<CustomerAddressResponse> Items);
 public sealed record DeliveryTimeSlotResponse(

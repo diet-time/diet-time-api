@@ -32,7 +32,7 @@ public sealed class CustomerAddressesController(ICustomerAddressService addresse
         if (!TryGetUserId(out var userId)) return Unauthorized();
         var result = await addresses.CreateAsync(customerProfileId, userId, request, cancellationToken);
         if (result.Status != CustomerAddressWriteStatus.Success)
-            return NotFoundProblem("customer_profile_not_found", "Customer profile not found.");
+            return WriteResult(result);
 
         return CreatedAtAction(nameof(Get),
             new { version = "1", customerProfileId, addressId = result.Address!.Id }, result.Address);
@@ -113,6 +113,8 @@ public sealed class CustomerAddressesController(ICustomerAddressService addresse
     private IActionResult WriteResult(CustomerAddressWriteResult result) => result.Status switch
     {
         CustomerAddressWriteStatus.Success => Ok(result.Address),
+        CustomerAddressWriteStatus.InvalidDeliveryTimeSlot => BadRequest(new ProblemDetails {
+            Status = 400, Title = "Select a delivery time slot", Detail = "Select an active delivery time slot before saving the address." }),
         CustomerAddressWriteStatus.CustomerNotFound => NotFoundProblem("customer_profile_not_found", "Customer profile not found."),
         _ => NotFoundProblem("address_not_found", "Customer address not found.")
     };

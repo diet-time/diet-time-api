@@ -16,6 +16,6 @@ public static class PackagePriceRules
         var effective = discounted ?? regular;
         var saving = regular - effective;
         return new(regular, discounted, effective, saving,
-            regular == 0 ? 0 : decimal.Round(saving / regular * 100, 2, MidpointRounding.AwayFromZero));
+            regular == 0 ? 0 : decimal.Round(saving / regular * 100, 0, MidpointRounding.AwayFromZero));
     }
 }

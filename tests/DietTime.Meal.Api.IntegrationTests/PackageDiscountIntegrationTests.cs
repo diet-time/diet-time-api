@@ -22,7 +22,7 @@ public sealed partial class UpcomingMealServiceTests
         await service.UpdateAsync(row.Id, request with { DiscountedPrice = 799 }, userId, default);
         var response = Assert.Single(await service.GetAsync(null, null, null, false, default));
         Assert.Equal(999, response.Price); Assert.Equal(799, response.EffectivePrice);
-        Assert.Equal(200, response.DiscountAmount); Assert.Equal(20.02m, response.DiscountPercentage);
+        Assert.Equal(200, response.DiscountAmount); Assert.Equal(20m, response.DiscountPercentage);
         await service.UpdateAsync(row.Id, request, userId, default);
         Assert.Equal(799, row.DiscountedPrice); // Older clients omit the field.
         await service.UpdateAsync(row.Id, request with { DiscountedPrice = 0 }, userId, default);

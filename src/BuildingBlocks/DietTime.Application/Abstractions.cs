@@ -86,7 +86,7 @@ public interface ICustomerProfileService
     Task<CustomerProfileResponse> UpdatePreferredNameAsync(Guid userId, string preferredName, CancellationToken cancellationToken);
 }
 
-public enum CustomerAddressWriteStatus { Success, CustomerNotFound, AddressNotFound }
+public enum CustomerAddressWriteStatus { Success, CustomerNotFound, AddressNotFound, InvalidDeliveryTimeSlot }
 public sealed record CustomerAddressWriteResult(
     CustomerAddressWriteStatus Status,
     CustomerAddressResponse? Address = null);

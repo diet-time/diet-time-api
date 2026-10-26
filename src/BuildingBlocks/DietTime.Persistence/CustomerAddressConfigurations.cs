@@ -17,6 +17,8 @@ public sealed class CustomerAddressConfiguration : IEntityTypeConfiguration<Cust
         entity.HasKey(x => x.Id);
         entity.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
         entity.Property(x => x.CustomerProfileId).HasColumnName("customer_profile_id").IsRequired();
+        entity.Property(x => x.DeliveryTimeSlotId).HasColumnName("delivery_time_slot_id");
+        entity.HasOne<DeliveryTimeSlot>().WithMany().HasForeignKey(x => x.DeliveryTimeSlotId).OnDelete(DeleteBehavior.Restrict);
         entity.Property(x => x.AddressName).HasColumnName("address_name").HasMaxLength(100);
         entity.Property(x => x.AddressType).HasColumnName("address_type").HasMaxLength(30).IsRequired();
         entity.Property(x => x.BuildingNo).HasColumnName("building_no").HasMaxLength(50);

@@ -198,6 +198,7 @@ public static class CustomerAddressTypes
 
 public sealed class CustomerAddress : Entity
 {
+    public Guid? DeliveryTimeSlotId { get; set; }
     public Guid CustomerProfileId { get; set; }
     public CustomerProfile CustomerProfile { get; set; } = null!;
     public string? AddressName { get; set; }

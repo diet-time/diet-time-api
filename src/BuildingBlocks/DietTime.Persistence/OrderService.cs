@@ -53,7 +53,7 @@ public sealed class OrderService(
                 "Idempotency-Key has already been used for a different order.");
 
         var now = clock.GetUtcNow();
-        var today = DateOnly.FromDateTime(now.UtcDateTime);
+        var today = SubscriptionMenuRules.QatarToday(now);
         var profile = await db.CustomerProfiles
             .SingleOrDefaultAsync(x => x.Id == request.CustomerProfileId && x.IsActive, cancellationToken);
         if (profile is null || profile.UserId != userId)
@@ -143,7 +143,9 @@ public sealed class OrderService(
         if (slot is null)
             return Fail(PlaceOrderStatus.DeliveryTimeSlotNotFound, "The selected delivery time slot was not found or is inactive.");
 
-        var minimumStartDate = today.AddDays(Math.Max(0, options.Value.MinimumLeadTimeDays));
+        var minimumStartDate = today.AddDays(Math.Max(1, options.Value.MinimumLeadTimeDays));
+        if (request.StartDate.DayOfWeek == DayOfWeek.Friday)
+            return Fail(PlaceOrderStatus.InvalidStartDate, "Friday is not a delivery day.");
         if (request.StartDate < minimumStartDate)
             return Fail(PlaceOrderStatus.InvalidStartDate,
                 $"startDate must be on or after {minimumStartDate:yyyy-MM-dd}.");

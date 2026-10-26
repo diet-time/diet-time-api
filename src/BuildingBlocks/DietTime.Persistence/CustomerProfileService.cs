@@ -81,6 +81,8 @@ public sealed class CustomerProfileService(
         profile.ActivityLevelCode = NormalizeCode(request.ActivityLevelCode);
         profile.PreferredLanguage = request.PreferredLanguage.Trim().ToLowerInvariant();
         profile.OnboardingStatus = request.OnboardingStatus.Trim().ToUpperInvariant();
+        profile.AllergensConfirmed = request.AllergensConfirmed ?? profile.AllergensConfirmed;
+        profile.PreferencesConfirmed = request.PreferencesConfirmed ?? profile.PreferencesConfirmed;
         if (profile.OnboardingStatus == "COMPLETED")
             profile.OnboardingCompletedAt ??= now;
         profile.UpdatedAt = now;
@@ -598,7 +600,7 @@ public sealed class CustomerProfileService(
                 .ToArray(),
             profile.CreatedAt,
             profile.UpdatedAt,
-            profile.RowVersion);
+            profile.RowVersion, profile.AllergensConfirmed, profile.PreferencesConfirmed);
     }
 
     private static string ResolveAllergenName(Allergen allergen, string language) =>

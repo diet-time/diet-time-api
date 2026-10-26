@@ -8,7 +8,8 @@ namespace DietTime.Persistence;
 public sealed class CustomerMealPlanPurchaseService(
     DietTimeDbContext db,
     IStorageUrlService storage,
-    TimeProvider clock) : ICustomerMealPlanPurchaseService
+    TimeProvider clock,
+    Microsoft.Extensions.Options.IOptions<OrderOptions>? orderOptions = null) : ICustomerMealPlanPurchaseService
 {
     public async Task<MealPlanPurchaseOptionsResponse?> GetPurchaseOptionsAsync(
         string mealPlanCodeOrId,
@@ -17,7 +18,8 @@ public sealed class CustomerMealPlanPurchaseService(
         CancellationToken ct)
     {
         var now = clock.GetUtcNow();
-        var today = DateOnly.FromDateTime(now.UtcDateTime);
+        var today = SubscriptionMenuRules.QatarToday(now);
+        var leadDays = Math.Max(1, orderOptions?.Value.MinimumLeadTimeDays ?? 1);
         var normalizedCode = mealPlanCodeOrId.Trim().ToUpperInvariant();
         var isId = Guid.TryParse(mealPlanCodeOrId, out var requestedId);
 
@@ -183,7 +185,7 @@ public sealed class CustomerMealPlanPurchaseService(
                         DailyPrice(row.DiscountedPrice ?? row.Amount, row.ServiceDays),
                         row.Name,
                         row.Description,
-                        row.PackageCode, row.PackageName, plan.Id, row.PackageOptionId, true, true, row.DiscountedPrice, row.Amount))
+                        row.PackageCode, row.PackageName, plan.Id, row.PackageOptionId, true, true, row.DiscountedPrice, row.Amount, now, today.AddDays(leadDays), leadDays))
                     .ToArray(), group.Key.PackageOptionId, group.Key.PackageOptionName))
             .ToArray();
 
