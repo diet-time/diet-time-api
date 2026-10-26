@@ -21,4 +21,13 @@ public sealed record TomorrowMenuResponse(Guid SubscriptionId, Guid? Subscriptio
     string SelectionStatus, bool SelectionLocked, bool CanConfirm, DateTimeOffset CutoffAt,
     DateTimeOffset ServerNow, string? ReviewReason, IReadOnlyList<Guid> SelectedMenuItemIds,
     IReadOnlyList<UpcomingMealItemResponse> SelectedMeals,
-    IReadOnlyList<UpcomingMealItemResponse> AvailableMeals, IReadOnlyList<UpcomingMealItemResponse> AvailableSnacks);
+    IReadOnlyList<UpcomingMealItemResponse> AvailableMeals, IReadOnlyList<UpcomingMealItemResponse> AvailableSnacks)
+{
+    public string? OrderStatus { get; init; }
+    public DateOnly? OrderStartDate { get; init; }
+    public DateOnly? FirstDeliveryDate { get; init; }
+    public Guid? MenuTemplateId { get; init; }
+    public int? MenuTemplateVersion { get; init; }
+    public int? MenuWeekNumber { get; init; }
+    public string? EmptyReason { get; init; }
+}

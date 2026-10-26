@@ -12,15 +12,72 @@ public sealed partial class UpcomingMealService
     public async Task<TomorrowMenuResponse?> GetTomorrowAsync(Guid orderId, Guid userId, string language, CancellationToken ct)
     {
         var order = await OwnedOrderAsync(orderId, userId, ct);
-        if (order is null) return null;
-        var tomorrow = SubscriptionMenuRules.QatarToday(clock.GetUtcNow()).AddDays(1);
-        var day = tomorrow.DayOfWeek == DayOfWeek.Friday ? null : await db.Set<SubscriptionServiceDay>()
-            .AsNoTracking().Include(d => d.Selections)
-            .SingleOrDefaultAsync(d => d.OrderId == orderId && d.ServiceDate == tomorrow &&
-                d.Status != "SKIPPED" && d.Status != "CANCELLED", ct);
-        if (day is null) return new(orderId, null, tomorrow, order.PlanName, 0, 0, "NO_DELIVERY", true, false,
-            SubscriptionMenuRules.TomorrowCutoff(tomorrow), clock.GetUtcNow(), null, [], [], [], []);
-        return await TomorrowResponseAsync(day, order, language, ct);
+        if (order is null)
+        {
+            logger?.LogWarning("Tomorrow menu ownership lookup failed. UserId={UserId} OrderId={OrderId}", userId, orderId);
+            return null; // 404 is an unavailable/unowned order, never NO_ORDER for an existing plan.
+        }
+        var now = clock.GetUtcNow();
+        var today = SubscriptionMenuRules.QatarToday(now);
+        var tomorrow = today.AddDays(1);
+        var dates = SubscriptionMenuRules.ServiceDates(order.StartDate, order.EndDate,
+            order.DeliveryDays.Select(d => d.DayOfWeek).ToHashSet()).ToArray();
+        DateOnly? first = dates.Length > 0 ? dates[0] : null;
+        var entitlements = await EntitlementsAsync(order, ct);
+        var template = await db.MealPlanTemplates.AsNoTracking().SingleOrDefaultAsync(t => t.Id == order.MealPlanTemplateId, ct);
+        TomorrowMenuResponse Empty(string status, string reason) => new(order.Id, null, tomorrow, order.PlanName,
+            entitlements.Meals, entitlements.Snacks, status, true, false,
+            SubscriptionMenuRules.TomorrowCutoff(tomorrow), now, reason, [], [], [], []) {
+                OrderStatus = order.Status, OrderStartDate = order.StartDate, FirstDeliveryDate = first,
+                MenuTemplateId = order.MealPlanTemplateId, MenuTemplateVersion = template?.VersionNumber, EmptyReason = reason
+            };
+        TomorrowMenuResponse response;
+        if (order.Status is not ("CONFIRMED" or "ACTIVE"))
+            response = Empty(order.Status is "PENDING" or "PENDING_ACTIVATION" or "PAUSED" ? "PENDING_ACTIVATION" : "INACTIVE_ORDER",
+                order.Status == "PAUSED" ? "Your plan is paused. Meal selection will resume when the plan is active."
+                : "Your order exists, but it is not active for meal selection yet.");
+        else if (order.EndDate < today)
+            response = Empty("INACTIVE_ORDER", "This order’s service period has ended.");
+        else if (first is null)
+            response = Empty("SCHEDULE_NOT_CONFIGURED", "Your order is saved, but its delivery weekdays need review by our team.");
+        else if (first > tomorrow)
+            response = Empty("NOT_STARTED", "Your plan starts after tomorrow. Meal selection opens the day before your first delivery.");
+        else if (!dates.Contains(tomorrow))
+            response = Empty("NO_DELIVERY", "Your plan has no scheduled delivery tomorrow.");
+        else
+        {
+            var day = await db.Set<SubscriptionServiceDay>().AsNoTracking().Include(d => d.Selections)
+                .SingleOrDefaultAsync(d => d.OrderId == orderId && d.ServiceDate == tomorrow, ct);
+            if (day is null)
+                response = Empty("SERVICE_DAYS_MISSING", "Your order is saved, but its delivery schedule needs to be initialized by our team.");
+            else if (day.Status is "SKIPPED" or "CANCELLED")
+                response = Empty("NO_DELIVERY", "Tomorrow’s delivery has been skipped or cancelled.");
+            else if (day.MealPlanTemplateId == null || day.MenuWeekNumber == null && day.ServiceSequence == null ||
+                day.MealCount == null || day.SnackCount == null)
+                response = Empty("SERVICE_DAY_INCOMPLETE", "Your delivery exists, but its saved menu mapping or package quantities need review by our team.");
+            else
+                response = (await TomorrowResponseAsync(day, order, language, ct)) with {
+                    OrderStatus = order.Status, OrderStartDate = order.StartDate, FirstDeliveryDate = first,
+                    MenuTemplateId = day.MealPlanTemplateId,
+                    MenuTemplateVersion = day.MealPlanTemplateId == template?.Id ? template.VersionNumber :
+                        await db.MealPlanTemplates.Where(t => t.Id == day.MealPlanTemplateId).Select(t => (int?)t.VersionNumber).SingleOrDefaultAsync(ct),
+                    MenuWeekNumber = day.MenuWeekNumber ?? SubscriptionMenuRules.MenuWeek(day.ServiceSequence!.Value, 4)
+                };
+        }
+        logger?.LogInformation("Tomorrow menu resolved. UserId={UserId} CustomerProfileId={CustomerProfileId} OrderId={OrderId} SubscriptionId={SubscriptionId} OrderStatus={OrderStatus} QatarToday={QatarToday} Tomorrow={Tomorrow} ServiceDayId={ServiceDayId} TemplateId={TemplateId} TemplateVersion={TemplateVersion} MenuWeek={MenuWeek} Weekday={Weekday} AvailableDishCount={AvailableDishCount} SelectionCount={SelectionCount} Status={Status} EmptyReason={EmptyReason}",
+            userId, order.CustomerProfileId, order.Id, response.SubscriptionId, order.Status, today, tomorrow,
+            response.SubscriptionServiceDayId, response.MenuTemplateId, response.MenuTemplateVersion, response.MenuWeekNumber,
+            MenuWeekdayExtensions.FromDate(tomorrow), response.AvailableMeals.Count + response.AvailableSnacks.Count,
+            response.SelectedMeals.Count, response.SelectionStatus, response.EmptyReason ?? response.ReviewReason);
+        return response;
+    }
+
+    private async Task<(int Meals, int Snacks)> EntitlementsAsync(Order order, CancellationToken ct)
+    {
+        var ids = order.Meals.Select(m => m.MealTypeId).ToArray();
+        var codes = await db.MealTypes.Where(t => ids.Contains(t.Id)).ToDictionaryAsync(t => t.Id, t => t.Code, ct);
+        return (order.Meals.Where(m => !MealTypeClassification.IsSnack(codes[m.MealTypeId])).Sum(m => m.Quantity),
+            order.Meals.Where(m => MealTypeClassification.IsSnack(codes[m.MealTypeId])).Sum(m => m.Quantity));
     }
 
     public async Task<TomorrowMenuResponse> ConfirmAsync(Guid orderId, Guid dayId, Guid userId,
@@ -192,6 +249,7 @@ public sealed partial class UpcomingMealService
                     row = new CustomerMealSelection { Id = Guid.NewGuid(), SubscriptionServiceDayId = day.Id,
                         Category = category, SelectionNumber = position, CreatedAt = now, CreatedBy = actor };
                     day.Selections.Add(row);
+                    db.Add(row);
                 }
                 else
                 {
@@ -226,13 +284,29 @@ public sealed partial class UpcomingMealService
         // Incomplete provisional defaults must not stop a customer completing a valid set.
         var menu = await MapAsync(day, order, language, ct, includeEligible: canConfirm);
         var items = canConfirm ? menu.AvailableAlternatives : [];
+        var availableMeals = items.Where(i => i.Category == "meal").DistinctBy(i => i.MealItemId).ToArray();
+        var availableSnacks = items.Where(i => i.Category == "snack").DistinctBy(i => i.MealItemId).ToArray();
+        var reason = day.ReviewReason;
+        string? emptyStatus = null;
+        if (canConfirm && (availableMeals.Length < day.MealCount || availableSnacks.Length < day.SnackCount))
+        {
+            var weekday = MenuWeekdayExtensions.FromDate(day.ServiceDate);
+            var week = day.MenuWeekNumber ?? SubscriptionMenuRules.MenuWeek(day.ServiceSequence!.Value, 4);
+            var configured = await db.MealPlanTemplateDays.AnyAsync(d => d.MealPlanTemplateId == day.MealPlanTemplateId &&
+                d.WeekNumber == week && d.MenuWeekday == weekday && d.IsActive && d.Plan.IsPublished &&
+                d.Slots.Any(s => s.IsActive && s.MaximumSelection > 0 && s.MealType.IsActive &&
+                    s.Options.Any(o => o.IsAvailable && o.AdditionalPrice == 0 && o.MealItem.IsAvailable && o.MealItem.Status == "ACTIVE")), ct);
+            emptyStatus = configured ? "NEEDS_REVIEW" : "MENU_NOT_CONFIGURED";
+            reason = configured ? "There are not enough suitable dishes for your purchased package. Our team needs to review your menu and dietary requirements."
+                : "The menu for your scheduled delivery has not been configured yet. Your order is saved; our team needs to publish its dishes.";
+            canConfirm = false;
+        }
         var status = day.CustomerConfirmedAt != null ? "CUSTOMER_CONFIRMED" : day.AutoFinalizedAt != null ? "AUTO_FINALIZED"
-            : locked ? "LOCKED" : day.ReviewReason != null ? "NEEDS_REVIEW"
-            : now >= SubscriptionMenuRules.TomorrowCutoff(day.ServiceDate) ? "FINALIZATION_PENDING" : "DEFAULT_PENDING";
+            : locked ? "LOCKED" : emptyStatus ?? (day.ReviewReason != null ? "NEEDS_REVIEW"
+            : now >= SubscriptionMenuRules.TomorrowCutoff(day.ServiceDate) ? "FINALIZATION_PENDING" : "DEFAULT_PENDING");
         return new(order.Id, day.Id, day.ServiceDate, order.PlanName, day.MealCount ?? 0, day.SnackCount ?? 0,
-            status, locked, canConfirm, SubscriptionMenuRules.TomorrowCutoff(day.ServiceDate), now, day.ReviewReason,
+            status, locked, canConfirm, SubscriptionMenuRules.TomorrowCutoff(day.ServiceDate), now, reason,
             menu.SelectedMeals.Select(s => s.Meal.MealItemId).ToArray(), menu.SelectedMeals.Select(s => s.Meal).ToArray(),
-            items.Where(i => i.Category == "meal").DistinctBy(i => i.MealItemId).ToArray(),
-            items.Where(i => i.Category == "snack").DistinctBy(i => i.MealItemId).ToArray());
+            availableMeals, availableSnacks) { EmptyReason = emptyStatus != null ? reason : null };
     }
 }

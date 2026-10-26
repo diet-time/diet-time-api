@@ -26,8 +26,13 @@ public sealed partial class UpcomingMealService(
             ? await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct) : null;
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT pg_advisory_xact_lock(hashtextextended({order.Id.ToString()}, 0))", ct);
-        var existingDates = (await db.Set<SubscriptionServiceDay>()
-            .Where(d => d.OrderId == order.Id).Select(d => d.ServiceDate).ToListAsync(ct)).ToHashSet();
+        var existingDays = await db.Set<SubscriptionServiceDay>().AsNoTracking()
+            .Where(d => d.OrderId == order.Id || d.SubscriptionId == order.Id)
+            .Select(d => new { d.OrderId, d.ServiceDate, d.ServiceSequence }).ToListAsync(ct);
+        if (existingDays.Any(d => d.OrderId != order.Id))
+            throw new UpcomingMealException(409, "service_day_link_review",
+                "Existing subscription service days need an order-link review. They were not duplicated or changed.");
+        var existingDates = existingDays.Select(d => d.ServiceDate).ToHashSet();
         var template = await db.MealPlanTemplates.SingleAsync(t => t.Id == order.MealPlanTemplateId, ct);
         var profile = await ProfileAsync(order.CustomerProfileId, ct);
         // Quantities come from the purchased order snapshot, even if an admin
@@ -44,6 +49,9 @@ public sealed partial class UpcomingMealService(
             sequence++;
             var qatarToday = SubscriptionMenuRules.QatarToday(now);
             if (date < qatarToday || existingDates.Contains(date)) continue; // Never regenerate or overwrite saved choices.
+            if (existingDays.Any(d => d.ServiceSequence == sequence && d.ServiceDate != date))
+                throw new UpcomingMealException(409, "service_sequence_review",
+                    "An existing service sequence belongs to a different delivery date. Review the schedule before backfilling.");
             var day = new SubscriptionServiceDay
             {
                 Id = Guid.NewGuid(), SubscriptionId = order.Id, OrderId = order.Id,
@@ -117,7 +125,7 @@ public sealed partial class UpcomingMealService(
         throw new UpcomingMealException(409, "confirmation_required", "Choose your meals on the dashboard and confirm the complete selection.");
 
     private Task<Order?> OwnedOrderAsync(Guid id, Guid userId, CancellationToken ct) =>
-        db.Orders.AsNoTracking().SingleOrDefaultAsync(o => o.Id == id && db.CustomerProfiles.Any(p =>
+        db.Orders.AsNoTracking().Include(o => o.Meals).Include(o => o.DeliveryDays).SingleOrDefaultAsync(o => o.Id == id && db.CustomerProfiles.Any(p =>
             p.Id == o.CustomerProfileId && p.UserId == userId && p.IsActive), ct);
 
     private Task<CustomerProfile> ProfileAsync(Guid profileId, CancellationToken ct) =>

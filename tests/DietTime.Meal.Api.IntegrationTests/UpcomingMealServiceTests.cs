@@ -380,6 +380,108 @@ public sealed class UpcomingMealServiceTests : IAsyncLifetime
         Assert.NotEmpty(report.OperationalExceptions); Assert.Empty(report.MealTypes);
     }
 
+    [UpcomingPostgresFact]
+    public async Task Existing_order_without_service_days_is_not_reported_as_no_delivery()
+    {
+        clock.Now = new(2026, 10, 26, 10, 0, 0, TimeSpan.Zero);
+        var result = (await Service().GetTomorrowAsync(order.Id, userId, "en", default))!;
+        Assert.Equal("SERVICE_DAYS_MISSING", result.SelectionStatus);
+        Assert.Equal(order.Id, result.SubscriptionId);
+        Assert.Equal("Complete Balance", result.MealPlanName);
+        Assert.Equal(3, result.MealCount); Assert.Equal(1, result.SnackCount);
+        Assert.Equal(new DateOnly(2026, 10, 27), result.FirstDeliveryDate);
+        Assert.NotNull(result.EmptyReason);
+        Assert.Empty(await db.Set<SubscriptionServiceDay>().ToListAsync()); // GET never backfills.
+    }
+
+    [UpcomingPostgresFact]
+    public async Task Future_order_and_pending_activation_have_distinct_states_with_plan_details()
+    {
+        var future = (await Service().GetTomorrowAsync(order.Id, userId, "en", default))!;
+        Assert.Equal("NOT_STARTED", future.SelectionStatus);
+        Assert.Equal(order.StartDate, future.FirstDeliveryDate);
+        Assert.Equal(3, future.MealCount);
+        order.Status = "PAUSED"; await db.SaveChangesAsync();
+        var pending = (await Service().GetTomorrowAsync(order.Id, userId, "en", default))!;
+        Assert.Equal("PENDING_ACTIVATION", pending.SelectionStatus);
+        Assert.Equal(order.PlanName, pending.MealPlanName); Assert.False(pending.CanConfirm);
+    }
+
+    [UpcomingPostgresFact]
+    public async Task Configured_dishes_load_and_confirm_without_any_provisional_selection_rows()
+    {
+        var original = await PrepareAsync();
+        await db.Set<CustomerMealSelection>().Where(s => s.SubscriptionServiceDayId == original.SubscriptionServiceDayId).ExecuteDeleteAsync();
+        db.ChangeTracker.Clear();
+        var menu = (await Service().GetTomorrowAsync(order.Id, userId, "en", default))!;
+        Assert.Empty(menu.SelectedMeals); Assert.True(menu.CanConfirm);
+        Assert.Equal(5, menu.AvailableMeals.Count); Assert.Equal(2, menu.AvailableSnacks.Count);
+        var request = new ConfirmMealsRequest(menu.AvailableMeals.Take(3).Select(m => m.MealItemId).ToArray(),
+            menu.AvailableSnacks.Take(1).Select(m => m.MealItemId).ToArray());
+        var confirmed = await Service().ConfirmAsync(order.Id, menu.SubscriptionServiceDayId!.Value, userId, "en", request, default);
+        Assert.Equal("CUSTOMER_CONFIRMED", confirmed.SelectionStatus); Assert.Equal(4, confirmed.SelectedMeals.Count);
+        Assert.True(confirmed.SelectionLocked);
+    }
+
+    [UpcomingPostgresFact]
+    public async Task Missing_configured_menu_is_distinct_from_missing_order_or_no_delivery()
+    {
+        var original = await PrepareAsync();
+        var slots = await db.MealPlanTemplateSlots.Where(s => s.Day.WeekNumber == 1 && s.Day.MenuWeekday == MenuWeekday.Tuesday).ToListAsync();
+        foreach (var slot in slots) slot.IsActive = false;
+        await db.SaveChangesAsync();
+        var result = (await Service().GetTomorrowAsync(order.Id, userId, "en", default))!;
+        Assert.Equal("MENU_NOT_CONFIGURED", result.SelectionStatus);
+        Assert.Equal(original.SubscriptionServiceDayId, result.SubscriptionServiceDayId);
+        Assert.False(result.CanConfirm); Assert.NotNull(result.EmptyReason);
+        Assert.Equal(3, result.MealCount);
+    }
+
+    [UpcomingPostgresFact]
+    public async Task Admin_preview_and_explicit_backfill_recover_an_existing_order_idempotently()
+    {
+        clock.Now = new(2026, 10, 26, 10, 0, 0, TimeSpan.Zero);
+        var controller = new DietTime.Meal.Api.Controllers.AdminUpcomingMealsController(db, Service(), clock);
+        Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(await controller.Preview(order.Id, default));
+        Assert.Empty(await db.Set<SubscriptionServiceDay>().ToListAsync());
+        Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(await controller.Initialize(order.Id, default));
+        var ids = await db.Set<SubscriptionServiceDay>().OrderBy(d => d.ServiceDate).Select(d => d.Id).ToListAsync();
+        Assert.Equal(12, ids.Count);
+        Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(await controller.Initialize(order.Id, default));
+        Assert.Equal(ids, await db.Set<SubscriptionServiceDay>().OrderBy(d => d.ServiceDate).Select(d => d.Id).ToListAsync());
+        var menu = (await Service().GetTomorrowAsync(order.Id, userId, "en", default))!;
+        Assert.True(menu.CanConfirm); Assert.NotEmpty(menu.AvailableMeals);
+        Assert.All(await db.Set<SubscriptionServiceDay>().ToListAsync(), d => Assert.NotEqual(DayOfWeek.Friday, d.ServiceDate.DayOfWeek));
+    }
+
+    [UpcomingPostgresFact]
+    public async Task Backfill_refuses_ambiguous_existing_subscription_links_without_duplicates()
+    {
+        var original = await PrepareAsync();
+        var day = await db.Set<SubscriptionServiceDay>().SingleAsync(d => d.Id == original.SubscriptionServiceDayId);
+        day.OrderId = null; await db.SaveChangesAsync();
+        var count = await db.Set<SubscriptionServiceDay>().CountAsync();
+        var error = await Assert.ThrowsAsync<UpcomingMealException>(() => Service().InitializeAsync(order, default));
+        Assert.Equal("service_day_link_review", error.Code);
+        Assert.Equal(count, await db.Set<SubscriptionServiceDay>().CountAsync());
+    }
+
+    [UpcomingPostgresFact]
+    public async Task Diagnostic_queries_match_current_foreign_keys_and_column_mappings()
+    {
+        await PrepareAsync();
+        var script = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../database/scripts/tomorrow_menu_diagnostics.sql"));
+        var sql = (await File.ReadAllTextAsync(script)).Replace(":'order_id'", "@orderId");
+        await using var diagnostic = new NpgsqlConnection(connection);
+        await diagnostic.OpenAsync();
+        await using var command = new NpgsqlCommand(sql, diagnostic);
+        command.Parameters.AddWithValue("orderId", order.Id);
+        await using var reader = await command.ExecuteReaderAsync();
+        var resultSets = 0;
+        do { while (await reader.ReadAsync()) { } resultSets++; } while (await reader.NextResultAsync());
+        Assert.True(resultSets >= 8);
+    }
+
     private async Task SeedAsync()
     {
         var now = clock.Now;
