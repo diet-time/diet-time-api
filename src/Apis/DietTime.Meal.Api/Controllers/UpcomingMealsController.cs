@@ -11,6 +11,33 @@ namespace DietTime.Meal.Api.Controllers;
 [Route("api/v{version:apiVersion}/orders/{orderId:guid}")]
 public sealed class UpcomingMealsController(IUpcomingMealService meals, ILanguageResolver languages) : ControllerBase
 {
+    [HttpGet("tomorrow-menu")]
+    public async Task<IActionResult> Tomorrow(Guid orderId, [FromQuery] string? language, CancellationToken ct)
+    {
+        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub"), out var userId)) return Unauthorized();
+        var menu = await meals.GetTomorrowAsync(orderId, userId, languages.Resolve(language, Request.Headers.AcceptLanguage), ct);
+        return menu is null ? NotFound() : Ok(ApiResponse<TomorrowMenuResponse>.Ok(menu));
+    }
+
+    [HttpPost("service-days/{dayId:guid}/confirm-meals")]
+    public async Task<IActionResult> Confirm(Guid orderId, Guid dayId, ConfirmMealsRequest request,
+        [FromQuery] string? language, CancellationToken ct)
+    {
+        if (!Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub"), out var userId)) return Unauthorized();
+        try
+        {
+            var menu = await meals.ConfirmAsync(orderId, dayId, userId,
+                languages.Resolve(language, Request.Headers.AcceptLanguage), request, ct);
+            return Ok(ApiResponse<TomorrowMenuResponse>.Ok(menu));
+        }
+        catch (UpcomingMealException error)
+        {
+            var problem = new ProblemDetails { Status = error.StatusCode, Title = error.Message };
+            problem.Extensions["code"] = error.Code;
+            return StatusCode(error.StatusCode, problem);
+        }
+    }
+
     [HttpGet("upcoming-meals")]
     public async Task<IActionResult> Days(Guid orderId, CancellationToken ct)
     {

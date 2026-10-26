@@ -97,12 +97,15 @@ public sealed class AdminDeliveryCalendarService(
         DateOnly date,
         CancellationToken cancellationToken)
     {
+        _ = rotationOptions; // Legacy constructor compatibility; final reports use persisted selections.
+        if (date.DayOfWeek == DayOfWeek.Friday) return DeliveryPreparationAggregation.Build(date, [], []);
         var apiWeekday = OperationsDashboardScheduling.ToApiWeekday(date.DayOfWeek);
-        var menuWeekday = MenuWeekdayExtensions.FromDate(date);
         var scheduledOrders = await db.Orders.AsNoTracking()
             .Where(order => (order.Status == OrderStatuses.Confirmed || order.Status == "ACTIVE") &&
                 order.StartDate <= date && order.EndDate >= date &&
-                order.DeliveryDays.Any(day => day.DayOfWeek == apiWeekday))
+                order.DeliveryDays.Any(day => day.DayOfWeek == apiWeekday) &&
+                !db.Set<SubscriptionServiceDay>().Any(day => day.OrderId == order.Id && day.ServiceDate == date &&
+                    (day.Status == "SKIPPED" || day.Status == "CANCELLED")))
             .Select(order => new DeliveryPreparationOrderSource(
                 order.Id,
                 order.CustomerProfileId,
@@ -114,122 +117,59 @@ public sealed class AdminDeliveryCalendarService(
             return DeliveryPreparationAggregation.Build(date, [], []);
 
         var now = clock.GetUtcNow();
-        // Finalization and customer edits acquire the same row locks. Already
-        // finalized days are unchanged, so report downloads are idempotent.
-        await db.Database.ExecuteSqlInterpolatedAsync(
-            $"UPDATE public.subscription_service_days SET selection_locked = TRUE, selection_status = 'LOCKED', revision = revision + 1, updated_at = {now} WHERE order_id IS NOT NULL AND service_date = {date} AND selection_cutoff_at <= {now} AND NOT selection_locked", cancellationToken);
+        var scheduledIds = scheduledOrders.Select(order => order.OrderId).ToArray();
         var trackedDays = await db.Set<SubscriptionServiceDay>().AsNoTracking()
-            .Where(day => day.ServiceDate == date && day.OrderId != null)
-            .Select(day => new { day.OrderId, day.SelectionLocked, day.ReviewReason })
+            .Where(day => day.ServiceDate == date && day.OrderId != null && scheduledIds.Contains(day.OrderId.Value))
+            .Select(day => new { day.OrderId, day.SelectionLocked, day.SelectionStatus, day.ReviewReason, day.CustomerConfirmedAt, day.AutoFinalizedAt })
             .ToListAsync(cancellationToken);
         var trackedOrderIds = trackedDays.Select(day => day.OrderId!.Value).ToHashSet();
-        var scheduledIds = scheduledOrders.Select(order => order.OrderId).ToArray();
         var persistedRows = await (
             from selection in db.Set<CustomerMealSelection>().AsNoTracking()
             join day in db.Set<SubscriptionServiceDay>().AsNoTracking() on selection.SubscriptionServiceDayId equals day.Id
             join meal in db.MealItems.AsNoTracking() on selection.MenuItemId equals meal.Id
             join type in db.MealTypes.AsNoTracking() on selection.MealTypeId equals type.Id
             where day.ServiceDate == date && day.OrderId != null && scheduledIds.Contains(day.OrderId.Value) &&
-                day.ReviewReason == null && selection.Status != "CANCELLED"
+                day.ReviewReason == null && day.SelectionLocked && (day.CustomerConfirmedAt != null || day.AutoFinalizedAt != null) && selection.Status != "CANCELLED"
             select new DeliveryPreparationMenuSource(day.OrderId!.Value, type.Id,
                 selection.Category == "snack" ? "Snack" : "Meal", type.DisplayOrder, meal.Id,
                 meal.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? meal.Sku, 1))
             .ToListAsync(cancellationToken);
-        DeliveryPreparationSummaryResponse Build(IReadOnlyCollection<DeliveryPreparationMenuSource> legacyRows)
-        {
-            var summary = DeliveryPreparationAggregation.Build(date, scheduledOrders,
-                legacyRows.Concat(persistedRows).ToArray());
-            return summary with { Status = trackedDays.Any(d => d.ReviewReason != null) ? "NeedsReview"
-                : trackedDays.Any(d => !d.SelectionLocked) ? "Provisional" : summary.Status };
-        }
-        // Legacy orders keep their historical reporting path; new service days
-        // always use the customer's persisted choices, never regenerated defaults.
-        var orderIds = scheduledOrders.Where(order => !trackedOrderIds.Contains(order.OrderId))
-            .Select(order => order.OrderId).ToArray();
-        var templateIds = scheduledOrders.Select(order => order.MealPlanId).Distinct().ToArray();
-        var templates = await db.MealPlanTemplates.AsNoTracking()
-            .Where(template => templateIds.Contains(template.Id))
-            .Select(template => new { template.Id, template.CycleWeeks, template.ValidFrom })
-            .ToListAsync(cancellationToken);
-        var templateById = templates.ToDictionary(template => template.Id);
-        var templateDays = await db.MealPlanTemplateDays.AsNoTracking()
-            .Where(day => templateIds.Contains(day.MealPlanTemplateId) && day.IsActive)
-            .Select(day => new { day.Id, day.MealPlanTemplateId, day.WeekNumber, day.MenuWeekday })
-            .ToListAsync(cancellationToken);
-        var menuDayIds = templateDays
-            .Where(day =>
-            {
-                if (!templateById.TryGetValue(day.MealPlanTemplateId, out var template))
-                    return false;
-                var week = MenuRotationResolver.ResolveWeek(
-                    date,
-                    template.CycleWeeks,
-                    template.ValidFrom,
-                    rotationOptions.Value.AnchorDate);
-                return week.HasValue && day.WeekNumber == week.Value && day.MenuWeekday == menuWeekday;
-            })
-            .Select(day => day.Id)
+        var details = await (
+            from day in db.Set<SubscriptionServiceDay>().AsNoTracking()
+            join order in db.Orders.AsNoTracking() on day.OrderId equals (Guid?)order.Id
+            where day.ServiceDate == date && scheduledIds.Contains(order.Id)
+            select new { Day = day, order.OrderNumber, order.CustomerProfileId }).ToListAsync(cancellationToken);
+        var profileIds = details.Select(d => d.CustomerProfileId).Distinct().ToArray();
+        var profiles = await db.CustomerProfiles.AsNoTracking().Include(p => p.Preferences).Include(p => p.Allergens)
+            .ThenInclude(a => a.Allergen).Where(p => profileIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, cancellationToken);
+        var selections = await (from selection in db.Set<CustomerMealSelection>().AsNoTracking()
+            join day in db.Set<SubscriptionServiceDay>() on selection.SubscriptionServiceDayId equals day.Id
+            join meal in db.MealItems on selection.MenuItemId equals meal.Id
+            where day.ServiceDate == date && day.OrderId != null && scheduledIds.Contains(day.OrderId.Value) &&
+                day.SelectionLocked && (day.CustomerConfirmedAt != null || day.AutoFinalizedAt != null) && day.ReviewReason == null && selection.Status != "CANCELLED"
+            select new { day.Id, selection.SelectionSource, selection.Category, Name = meal.Translations
+                .Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? meal.Sku }).ToListAsync(cancellationToken);
+        var exceptions = trackedDays.Where(d => d.ReviewReason != null).Select(d => $"Order {d.OrderId}: {d.ReviewReason}")
+            .Concat(trackedDays.Where(d => (d.SelectionLocked || d.SelectionStatus == "LOCKED") && d.CustomerConfirmedAt == null && d.AutoFinalizedAt == null)
+                .Select(d => $"Order {d.OrderId}: legacy lock has no validated finalization timestamp; review required."))
+            .Concat(scheduledOrders.Where(o => !trackedOrderIds.Contains(o.OrderId)).Select(o => $"Order {o.OrderId}: service days have not been initialized; review required."))
             .ToArray();
-        if (menuDayIds.Length == 0)
-            return Build([]);
-
-        var menuCandidates = await (
-            from orderMeal in db.OrderMeals.AsNoTracking()
-            where orderIds.Contains(orderMeal.OrderId)
-            join order in db.Orders.AsNoTracking()
-                on orderMeal.OrderId equals order.Id
-            join day in db.MealPlanTemplateDays.AsNoTracking()
-                on order.MealPlanTemplateId equals day.MealPlanTemplateId
-            join slot in db.MealPlanTemplateSlots.AsNoTracking()
-                on new { DayId = day.Id, orderMeal.MealTypeId }
-                equals new { DayId = slot.MealPlanTemplateDayId, slot.MealTypeId }
-            join option in db.MealPlanSlotOptions.AsNoTracking()
-                on slot.Id equals option.MealPlanTemplateSlotId
-            join mealType in db.MealTypes.AsNoTracking()
-                on orderMeal.MealTypeId equals mealType.Id
-            join menuItem in db.MealItems.AsNoTracking()
-                on option.MealItemId equals menuItem.Id
-            where menuDayIds.Contains(day.Id) && day.MenuWeekday == menuWeekday
-            select new
-            {
-                orderMeal.OrderId,
-                orderMeal.MealTypeId,
-                orderMeal.MealTypeName,
-                MealTypeDisplayOrder = mealType.DisplayOrder,
-                MenuItemId = menuItem.Id,
-                MenuItemName = menuItem.Translations
-                    .Where(translation => translation.LanguageCode == "en")
-                    .Select(translation => translation.Name)
-                    .FirstOrDefault() ?? menuItem.Sku,
-                orderMeal.Quantity,
-                option.IsDefault,
-                option.IsAvailable,
-                option.DisplayOrder
-            })
-            .ToListAsync(cancellationToken);
-
-        // Orders retain their plan version, so preparation must still work when an
-        // option or slot is later made unavailable. Prefer the configured default;
-        // legacy plans without one fall back deterministically to their first option.
-        var menuRows = menuCandidates
-            .GroupBy(row => new { row.OrderId, row.MealTypeId })
-            .Select(group => group
-                .OrderByDescending(row => row.IsDefault)
-                .ThenByDescending(row => row.IsAvailable)
-                .ThenBy(row => row.DisplayOrder)
-                .ThenBy(row => row.MenuItemName, StringComparer.OrdinalIgnoreCase)
-                .First())
-            .Select(row => new DeliveryPreparationMenuSource(
-                row.OrderId,
-                row.MealTypeId,
-                row.MealTypeName,
-                row.MealTypeDisplayOrder,
-                row.MenuItemId,
-                row.MenuItemName,
-                row.Quantity))
-            .ToArray();
-
-        return Build(menuRows);
+        var preliminary = now < SubscriptionMenuRules.TomorrowCutoff(date) || trackedDays.Any(d => !d.SelectionLocked) || exceptions.Length > 0;
+        var summary = DeliveryPreparationAggregation.Build(date, scheduledOrders, persistedRows);
+        return summary with {
+            Status = exceptions.Length > 0 ? "NeedsReview" : preliminary ? "Preliminary" : "Finalized",
+            IsPreliminary = preliminary,
+            OperationalExceptions = exceptions,
+            Selections = details.Select(d => {
+                profiles.TryGetValue(d.CustomerProfileId, out var profile);
+                var rows = selections.Where(s => s.Id == d.Day.Id).ToArray();
+                return new KitchenSelectionResponse(d.Day.Id, d.OrderNumber, d.CustomerProfileId,
+                    d.Day.CustomerConfirmedAt != null ? "CUSTOMER_CONFIRMED" : d.Day.AutoFinalizedAt != null ? "AUTO_FINALIZED" : "UNFINALIZED",
+                    rows.Select(r => r.SelectionSource).Distinct().ToArray(),
+                    rows.GroupBy(r => new { r.Name, r.Category }).Select(g => new KitchenDishResponse(g.Key.Name, g.Key.Category ?? "meal", g.Count())).ToArray(),
+                    profile?.Preferences.Select(p => p.PreferenceCode).Concat(profile.Allergens.Select(a => "ALLERGEN: " + a.Allergen.Code)).ToArray() ?? [], d.Day.ReviewReason);
+            }).ToArray()
+        };
     }
 
     private static string ResolveCustomerName(

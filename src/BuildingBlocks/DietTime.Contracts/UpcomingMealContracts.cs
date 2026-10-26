@@ -14,3 +14,11 @@ public sealed record DailyMealMenuResponse(Guid SubscriptionId, Guid Subscriptio
     IReadOnlyList<AssignedMealResponse> SelectedMeals,
     IReadOnlyList<UpcomingMealItemResponse> AvailableAlternatives);
 public sealed record ReplaceAssignedMealRequest(Guid MealItemId, Guid SlotOptionId, long ExpectedRevision);
+
+public sealed record ConfirmMealsRequest(IReadOnlyList<Guid> MealMenuItemIds, IReadOnlyList<Guid> SnackMenuItemIds);
+public sealed record TomorrowMenuResponse(Guid SubscriptionId, Guid? SubscriptionServiceDayId,
+    DateOnly DeliveryDate, string MealPlanName, int MealCount, int SnackCount,
+    string SelectionStatus, bool SelectionLocked, bool CanConfirm, DateTimeOffset CutoffAt,
+    DateTimeOffset ServerNow, string? ReviewReason, IReadOnlyList<Guid> SelectedMenuItemIds,
+    IReadOnlyList<UpcomingMealItemResponse> SelectedMeals,
+    IReadOnlyList<UpcomingMealItemResponse> AvailableMeals, IReadOnlyList<UpcomingMealItemResponse> AvailableSnacks);

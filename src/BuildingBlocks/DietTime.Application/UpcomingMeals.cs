@@ -5,6 +5,9 @@ namespace DietTime.Application;
 
 public interface IUpcomingMealService
 {
+    Task<TomorrowMenuResponse?> GetTomorrowAsync(Guid orderId, Guid userId, string language, CancellationToken ct);
+    Task<TomorrowMenuResponse> ConfirmAsync(Guid orderId, Guid dayId, Guid userId, string language, ConfirmMealsRequest request, CancellationToken ct);
+    Task FinalizeDueAsync(CancellationToken ct);
     Task InitializeAsync(Order order, CancellationToken ct);
     Task<IReadOnlyList<UpcomingMealDayResponse>?> GetDaysAsync(Guid orderId, Guid userId, CancellationToken ct);
     Task<DailyMealMenuResponse?> GetMenuAsync(Guid orderId, Guid dayId, Guid userId, string language, CancellationToken ct);
@@ -20,6 +23,12 @@ public sealed class UpcomingMealException(int statusCode, string code, string me
 
 public static class SubscriptionMenuRules
 {
+    public static DateOnly QatarToday(DateTimeOffset now) => DateOnly.FromDateTime(
+        TimeZoneInfo.ConvertTime(now, TimeZoneInfo.FindSystemTimeZoneById("Asia/Qatar")).DateTime);
+    public static DateTimeOffset TomorrowCutoff(DateOnly deliveryDate) => QatarCutoff(deliveryDate, 1, new(21, 0));
+    public static bool IsSelectionOpen(DateOnly deliveryDate, DateTimeOffset now) =>
+        deliveryDate.DayOfWeek != DayOfWeek.Friday && deliveryDate == QatarToday(now).AddDays(1) && now < TomorrowCutoff(deliveryDate);
+
     public static int MenuWeek(int serviceSequence, int cycleWeeks)
     {
         if (serviceSequence < 1) throw new ArgumentOutOfRangeException(nameof(serviceSequence));

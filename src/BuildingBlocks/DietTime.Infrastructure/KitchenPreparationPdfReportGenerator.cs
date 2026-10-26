@@ -72,8 +72,16 @@ public sealed class KitchenPreparationPdfReportGenerator : IKitchenPreparationRe
         section.PageSetup.FooterDistance = Unit.FromMillimeter(7);
         AddFooter(section, summary.Date);
         AddReportHeader(section, summary.Date);
+        section.AddParagraph(summary.IsPreliminary ? "PRELIMINARY - finalized dishes only; do not use as a complete preparation list." : $"Status: {summary.Status}");
+        foreach (var exception in summary.OperationalExceptions) section.AddParagraph("REVIEW REQUIRED: " + exception);
+        foreach (var selection in summary.Selections)
+        {
+            section.AddParagraph($"Order {selection.OrderReference} / Customer {selection.CustomerReference} - {selection.FinalizationStatus} - {string.Join(", ", selection.SelectionSources)}");
+            section.AddParagraph("Dietary requirements: " + string.Join(", ", selection.DietaryRestrictions));
+            foreach (var dish in selection.Dishes) section.AddParagraph($"{dish.Quantity} x {dish.MealName} ({dish.Category})");
+        }
 
-        if (summary.MealItemCount == 0 && summary.MealTypes.Count == 0)
+        if (summary.MealItemCount == 0 && summary.MealTypes.Count == 0 && !summary.IsPreliminary)
             AddEmptyState(section, summary);
         else
             AddPreparationReport(section, summary);

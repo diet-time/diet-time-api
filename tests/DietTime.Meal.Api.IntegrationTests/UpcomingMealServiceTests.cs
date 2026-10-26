@@ -43,6 +43,9 @@ public sealed class UpcomingMealServiceTests : IAsyncLifetime
         connection = new NpgsqlConnectionStringBuilder(adminConnection) { Database = database }.ConnectionString;
         db = Context();
         await db.Database.EnsureCreatedAsync();
+        await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX ux_customer_meal_selection_legacy_type ON public.customer_meal_selections(subscription_service_day_id, meal_type_id) WHERE category IS NULL");
+        await db.Database.ExecuteSqlRawAsync("ALTER TABLE public.customer_meal_selections ADD CONSTRAINT test_category CHECK (category IN ('meal','snack'))");
+        await db.Database.ExecuteSqlRawAsync("ALTER TABLE public.subscription_service_days ADD CONSTRAINT test_selection_status CHECK (selection_status IN ('PENDING','PARTIAL','COMPLETED','DEFAULTED','LOCKED'))");
         await SeedAsync();
     }
 
@@ -60,219 +63,321 @@ public sealed class UpcomingMealServiceTests : IAsyncLifetime
     private DietTimeDbContext Context() => new(new DbContextOptionsBuilder<DietTimeDbContext>()
         .UseNpgsql(connection).UseSnakeCaseNamingConvention().Options);
     private UpcomingMealService Service(DietTimeDbContext? context = null) => new(context ?? db, clock,
-        Options.Create(new MealSelectionOptions { CutoffTime = new(19, 0), DaysBeforeDelivery = 1 }), new TestStorage());
+        Options.Create(new MealSelectionOptions { CutoffTime = new(21, 0), DaysBeforeDelivery = 1 }), new TestStorage());
 
-    [UpcomingPostgresFact]
-    public async Task Purchase_creates_assignments_and_customer_HTTP_endpoints_save_and_protect_them()
+
+    private async Task<TomorrowMenuResponse> PrepareAsync()
     {
-        var address = new CustomerAddress { Id = Guid.NewGuid(), CustomerProfileId = order.CustomerProfileId,
-            AddressType = "HOME", Area = "Doha", IsActive = true };
-        var delivery = new DeliveryTimeSlot { Id = Guid.NewGuid(), Code = "MORNING", Name = "Morning", NameAr = "Morning",
-            StartTime = new(9, 0), EndTime = new(11, 0), IsActive = true };
-        db.AddRange(address, delivery);
-        await db.SaveChangesAsync();
-        await using var factory = new ApiFactory(connection, services =>
-        {
-            services.AddSingleton<TimeProvider>(clock);
-            services.PostConfigure<DietTime.Infrastructure.TwilioWhatsAppOptions>(o => o.Enabled = false);
-        });
-        using var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Development-User-Id", userId.ToString());
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/orders") {
-            Content = JsonContent.Create(new PlaceOrderRequest(order.CustomerProfileId,
-                order.MealPlanTemplateId, order.MealPlanPriceId, address.Id, delivery.Id, order.StartDate,
-                [1, 2, 3, 4, 6, 7], order.Meals.Select(m => new PlaceOrderMealRequest(m.MealTypeId, m.Quantity)).ToArray()))
-        };
-        request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString());
-        var placed = await client.SendAsync(request);
-        var body = await placed.Content.ReadAsStringAsync();
-        Assert.True(placed.StatusCode == HttpStatusCode.Created, body);
-        var newOrderId = JsonDocument.Parse(body).RootElement.GetProperty("id").GetGuid();
-        Assert.Equal(48, await db.Set<CustomerMealSelection>().CountAsync(s => s.ServiceDay.OrderId == newOrderId));
-        var days = await client.GetFromJsonAsync<JsonElement>($"/api/v1/orders/{newOrderId}/upcoming-meals");
-        var dayId = days.GetProperty("data")[0].GetProperty("subscriptionServiceDayId").GetGuid();
-        var menuPath = $"/api/v1/orders/{newOrderId}/service-days/{dayId}/menu";
-        var rawMenu = await client.GetFromJsonAsync<JsonElement>(menuPath);
-        var menu = rawMenu.GetProperty("data").Deserialize<DailyMealMenuResponse>(new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
-        var replacement = Alternative(menu);
-        var changePath = $"/api/v1/orders/{newOrderId}/service-days/{dayId}/meal-selections/{menu.SelectedMeals[0].SelectionId}";
-        var changed = await client.PutAsJsonAsync(changePath,
-            new ReplaceAssignedMealRequest(replacement.MealItemId, replacement.SlotOptionId, menu.Revision));
-        Assert.Equal(HttpStatusCode.OK, changed.StatusCode);
-        var reopened = await client.GetFromJsonAsync<JsonElement>(menuPath);
-        Assert.Equal("customized", reopened.GetProperty("data").GetProperty("status").GetString());
-        client.DefaultRequestHeaders.Remove("X-Development-User-Id");
-        client.DefaultRequestHeaders.Add("X-Development-User-Id", Guid.NewGuid().ToString());
-        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(menuPath)).StatusCode);
-        client.DefaultRequestHeaders.Remove("X-Development-User-Id");
-        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(menuPath)).StatusCode);
+        clock.Now = new(2026, 10, 26, 10, 0, 0, TimeSpan.Zero);
+        await Service().InitializeAsync(order, default);
+        return (await Service().GetTomorrowAsync(order.Id, userId, "en", default))!;
     }
+    private static ConfirmMealsRequest Request(TomorrowMenuResponse menu) => new(
+        menu.SelectedMeals.Where(m => m.Category == "meal").Select(m => m.MealItemId).ToArray(),
+        menu.SelectedMeals.Where(m => m.Category == "snack").Select(m => m.MealItemId).ToArray());
 
     [UpcomingPostgresFact]
-    public async Task Assigns_exact_quantities_once_for_every_day_and_reopens_saved_choices()
+    public async Task Tomorrow_defaults_are_provisional_and_confirmation_is_permanently_locked()
     {
-        var service = Service();
-        await service.InitializeAsync(order, default);
-        await service.InitializeAsync(order, default);
-        Assert.Equal(12, await db.Set<SubscriptionServiceDay>().CountAsync());
-        Assert.Equal(48, await db.Set<CustomerMealSelection>().CountAsync());
-        var days = await service.GetDaysAsync(order.Id, userId, default);
-        Assert.All(days!, d => Assert.NotEqual(DayOfWeek.Friday, d.DeliveryDate.DayOfWeek));
-        Assert.Equal(1, days![5].MenuWeekNumber);
-        Assert.Equal(2, days[6].MenuWeekNumber);
-        Assert.Equal(new DateTimeOffset(2026, 10, 26, 16, 0, 0, TimeSpan.Zero), days[0].CutoffAt);
-        var menu = (await service.GetMenuAsync(order.Id, days[0].SubscriptionServiceDayId, userId, "en", default))!;
-        Assert.Equal(3, menu.SelectedMeals.Count(m => m.Meal.Category == "meal"));
-        Assert.Single(menu.SelectedMeals.Where(m => m.Meal.Category == "snack"));
-        Assert.Equal(4, menu.SelectedMeals.Select(m => m.Meal.MealItemId).Distinct().Count());
-        var replacement = Alternative(menu);
-        var changed = await service.ReplaceAsync(order.Id, menu.SubscriptionServiceDayId, menu.SelectedMeals[0].SelectionId,
-            userId, "en", new(replacement.MealItemId, replacement.SlotOptionId, menu.Revision), default);
-        Assert.Equal("customized", changed.Status);
-        Assert.Equal(3, menu.SelectedMeals.Skip(1).Count(old => changed.SelectedMeals.Any(m => m.SelectionId == old.SelectionId && m.Meal.MealItemId == old.Meal.MealItemId)));
-        await service.InitializeAsync(order, default);
+        var menu = await PrepareAsync();
+        Assert.Equal(new DateOnly(2026, 10, 27), menu.DeliveryDate);
+        Assert.Equal(new DateTimeOffset(2026, 10, 26, 18, 0, 0, TimeSpan.Zero), menu.CutoffAt);
+        Assert.Equal("DEFAULT_PENDING", menu.SelectionStatus);
+        Assert.True(menu.CanConfirm); Assert.False(menu.SelectionLocked);
+        Assert.Equal(3, menu.MealCount); Assert.Equal(1, menu.SnackCount);
+        var counts = await db.Set<CustomerMealSelection>().CountAsync();
+        var request = Request(menu);
+        // Reorder existing dishes: tests a dish-index swap without losing positions/history.
+        request = request with { MealMenuItemIds = request.MealMenuItemIds.Reverse().ToArray() };
+        var saved = await Service().ConfirmAsync(order.Id, menu.SubscriptionServiceDayId!.Value, userId, "en", request, default);
+        Assert.Equal("CUSTOMER_CONFIRMED", saved.SelectionStatus);
+        Assert.True(saved.SelectionLocked); Assert.False(saved.CanConfirm);
+        Assert.Empty(saved.AvailableMeals); Assert.Empty(saved.AvailableSnacks);
+        Assert.Equal(counts, await db.Set<CustomerMealSelection>().CountAsync());
         await using var fresh = Context();
-        var reopened = (await Service(fresh).GetMenuAsync(order.Id, menu.SubscriptionServiceDayId, userId, "en", default))!;
-        Assert.Equal(replacement.MealItemId, reopened.SelectedMeals[0].Meal.MealItemId);
-        Assert.Equal("customer", reopened.SelectedMeals[0].SelectionSource);
-        Assert.Equal(48, await fresh.Set<CustomerMealSelection>().CountAsync());
-        Assert.Single(await fresh.Set<CustomerMealSelectionHistory>().ToListAsync());
+        var reopened = (await Service(fresh).GetTomorrowAsync(order.Id, userId, "en", default))!;
+        Assert.Equal(saved.SelectedMenuItemIds.Order(), reopened.SelectedMenuItemIds.Order());
+        var error = await Assert.ThrowsAsync<UpcomingMealException>(() => Service(fresh).ConfirmAsync(order.Id,
+            menu.SubscriptionServiceDayId.Value, userId, "en", request, default));
+        Assert.Equal("already_confirmed", error.Code);
+        clock.Now = menu.CutoffAt;
+        await Service(fresh).FinalizeDueAsync(default);
+        Assert.Equal("CUSTOMER_CONFIRMED", (await Service(fresh).GetTomorrowAsync(order.Id, userId, "en", default))!.SelectionStatus);
     }
 
     [UpcomingPostgresFact]
-    public async Task Ownership_cutoff_delivered_and_kitchen_locks_are_enforced()
+    public async Task Confirmation_HTTP_authenticates_checks_ownership_and_returns_saved_dishes()
     {
-        await Service().InitializeAsync(order, default);
-        var day = await db.Set<SubscriptionServiceDay>().OrderBy(d => d.ServiceDate).FirstAsync();
-        Assert.Null(await Service().GetMenuAsync(order.Id, day.Id, Guid.NewGuid(), "en", default));
-        var menu = (await Service().GetMenuAsync(order.Id, day.Id, userId, "en", default))!;
-        var alt = Alternative(menu);
-        clock.Now = menu.CutoffAt!.Value;
-        Assert.False((await Service().GetMenuAsync(order.Id, day.Id, userId, "en", default))!.CanEdit);
-        var error = await Assert.ThrowsAsync<UpcomingMealException>(() => Service().ReplaceAsync(order.Id, day.Id,
-            menu.SelectedMeals[0].SelectionId, userId, "en", new(alt.MealItemId, alt.SlotOptionId, menu.Revision), default));
-        Assert.Equal(409, error.StatusCode);
-        clock.Now = new(2026, 10, 25, 10, 0, 0, TimeSpan.Zero);
-        day.SelectionLocked = true;
-        await db.SaveChangesAsync();
-        Assert.False((await Service().GetMenuAsync(order.Id, day.Id, userId, "en", default))!.CanEdit);
-        day.Status = "DELIVERED";
-        await db.SaveChangesAsync();
-        Assert.Equal("delivered", (await Service().GetMenuAsync(order.Id, day.Id, userId, "en", default))!.Status);
+        var menu = await PrepareAsync();
+        await using var factory = new ApiFactory(connection, services => services.AddSingleton<TimeProvider>(clock));
+        using var client = factory.CreateClient();
+        var getPath = $"/api/v1/orders/{order.Id}/tomorrow-menu";
+        var postPath = $"/api/v1/orders/{order.Id}/service-days/{menu.SubscriptionServiceDayId}/confirm-meals";
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync(getPath)).StatusCode);
+        client.DefaultRequestHeaders.Add("X-Development-User-Id", Guid.NewGuid().ToString());
+        Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync(getPath)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsJsonAsync(postPath, Request(menu))).StatusCode);
+        client.DefaultRequestHeaders.Remove("X-Development-User-Id");
+        client.DefaultRequestHeaders.Add("X-Development-User-Id", userId.ToString());
+        var response = await client.PostAsJsonAsync(postPath, Request(menu));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var data = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        Assert.True(data.GetProperty("selectionLocked").GetBoolean());
+        Assert.Equal("CUSTOMER_CONFIRMED", data.GetProperty("selectionStatus").GetString());
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync(postPath, Request(menu))).StatusCode);
     }
 
     [UpcomingPostgresFact]
-    public async Task Allergen_restriction_and_inactive_options_are_excluded_and_shortages_flagged()
+    public async Task At_exact_cutoff_confirmation_is_rejected_and_finalizer_is_idempotent()
     {
-        var allergen = new Allergen { Id = Guid.NewGuid(), Code = "NUTS", IsActive = true };
-        db.Add(allergen);
-        db.Add(new CustomerProfileAllergen { Id = Guid.NewGuid(), CustomerProfileId = order.CustomerProfileId, AllergenId = allergen.Id });
-        var bad = await db.MealItems.Where(m => m.Sku == "meal-0").SingleAsync();
-        bad.Allergens.Add(new MealItemAllergen { MealItemId = bad.Id, AllergenId = allergen.Id });
-        var inactive = await db.MealItems.Where(m => m.Sku == "meal-1").SingleAsync();
-        inactive.Status = "INACTIVE";
-        var restricted = await db.MealItems.Where(m => m.Sku == "meal-2").SingleAsync();
-        restricted.IsVegan = false;
-        db.Add(new CustomerProfilePreference { Id = Guid.NewGuid(), CustomerProfileId = order.CustomerProfileId, PreferenceCode = "VEGAN", PreferenceType = "DIET_STYLE" });
-        await db.SaveChangesAsync();
-        await Service().InitializeAsync(order, default);
-        var day = await db.Set<SubscriptionServiceDay>().FirstAsync();
-        var menu = (await Service().GetMenuAsync(order.Id, day.Id, userId, "en", default))!;
-        Assert.Equal("needs_review", menu.Status);
-        Assert.False(menu.CanEdit);
-        Assert.DoesNotContain(menu.AvailableAlternatives, m => new[] { bad.Id, inactive.Id, restricted.Id }.Contains(m.MealItemId));
-        Assert.DoesNotContain(menu.SelectedMeals, m => new[] { bad.Id, inactive.Id, restricted.Id }.Contains(m.Meal.MealItemId));
+        var menu = await PrepareAsync();
+        clock.Now = menu.CutoffAt;
+        var error = await Assert.ThrowsAsync<UpcomingMealException>(() => Service().ConfirmAsync(order.Id,
+            menu.SubscriptionServiceDayId!.Value, userId, "en", Request(menu), default));
+        Assert.Equal("cutoff_passed", error.Code);
+        await Service().FinalizeDueAsync(default);
+        var rows = await db.Set<CustomerMealSelection>().CountAsync();
+        var history = await db.Set<CustomerMealSelectionHistory>().CountAsync();
+        await using var fresh = Context();
+        await Service(fresh).FinalizeDueAsync(default);
+        Assert.Equal(rows, await fresh.Set<CustomerMealSelection>().CountAsync());
+        Assert.Equal(history, await fresh.Set<CustomerMealSelectionHistory>().CountAsync());
+        Assert.Equal("AUTO_FINALIZED", (await Service(fresh).GetTomorrowAsync(order.Id, userId, "en", default))!.SelectionStatus);
     }
 
     [UpcomingPostgresFact]
-    public async Task Rejects_other_menu_day_category_and_duplicate_dish_without_mutating_others()
+    public async Task Concurrent_confirmations_have_one_winner_and_no_duplicates()
     {
-        await Service().InitializeAsync(order, default);
-        var day = await db.Set<SubscriptionServiceDay>().OrderBy(d => d.ServiceDate).FirstAsync();
-        var menu = (await Service().GetMenuAsync(order.Id, day.Id, userId, "en", default))!;
-        var first = menu.SelectedMeals.First(m => m.Meal.Category == "meal");
-        var snack = menu.AvailableAlternatives.First(m => m.Category == "snack");
-        await Assert.ThrowsAsync<UpcomingMealException>(() => Service().ReplaceAsync(order.Id, day.Id, first.SelectionId,
-            userId, "en", new(snack.MealItemId, snack.SlotOptionId, menu.Revision), default));
-        var other = menu.SelectedMeals.First(m => m.SelectionId != first.SelectionId && m.Meal.Category == "meal").Meal;
-        await Assert.ThrowsAsync<UpcomingMealException>(() => Service().ReplaceAsync(order.Id, day.Id, first.SelectionId,
-            userId, "en", new(other.MealItemId, other.SlotOptionId, menu.Revision), default));
-        var otherOption = await db.MealPlanSlotOptions.FirstAsync(o => o.Slot.Day.MenuWeekday == MenuWeekday.Wednesday);
-        await Assert.ThrowsAsync<UpcomingMealException>(() => Service().ReplaceAsync(order.Id, day.Id, first.SelectionId,
-            userId, "en", new(otherOption.MealItemId, otherOption.Id, menu.Revision), default));
-        Assert.Empty(await db.Set<CustomerMealSelectionHistory>().ToListAsync());
-    }
-
-    [UpcomingPostgresFact]
-    public async Task Concurrent_replacements_cannot_overwrite_one_another()
-    {
-        await Service().InitializeAsync(order, default);
-        var day = await db.Set<SubscriptionServiceDay>().OrderBy(d => d.ServiceDate).FirstAsync();
-        var menu = (await Service().GetMenuAsync(order.Id, day.Id, userId, "en", default))!;
-        var ids = menu.SelectedMeals.Select(m => m.Meal.MealItemId).ToHashSet();
-        var options = menu.AvailableAlternatives.Where(m => m.Category == "meal" && !ids.Contains(m.MealItemId)).Take(2).ToArray();
-        async Task<int> Attempt(UpcomingMealItemResponse option)
+        var menu = await PrepareAsync();
+        async Task<bool> Attempt()
         {
             await using var context = Context();
-            try { await Service(context).ReplaceAsync(order.Id, day.Id, menu.SelectedMeals[0].SelectionId,
-                userId, "en", new(option.MealItemId, option.SlotOptionId, menu.Revision), default); return 200; }
-            catch (UpcomingMealException error) { return error.StatusCode; }
+            try { await Service(context).ConfirmAsync(order.Id, menu.SubscriptionServiceDayId!.Value, userId, "en", Request(menu), default); return true; }
+            catch (UpcomingMealException e) when (e.Code == "already_confirmed") { return false; }
         }
-        var results = await Task.WhenAll(options.Select(Attempt));
-        Assert.Equal(new[] { 200, 409 }, results.Order().ToArray());
+        var results = await Task.WhenAll(Attempt(), Attempt());
+        Assert.Single(results.Where(r => r));
+        await using var fresh = Context();
+        var rows = await fresh.Set<CustomerMealSelection>().Where(s => s.SubscriptionServiceDayId == menu.SubscriptionServiceDayId && s.Status != "CANCELLED").ToListAsync();
+        Assert.Equal(4, rows.Count); Assert.Equal(4, rows.Select(r => r.MenuItemId).Distinct().Count());
     }
 
     [UpcomingPostgresFact]
-    public async Task Kitchen_summary_uses_saved_customer_dish_and_finalizes_at_cutoff()
+    public async Task Concurrent_finalizers_and_confirmation_cannot_overwrite_customer_choice()
     {
-        order.Status = "ACTIVE";
-        await db.SaveChangesAsync();
-        await Service().InitializeAsync(order, default);
-        var day = await db.Set<SubscriptionServiceDay>().OrderBy(d => d.ServiceDate).FirstAsync();
-        var menu = (await Service().GetMenuAsync(order.Id, day.Id, userId, "en", default))!;
-        var replacement = Alternative(menu);
-        await Service().ReplaceAsync(order.Id, day.Id, menu.SelectedMeals[0].SelectionId,
-            userId, "en", new(replacement.MealItemId, replacement.SlotOptionId, menu.Revision), default);
-        clock.Now = menu.CutoffAt!.Value;
-        var calendar = new AdminDeliveryCalendarService(db, Options.Create(new MenuRotationOptions()), clock);
-        var summary = await calendar.GetPreparationSummaryAsync(day.ServiceDate, default);
-        Assert.Equal(4, summary.MealItemCount);
-        Assert.Contains(summary.MealTypes.SelectMany(t => t.Items), m => m.MenuItemId == replacement.MealItemId);
-        db.ChangeTracker.Clear();
-        Assert.True((await db.Set<SubscriptionServiceDay>().SingleAsync(d => d.Id == day.Id)).SelectionLocked);
-        Assert.False((await Service().GetMenuAsync(order.Id, day.Id, userId, "en", default))!.CanEdit);
+        var menu = await PrepareAsync();
+        // Hold the row while both operations queue, then advance server time to cutoff.
+        await using var blocker = Context();
+        await using var tx = await blocker.Database.BeginTransactionAsync();
+        var id = menu.SubscriptionServiceDayId!.Value;
+        await blocker.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM public.subscription_service_days WHERE id = {id} FOR UPDATE");
+        await using var confirmingContext = Context();
+        var confirmation = Service(confirmingContext).ConfirmAsync(order.Id, id, userId, "en", Request(menu), default);
+        clock.Now = menu.CutoffAt;
+        await using var workerContext = Context();
+        var finalization = Service(workerContext).FinalizeDueAsync(default);
+        await tx.CommitAsync();
+        var error = await Assert.ThrowsAsync<UpcomingMealException>(() => confirmation);
+        Assert.Equal("cutoff_passed", error.Code);
+        await finalization;
+        await using var retry1 = Context(); await using var retry2 = Context();
+        await Task.WhenAll(Service(retry1).FinalizeDueAsync(default), Service(retry2).FinalizeDueAsync(default));
+        await using var fresh = Context();
+        var day = await fresh.Set<SubscriptionServiceDay>().SingleAsync(d => d.Id == id);
+        Assert.True(day.SelectionLocked); Assert.NotNull(day.AutoFinalizedAt); Assert.Null(day.CustomerConfirmedAt);
     }
 
     [UpcomingPostgresFact]
-    public async Task Every_rotation_week_and_actual_weekday_resolve_against_the_purchased_template()
+    public async Task Invalid_counts_duplicates_categories_and_unavailable_dishes_leave_defaults_unchanged()
     {
-        var dates = SubscriptionMenuRules.ServiceDates(order.StartDate, order.StartDate.AddDays(45),
-            new HashSet<int> { 1, 2, 3, 4, 6, 7 }).Take(30).ToArray();
-        order.EndDate = dates[^1];
-        await db.SaveChangesAsync();
-        await Service().InitializeAsync(order, default);
-        var days = (await Service().GetDaysAsync(order.Id, userId, default))!;
-        Assert.Equal(30, days.Count);
-        foreach (var sequence in new[] { 1, 6, 7, 12, 13, 18, 19, 24, 25, 30 })
+        var menu = await PrepareAsync();
+        var good = Request(menu); var id = menu.SubscriptionServiceDayId!.Value;
+        foreach (var bad in new[] {
+            good with { MealMenuItemIds = [] },
+            good with { MealMenuItemIds = Enumerable.Repeat(good.MealMenuItemIds[0], 3).ToArray() },
+            good with { SnackMenuItemIds = [good.MealMenuItemIds[0]] },
+            good with { SnackMenuItemIds = [Guid.NewGuid()] } })
         {
-            var day = days[sequence - 1];
-            var menu = (await Service().GetMenuAsync(order.Id, day.SubscriptionServiceDayId, userId, "en", default))!;
-            var ids = menu.AvailableAlternatives.Select(m => m.SlotOptionId).ToArray();
-            var mapped = await db.MealPlanSlotOptions.Where(o => ids.Contains(o.Id))
-                .Select(o => new { o.Slot.Day.WeekNumber, o.Slot.Day.MenuWeekday, o.Slot.Day.MealPlanTemplateId }).ToListAsync();
-            Assert.All(mapped, option =>
-            {
-                Assert.Equal(SubscriptionMenuRules.MenuWeek(sequence, 4), option.WeekNumber);
-                Assert.Equal(MenuWeekdayExtensions.FromDate(day.DeliveryDate), option.MenuWeekday);
-                Assert.Equal(order.MealPlanTemplateId, option.MealPlanTemplateId);
-            });
+            await using var context = Context();
+            await Assert.ThrowsAsync<UpcomingMealException>(() => Service(context).ConfirmAsync(order.Id, id, userId, "en", bad, default));
+        }
+        await using var fresh = Context();
+        var after = (await Service(fresh).GetTomorrowAsync(order.Id, userId, "en", default))!;
+        Assert.Equal(menu.SelectedMenuItemIds.Order(), after.SelectedMenuItemIds.Order()); Assert.False(after.SelectionLocked);
+        Assert.Empty(await fresh.Set<CustomerMealSelectionHistory>().ToListAsync());
+    }
+
+    [UpcomingPostgresFact]
+    public async Task Cancelled_positions_are_reused_without_violating_unique_indexes()
+    {
+        var menu = await PrepareAsync();
+        var day = await db.Set<SubscriptionServiceDay>().Include(d => d.Selections).SingleAsync(d => d.Id == menu.SubscriptionServiceDayId);
+        foreach (var row in day.Selections) row.Status = "CANCELLED";
+        await db.SaveChangesAsync();
+        var result = await Service().ConfirmAsync(order.Id, day.Id, userId, "en", Request(menu), default);
+        Assert.True(result.SelectionLocked);
+        Assert.Equal(4, await db.Set<CustomerMealSelection>().CountAsync(s => s.SubscriptionServiceDayId == day.Id));
+    }
+
+    [UpcomingPostgresFact]
+    public async Task Shortage_flags_review_then_recovers_after_configuration_is_fixed()
+    {
+        var menu = await PrepareAsync();
+        var meals = await db.MealItems.Where(m => m.Sku == "meal-0" || m.Sku == "meal-1" || m.Sku == "meal-2").ToListAsync();
+        foreach (var meal in meals) meal.IsAvailable = false;
+        await db.SaveChangesAsync(); clock.Now = menu.CutoffAt;
+        await Service().FinalizeDueAsync(default);
+        var failed = (await Service().GetTomorrowAsync(order.Id, userId, "en", default))!;
+        Assert.Equal("NEEDS_REVIEW", failed.SelectionStatus); Assert.False(failed.SelectionLocked);
+        var calendar = new AdminDeliveryCalendarService(db, Options.Create(new MenuRotationOptions()), clock);
+        var report = await calendar.GetPreparationSummaryAsync(menu.DeliveryDate, default);
+        Assert.Empty(report.MealTypes); Assert.NotEmpty(report.OperationalExceptions); Assert.True(report.IsPreliminary);
+        foreach (var meal in meals) meal.IsAvailable = true;
+        await db.SaveChangesAsync(); await Service().FinalizeDueAsync(default);
+        Assert.Equal("AUTO_FINALIZED", (await Service().GetTomorrowAsync(order.Id, userId, "en", default))!.SelectionStatus);
+    }
+
+    [UpcomingPostgresFact]
+    public async Task Allergens_restrictions_inactive_slots_and_wrong_menu_days_are_excluded()
+    {
+        var menu = await PrepareAsync();
+        var allergen = new Allergen { Id = Guid.NewGuid(), Code = "NUTS", IsActive = true };
+        db.Add(allergen); db.Add(new CustomerProfileAllergen { Id = Guid.NewGuid(), CustomerProfileId = order.CustomerProfileId, AllergenId = allergen.Id });
+        var bad = await db.MealItems.SingleAsync(m => m.Sku == "meal-0");
+        bad.Allergens.Add(new MealItemAllergen { MealItemId = bad.Id, AllergenId = allergen.Id });
+        var inactive = await db.MealItems.SingleAsync(m => m.Sku == "meal-1"); inactive.Status = "INACTIVE";
+        var restricted = await db.MealItems.SingleAsync(m => m.Sku == "meal-2"); restricted.IsVegan = false;
+        db.Add(new CustomerProfilePreference { Id = Guid.NewGuid(), CustomerProfileId = order.CustomerProfileId, PreferenceCode = "VEGAN", PreferenceType = "DIET_STYLE" });
+        await db.SaveChangesAsync();
+        var refreshed = (await Service().GetTomorrowAsync(order.Id, userId, "en", default))!;
+        Assert.DoesNotContain(refreshed.AvailableMeals, m => new[] { bad.Id, inactive.Id, restricted.Id }.Contains(m.MealItemId));
+        await Assert.ThrowsAsync<UpcomingMealException>(() => Service().ConfirmAsync(order.Id, menu.SubscriptionServiceDayId!.Value, userId, "en", Request(menu), default));
+        var ids = refreshed.AvailableMeals.Concat(refreshed.AvailableSnacks).Select(m => m.SlotOptionId).ToArray();
+        var mappings = await db.MealPlanSlotOptions.Where(o => ids.Contains(o.Id)).Select(o => new { o.Slot.Day.MenuWeekday, o.Slot.Day.WeekNumber }).ToListAsync();
+        Assert.All(mappings, m => { Assert.Equal(MenuWeekday.Tuesday, m.MenuWeekday); Assert.Equal(1, m.WeekNumber); });
+        var slot = await db.MealPlanTemplateSlots.FirstAsync(t => t.Day.WeekNumber == 1 && t.Day.MenuWeekday == MenuWeekday.Tuesday && t.MealType.Code == "MEAL");
+        slot.IsActive = false; await db.SaveChangesAsync();
+        Assert.Empty((await Service().GetTomorrowAsync(order.Id, userId, "en", default))!.AvailableMeals);
+    }
+
+    [UpcomingPostgresFact]
+    public async Task Missed_cutoffs_recover_and_kitchen_uses_only_finalized_persisted_dishes()
+    {
+        var menu = await PrepareAsync();
+        var calendar = new AdminDeliveryCalendarService(db, Options.Create(new MenuRotationOptions()), clock);
+        var preliminary = await calendar.GetPreparationSummaryAsync(menu.DeliveryDate, default);
+        Assert.True(preliminary.IsPreliminary); Assert.Empty(preliminary.MealTypes);
+        clock.Now = menu.CutoffAt.AddDays(2); // server was unavailable for two days
+        await Service().FinalizeDueAsync(default);
+        var report = await calendar.GetPreparationSummaryAsync(menu.DeliveryDate, default);
+        Assert.False(report.IsPreliminary); Assert.Equal(4, report.MealItemCount);
+        Assert.Equal(menu.SelectedMenuItemIds.Order(), report.MealTypes.SelectMany(t => t.Items).Select(i => i.MenuItemId).Order());
+        Assert.Equal("AUTO_FINALIZED", Assert.Single(report.Selections).FinalizationStatus);
+        Assert.DoesNotContain(report.MealTypes, t => t.MealTypeName.StartsWith("Meal "));
+    }
+
+    [UpcomingPostgresFact]
+    public async Task Thursday_has_no_delivery_and_Friday_opens_Saturday_only()
+    {
+        await PrepareAsync(); clock.Now = new(2026, 10, 29, 10, 0, 0, TimeSpan.Zero);
+        Assert.Equal("NO_DELIVERY", (await Service().GetTomorrowAsync(order.Id, userId, "en", default))!.SelectionStatus);
+        clock.Now = clock.Now.AddDays(1);
+        var saturday = (await Service().GetTomorrowAsync(order.Id, userId, "en", default))!;
+        Assert.Equal(DayOfWeek.Saturday, saturday.DeliveryDate.DayOfWeek); Assert.True(saturday.CanConfirm);
+        var other = await db.Set<SubscriptionServiceDay>().FirstAsync(d => d.ServiceDate > saturday.DeliveryDate);
+        var future = (await Service().GetMenuAsync(order.Id, other.Id, userId, "en", default))!;
+        Assert.Empty(future.AvailableAlternatives); Assert.False(future.CanEdit);
+        await Assert.ThrowsAsync<UpcomingMealException>(() => Service().ConfirmAsync(order.Id, other.Id, userId, "en", Request(saturday), default));
+    }
+
+    [UpcomingPostgresFact]
+    public async Task Four_week_mapping_and_saved_template_are_used_for_each_service_sequence()
+    {
+        var dates = SubscriptionMenuRules.ServiceDates(order.StartDate, order.StartDate.AddDays(45), new HashSet<int> { 1,2,3,4,6,7 }).Take(30).ToArray();
+        order.EndDate = dates[^1]; await db.SaveChangesAsync(); await Service().InitializeAsync(order, default);
+        var days = await db.Set<SubscriptionServiceDay>().OrderBy(d => d.ServiceSequence).ToListAsync();
+        foreach (var day in days)
+        {
+            clock.Now = SubscriptionMenuRules.QatarCutoff(day.ServiceDate, 1, new(12, 0));
+            var menu = (await Service().GetTomorrowAsync(order.Id, userId, "en", default))!;
+            var ids = menu.AvailableMeals.Concat(menu.AvailableSnacks).Select(m => m.SlotOptionId).ToArray();
+            Assert.NotEmpty(ids);
+            var mapped = await db.MealPlanSlotOptions.Where(o => ids.Contains(o.Id)).Select(o => new { o.Slot.Day.WeekNumber, o.Slot.Day.MenuWeekday, o.Slot.Day.MealPlanTemplateId }).ToListAsync();
+            Assert.All(mapped, m => { Assert.Equal(SubscriptionMenuRules.MenuWeek(day.ServiceSequence!.Value,4),m.WeekNumber); Assert.Equal(MenuWeekdayExtensions.FromDate(day.ServiceDate),m.MenuWeekday); Assert.Equal(order.MealPlanTemplateId,m.MealPlanTemplateId); });
         }
     }
 
-    private static UpcomingMealItemResponse Alternative(DailyMealMenuResponse menu)
+
+    [UpcomingPostgresFact]
+    public async Task Failure_during_replacement_rolls_back_cancelled_rows_and_confirmation()
     {
-        var ids = menu.SelectedMeals.Select(m => m.Meal.MealItemId).ToHashSet();
-        return menu.AvailableAlternatives.First(m => m.Category == menu.SelectedMeals[0].Meal.Category && !ids.Contains(m.MealItemId));
+        var menu = await PrepareAsync();
+        await db.Database.ExecuteSqlRawAsync("CREATE FUNCTION test_fail_confirmation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.selection_source = 'CUSTOMER' AND NEW.selection_number = 2 AND NEW.status = 'SELECTED' THEN RAISE EXCEPTION 'injected write failure'; END IF; RETURN NEW; END $$");
+        await db.Database.ExecuteSqlRawAsync("CREATE TRIGGER test_fail_confirmation BEFORE UPDATE ON public.customer_meal_selections FOR EACH ROW EXECUTE FUNCTION test_fail_confirmation()");
+        await using var context = Context();
+        await Assert.ThrowsAsync<DbUpdateException>(() => Service(context).ConfirmAsync(order.Id, menu.SubscriptionServiceDayId!.Value, userId, "en", Request(menu), default));
+        await using var fresh = Context();
+        var after = (await Service(fresh).GetTomorrowAsync(order.Id, userId, "en", default))!;
+        Assert.False(after.SelectionLocked); Assert.Equal("DEFAULT_PENDING", after.SelectionStatus);
+        Assert.Equal(menu.SelectedMenuItemIds.Order(), after.SelectedMenuItemIds.Order());
+        Assert.Empty(await fresh.Set<CustomerMealSelectionHistory>().ToListAsync());
+        Assert.All(await fresh.Set<CustomerMealSelection>().Where(r => r.SubscriptionServiceDayId == menu.SubscriptionServiceDayId).ToListAsync(), r => Assert.Equal("SELECTED", r.Status));
+    }
+
+    [UpcomingPostgresFact]
+    public async Task Inactive_subscription_and_incomplete_defaults_do_not_bypass_server_rules()
+    {
+        var menu = await PrepareAsync();
+        order.Status = "CANCELLED"; await db.SaveChangesAsync();
+        var error = await Assert.ThrowsAsync<UpcomingMealException>(() => Service().ConfirmAsync(order.Id, menu.SubscriptionServiceDayId!.Value, userId, "en", Request(menu), default));
+        Assert.Equal("subscription_inactive", error.Code);
+        Assert.False((await Service().GetTomorrowAsync(order.Id,userId,"en",default))!.CanConfirm);
+        order.Status = "ACTIVE"; await db.SaveChangesAsync();
+        var day = await db.Set<SubscriptionServiceDay>().Include(d => d.Selections).SingleAsync(d => d.Id == menu.SubscriptionServiceDayId);
+        day.Selections.First().Status = "CANCELLED";
+        day.ReviewReason = "Incomplete defaults"; await db.SaveChangesAsync();
+        var refreshed = (await Service().GetTomorrowAsync(order.Id,userId,"en",default))!;
+        Assert.True(refreshed.CanConfirm); Assert.NotEmpty(refreshed.AvailableMeals);
+        var confirmed = await Service().ConfirmAsync(order.Id, day.Id,userId,"en",Request(menu),default);
+        Assert.Equal("CUSTOMER_CONFIRMED",confirmed.SelectionStatus); Assert.Null(confirmed.ReviewReason);
+    }
+
+
+    [UpcomingPostgresFact]
+    public async Task One_failed_delivery_is_flagged_without_blocking_other_due_deliveries()
+    {
+        var menu = await PrepareAsync();
+        await db.Database.ExecuteSqlRawAsync("CREATE FUNCTION test_fail_first_default() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.subscription_service_day_id = (SELECT id FROM public.subscription_service_days WHERE service_date = DATE '2026-10-27') AND NEW.status = 'SELECTED' THEN RAISE EXCEPTION 'injected default write failure'; END IF; RETURN NEW; END $$");
+        await db.Database.ExecuteSqlRawAsync("CREATE TRIGGER test_fail_first_default BEFORE UPDATE ON public.customer_meal_selections FOR EACH ROW EXECUTE FUNCTION test_fail_first_default()");
+        clock.Now = menu.CutoffAt.AddDays(1);
+        await Service().FinalizeDueAsync(default);
+        await using var fresh = Context();
+        var days = await fresh.Set<SubscriptionServiceDay>().OrderBy(d => d.ServiceDate).Take(2).ToListAsync();
+        Assert.False(days[0].SelectionLocked); Assert.NotNull(days[0].ReviewReason);
+        Assert.True(days[1].SelectionLocked); Assert.NotNull(days[1].AutoFinalizedAt);
+        Assert.All(await fresh.Set<CustomerMealSelection>().Where(r => r.SubscriptionServiceDayId == menu.SubscriptionServiceDayId).ToListAsync(), r => Assert.Equal("SELECTED",r.Status));
+        await fresh.Database.ExecuteSqlRawAsync("DROP TRIGGER test_fail_first_default ON public.customer_meal_selections");
+        await Service(fresh).FinalizeDueAsync(default);
+        Assert.NotNull((await fresh.Set<SubscriptionServiceDay>().SingleAsync(d => d.Id == menu.SubscriptionServiceDayId)).AutoFinalizedAt);
+    }
+
+    [UpcomingPostgresFact]
+    public async Task Legacy_locked_status_cannot_be_confirmed_or_silently_auto_finalized()
+    {
+        var menu = await PrepareAsync();
+        var day = await db.Set<SubscriptionServiceDay>().SingleAsync(d => d.Id == menu.SubscriptionServiceDayId);
+        day.SelectionStatus = "LOCKED"; // Legacy status is authoritative even without the flag.
+        await db.SaveChangesAsync();
+        var readOnly = (await Service().GetTomorrowAsync(order.Id, userId, "en", default))!;
+        Assert.True(readOnly.SelectionLocked); Assert.False(readOnly.CanConfirm); Assert.Empty(readOnly.AvailableMeals);
+        var error = await Assert.ThrowsAsync<UpcomingMealException>(() => Service().ConfirmAsync(order.Id, day.Id, userId, "en", Request(menu), default));
+        Assert.Equal("already_confirmed", error.Code);
+        clock.Now = menu.CutoffAt;
+        await Service().FinalizeDueAsync(default);
+        Assert.Null(day.AutoFinalizedAt); Assert.Null(day.CustomerConfirmedAt);
+        var report = await new AdminDeliveryCalendarService(db, Options.Create(new MenuRotationOptions()), clock)
+            .GetPreparationSummaryAsync(menu.DeliveryDate, default);
+        Assert.NotEmpty(report.OperationalExceptions); Assert.Empty(report.MealTypes);
     }
 
     private async Task SeedAsync()

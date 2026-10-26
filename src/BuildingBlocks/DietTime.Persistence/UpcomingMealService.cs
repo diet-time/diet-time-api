@@ -4,6 +4,7 @@ using DietTime.Contracts;
 using DietTime.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 
 namespace DietTime.Persistence;
 
@@ -14,12 +15,13 @@ public sealed class MealSelectionOptions
     public int? DaysBeforeDelivery { get; set; }
 }
 
-public sealed class UpcomingMealService(
+public sealed partial class UpcomingMealService(
     DietTimeDbContext db, TimeProvider clock, IOptions<MealSelectionOptions> policy,
-    IStorageUrlService storage) : IUpcomingMealService
+    IStorageUrlService storage, ILogger<UpcomingMealService>? logger = null) : IUpcomingMealService
 {
     public async Task InitializeAsync(Order order, CancellationToken ct)
     {
+        _ = policy; // Retained constructor contract; the new business cutoff is fixed at 21:00 Qatar.
         await using var transaction = db.Database.CurrentTransaction is null
             ? await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct) : null;
         await db.Database.ExecuteSqlInterpolatedAsync(
@@ -40,7 +42,7 @@ public sealed class UpcomingMealService(
                      order.DeliveryDays.Select(d => d.DayOfWeek).ToHashSet()))
         {
             sequence++;
-            var qatarToday = DateOnly.FromDateTime(now.UtcDateTime.AddHours(3));
+            var qatarToday = SubscriptionMenuRules.QatarToday(now);
             if (date < qatarToday || existingDates.Contains(date)) continue; // Never regenerate or overwrite saved choices.
             var day = new SubscriptionServiceDay
             {
@@ -49,9 +51,7 @@ public sealed class UpcomingMealService(
                 MealPlanTemplateId = template.Id, ServiceSequence = sequence,
                 MenuWeekNumber = SubscriptionMenuRules.MenuWeek(sequence, template.CycleWeeks),
                 MealCount = mealCount, SnackCount = snackCount,
-                SelectionCutoffAt = policy.Value.CutoffTime is { } time &&
-                    policy.Value.DaysBeforeDelivery is >= 0
-                    ? SubscriptionMenuRules.QatarCutoff(date, policy.Value.DaysBeforeDelivery.Value, time) : null,
+                SelectionCutoffAt = SubscriptionMenuRules.TomorrowCutoff(date),
                 CreatedAt = now, UpdatedAt = now, CreatedBy = order.CreatedBy, UpdatedBy = order.CreatedBy
             };
             var candidates = await EligibleAsync(day, order, profile, ct);
@@ -98,7 +98,7 @@ public sealed class UpcomingMealService(
             var reason = LockReason(d, order);
             return new UpcomingMealDayResponse(orderId, d.Id, d.ServiceDate,
                 d.ServiceSequence ?? 0, d.MenuWeekNumber ?? 0, Status(d, reason),
-                reason is null, d.SelectionCutoffAt, reason);
+                false, SubscriptionMenuRules.TomorrowCutoff(d.ServiceDate), reason ?? "Confirm your meals from Tomorrow’s Menu on the dashboard.");
         }).ToArray();
     }
 
@@ -111,51 +111,10 @@ public sealed class UpcomingMealService(
         return day is null ? null : await MapAsync(day, order, language, ct);
     }
 
-    public async Task<DailyMealMenuResponse> ReplaceAsync(Guid orderId, Guid dayId, Guid selectionId,
-        Guid userId, string language, ReplaceAssignedMealRequest request, CancellationToken ct)
-    {
-        await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
-        var order = await OwnedOrderAsync(orderId, userId, ct) ?? throw Missing();
-        if (!await db.Set<SubscriptionServiceDay>().AnyAsync(d => d.Id == dayId && d.OrderId == orderId, ct)) throw Missing();
-        // Serialize changes and kitchen finalization on this exact service day.
-        await db.Database.ExecuteSqlInterpolatedAsync(
-            $"SELECT id FROM public.subscription_service_days WHERE id = {dayId} FOR UPDATE", ct);
-        var day = await db.Set<SubscriptionServiceDay>().Include(d => d.Selections).SingleAsync(d => d.Id == dayId, ct);
-        var reason = LockReason(day, order);
-        if (reason is not null) throw new UpcomingMealException(409, "selection_locked", reason);
-        if (request.ExpectedRevision != day.Revision)
-            throw new UpcomingMealException(409, "selection_conflict", "Your meals changed. Refresh this day before trying again.");
-        var selection = day.Selections.SingleOrDefault(s => s.Id == selectionId && s.Status != "CANCELLED") ?? throw Missing();
-        var profile = await ProfileAsync(order.CustomerProfileId, ct);
-        var eligible = await EligibleAsync(day, order, profile, ct);
-        var replacement = eligible.SingleOrDefault(o => o.Id == request.SlotOptionId && o.MealItemId == request.MealItemId);
-        if (replacement is null || Category(replacement) != selection.Category)
-            throw new UpcomingMealException(422, "meal_unavailable", "That meal is not available for this selection and delivery day.");
-        if (day.Selections.Any(s => s.Id != selectionId && s.Status != "CANCELLED" && s.MenuItemId == replacement.MealItemId))
-            throw new UpcomingMealException(422, "duplicate_meal", "This dish is already included in your meals for this day.");
-        var now = clock.GetUtcNow();
-        db.Add(new CustomerMealSelectionHistory
-        {
-            Id = Guid.NewGuid(), CustomerMealSelectionId = selection.Id,
-            SubscriptionServiceDayId = day.Id, MealTypeId = replacement.Slot.MealTypeId,
-            PreviousMenuItemId = selection.MenuItemId, NewMenuItemId = replacement.MealItemId,
-            ChangedAt = now, ChangedBy = userId
-        });
-        selection.MenuItemId = replacement.MealItemId;
-        selection.MealPlanSlotOptionId = replacement.Id;
-        selection.MealTypeId = replacement.Slot.MealTypeId;
-        selection.SelectionSource = "CUSTOMER";
-        selection.IsDefaultSelection = false;
-        selection.LastChangedAt = selection.UpdatedAt = now;
-        selection.UpdatedBy = userId;
-        day.SelectionStatus = "COMPLETED";
-        day.UpdatedAt = now;
-        day.UpdatedBy = userId;
-        day.Revision++;
-        await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
-        return await MapAsync(day, order, language, ct);
-    }
+    // Old per-card writes must not bypass one-time whole-day confirmation.
+    public Task<DailyMealMenuResponse> ReplaceAsync(Guid orderId, Guid dayId, Guid selectionId,
+        Guid userId, string language, ReplaceAssignedMealRequest request, CancellationToken ct) =>
+        throw new UpcomingMealException(409, "confirmation_required", "Choose your meals on the dashboard and confirm the complete selection.");
 
     private Task<Order?> OwnedOrderAsync(Guid id, Guid userId, CancellationToken ct) =>
         db.Orders.AsNoTracking().SingleOrDefaultAsync(o => o.Id == id && db.CustomerProfiles.Any(p =>
@@ -167,7 +126,11 @@ public sealed class UpcomingMealService(
 
     private async Task<List<MealPlanSlotOption>> EligibleAsync(SubscriptionServiceDay day, Order order, CustomerProfile profile, CancellationToken ct)
     {
+        if (day.ServiceDate.DayOfWeek == DayOfWeek.Friday || day.MealPlanTemplateId is null ||
+            !await db.MealPlanTemplates.AnyAsync(t => t.Id == day.MealPlanTemplateId && t.IsPublished, ct)) return [];
         var weekday = MenuWeekdayExtensions.FromDate(day.ServiceDate);
+        var week = day.MenuWeekNumber ?? (day.ServiceSequence is > 0
+            ? SubscriptionMenuRules.MenuWeek(day.ServiceSequence.Value, 4) : 0);
         var atDelivery = SubscriptionMenuRules.QatarCutoff(day.ServiceDate, 0, order.DeliveryStartTime);
         var allergenIds = profile.Allergens.Select(a => a.AllergenId).ToArray();
         var options = await db.MealPlanSlotOptions.AsNoTracking()
@@ -175,8 +138,8 @@ public sealed class UpcomingMealService(
             .Include(o => o.MealItem).ThenInclude(m => m.Translations)
             .Include(o => o.MealItem).ThenInclude(m => m.Nutrition)
             .Where(o => o.Slot.Day.MealPlanTemplateId == day.MealPlanTemplateId &&
-                o.Slot.Day.WeekNumber == day.MenuWeekNumber && o.Slot.Day.MenuWeekday == weekday &&
-                o.Slot.Day.IsActive && o.Slot.IsActive && o.Slot.MealType.IsActive &&
+                o.Slot.Day.WeekNumber == week && o.Slot.Day.MenuWeekday == weekday &&
+                o.Slot.Day.IsActive && o.Slot.IsActive && o.Slot.MaximumSelection > 0 && o.Slot.MealType.IsActive &&
                 o.IsAvailable && o.AdditionalPrice == 0 &&
                 (o.AvailableFrom == null || o.AvailableFrom <= atDelivery) &&
                 (o.AvailableUntil == null || o.AvailableUntil > atDelivery) &&
@@ -188,7 +151,7 @@ public sealed class UpcomingMealService(
         return options.Where(o => MealPreferenceRules.IsEligible(o.MealItem, profile.Preferences)).ToList();
     }
 
-    private async Task<DailyMealMenuResponse> MapAsync(SubscriptionServiceDay day, Order order, string language, CancellationToken ct)
+    private async Task<DailyMealMenuResponse> MapAsync(SubscriptionServiceDay day, Order order, string language, CancellationToken ct, bool includeEligible = false)
     {
         var profile = await ProfileAsync(order.CustomerProfileId, ct);
         var alternatives = await EligibleAsync(day, order, profile, ct);
@@ -213,10 +176,11 @@ public sealed class UpcomingMealService(
                 text?.ShortDescription, imageUrl, meal?.Nutrition?.CaloriesKcal, category, typeId);
         }
         var reason = LockReason(day, order);
+        if (!SubscriptionMenuRules.IsSelectionOpen(day.ServiceDate, clock.GetUtcNow()) || (!includeEligible && reason is not null)) alternatives = [];
         return new(order.Id, day.Id, day.ServiceDate, day.MenuWeekNumber ?? 0,
             day.ServiceDate.DayOfWeek == DayOfWeek.Sunday ? 7 : (int)day.ServiceDate.DayOfWeek,
-            day.MealCount ?? 0, day.SnackCount ?? 0, Status(day, reason), reason is null,
-            day.SelectionCutoffAt, reason, day.Revision,
+            day.MealCount ?? 0, day.SnackCount ?? 0, Status(day, reason), false,
+            SubscriptionMenuRules.TomorrowCutoff(day.ServiceDate), reason ?? "Confirm your meals from Tomorrow’s Menu on the dashboard.", day.Revision,
             saved.Select(s => new AssignedMealResponse(s.Id,
                 s.SelectionSource == "DEFAULT" ? "automatic" : s.SelectionSource.ToLowerInvariant(),
                 Item(s.MenuItemId, s.MealPlanSlotOptionId ?? Guid.Empty, s.Category ?? "meal", s.MealTypeId))).ToArray(),
@@ -225,6 +189,8 @@ public sealed class UpcomingMealService(
 
     private string? LockReason(SubscriptionServiceDay day, Order order)
     {
+        if (!SubscriptionMenuRules.IsSelectionOpen(day.ServiceDate, clock.GetUtcNow()))
+            return "Meal selection is available only for tomorrow before 9:00 PM Qatar time.";
         if (day.Status == "DELIVERED") return "This delivery has been completed.";
         if (order.Status is not ("CONFIRMED" or "ACTIVE")) return "This subscription is not active.";
         if (day.SelectionLocked || day.SelectionStatus == "LOCKED" || day.Status is not ("PLANNED" or "CONFIRMED"))
@@ -233,8 +199,7 @@ public sealed class UpcomingMealService(
         if (day.Selections.Count(s => s.Category == "meal" && s.Status != "CANCELLED") != day.MealCount ||
             day.Selections.Count(s => s.Category == "snack" && s.Status != "CANCELLED") != day.SnackCount)
             return "Our team needs to review the meal quantities for this day.";
-        if (day.SelectionCutoffAt is null) return "The selection deadline is being confirmed. Your meals are read-only.";
-        if (clock.GetUtcNow() >= day.SelectionCutoffAt.Value) return "The selection deadline has passed. Your meals are locked for kitchen preparation.";
+        if (clock.GetUtcNow() >= SubscriptionMenuRules.TomorrowCutoff(day.ServiceDate)) return "The selection deadline has passed. Your meals are locked for kitchen preparation.";
         return null;
     }
 

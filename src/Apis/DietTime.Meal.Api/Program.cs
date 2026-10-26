@@ -58,8 +58,8 @@ builder.Services.Configure<DeliveryScheduleOptions>(builder.Configuration.GetSec
 builder.Services.Configure<MenuRotationOptions>(builder.Configuration.GetSection(MenuRotationOptions.SectionName));
 builder.Services.Configure<CustomerNutritionOptions>(builder.Configuration.GetSection(CustomerNutritionOptions.SectionName));
 builder.Services.AddOptions<MealSelectionOptions>()
-    .Configure(o => { o.CutoffTime = new TimeOnly(19, 0); o.DaysBeforeDelivery = 1; })
-    .Bind(builder.Configuration.GetSection(MealSelectionOptions.SectionName))
+    .Configure(o => { o.CutoffTime = new TimeOnly(21, 0); o.DaysBeforeDelivery = 1; })
+    // The customer cutoff is fixed by the Qatar business rule.
     .Validate(o => o.CutoffTime.HasValue && o.DaysBeforeDelivery is >= 0, "A valid Qatar meal selection cutoff is required.")
     .ValidateOnStart();
 builder.Services.Configure<OrderOptions>(builder.Configuration.GetSection(OrderOptions.SectionName));
@@ -164,6 +164,7 @@ builder.Services.AddScoped<ICustomerAddressService, CustomerAddressService>();
 builder.Services.AddScoped<IDeliveryTimeSlotService, DeliveryTimeSlotService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<IUpcomingMealService, UpcomingMealService>();
+builder.Services.AddHostedService<TomorrowMealFinalizationWorker>();
 builder.Services.AddScoped<IAdminDeliveryCalendarService, AdminDeliveryCalendarService>();
 builder.Services.AddSingleton<IKitchenPreparationReportGenerator, KitchenPreparationPdfReportGenerator>();
 builder.Services.AddScoped<IOperationsDashboardService, OperationsDashboardService>();

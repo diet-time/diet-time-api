@@ -127,7 +127,7 @@ public sealed class DeliveryPreparationApiTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Aggregates_default_menu_assignments_and_excludes_invalid_schedules()
+    public async Task Uninitialized_legacy_orders_are_flagged_instead_of_regenerating_kitchen_dishes()
     {
         if (!enabled) return;
 
@@ -137,15 +137,13 @@ public sealed class DeliveryPreparationApiTests : IAsyncLifetime
         var envelope = await response.Content.ReadFromJsonAsync<JsonElement>();
         var body = envelope.GetProperty("data");
 
-        Assert.Equal("Scheduled", body.GetProperty("status").GetString());
+        Assert.Equal("NeedsReview", body.GetProperty("status").GetString());
+        Assert.True(body.GetProperty("isPreliminary").GetBoolean());
         Assert.Equal(3, body.GetProperty("orderCount").GetInt32());
         Assert.Equal(2, body.GetProperty("customerCount").GetInt32());
-        Assert.Equal(10, body.GetProperty("mealItemCount").GetInt32());
-        var breakfast = body.GetProperty("mealTypes")[0];
-        Assert.Equal("Breakfast", breakfast.GetProperty("mealTypeName").GetString());
-        Assert.Equal(5, breakfast.GetProperty("quantity").GetInt32());
-        Assert.Equal("Chicken Wrap", breakfast.GetProperty("items")[0].GetProperty("menuItemName").GetString());
-        Assert.Equal(3, breakfast.GetProperty("items")[0].GetProperty("quantity").GetInt32());
+        Assert.Equal(0, body.GetProperty("mealItemCount").GetInt32());
+        Assert.Empty(body.GetProperty("mealTypes").EnumerateArray());
+        Assert.Equal(3, body.GetProperty("operationalExceptions").GetArrayLength());
         Assert.Equal(2, body.GetProperty("planBreakdown").GetArrayLength());
         Assert.Equal(2, body.GetProperty("planBreakdown")[0].GetProperty("orderCount").GetInt32());
     }

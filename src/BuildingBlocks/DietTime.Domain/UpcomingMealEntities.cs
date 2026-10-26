@@ -11,6 +11,8 @@ public sealed class SubscriptionServiceDay : Entity
     public short DayOfWeek { get; set; }
     public string Status { get; set; } = "PLANNED";
     public string SelectionStatus { get; set; } = "PENDING";
+    public DateTimeOffset? CustomerConfirmedAt { get; set; }
+    public DateTimeOffset? AutoFinalizedAt { get; set; }
     public bool SelectionLocked { get; set; }
     public DateTimeOffset? SelectionCutoffAt { get; set; }
     public int? ServiceSequence { get; set; }
