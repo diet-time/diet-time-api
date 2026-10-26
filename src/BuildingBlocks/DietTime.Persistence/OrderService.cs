@@ -72,7 +72,10 @@ public sealed class OrderService(
             (template.ValidUntil.HasValue && today > template.ValidUntil.Value))
             return Fail(PlaceOrderStatus.TemplateUnavailable, "Meal plan template is not currently available.");
 
-        var price = await db.MealPlanPrices
+        // Keep the checked price stable until the agreed snapshot is committed.
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT id FROM public.meal_plan_prices WHERE id = {request.MealPlanPriceId} FOR SHARE", cancellationToken);
+        var price = await db.MealPlanPrices.AsNoTracking()
             .Include(x => x.Translations)
             .SingleOrDefaultAsync(x => x.Id == request.MealPlanPriceId, cancellationToken);
         if (price is null || price.MealPlanTemplateId != template.Id)
@@ -83,6 +86,13 @@ public sealed class OrderService(
 
         if (!await PurchasablePlanPrices.Query(db, now).AnyAsync(item => item.Id == price.Id, cancellationToken))
             return Fail(PlaceOrderStatus.PriceUnavailable, "The selected plan, package or duration is no longer purchasable.");
+
+        var currentPrice = PackagePriceRules.Calculate(price.Amount, price.DiscountedPrice);
+        if ((request.ExpectedTotalAmount.HasValue && request.ExpectedTotalAmount != currentPrice.EffectivePrice) ||
+            (request.ExpectedRegularPrice.HasValue && request.ExpectedRegularPrice != currentPrice.RegularPrice) ||
+            (request.ExpectedDiscountAmount.HasValue && request.ExpectedDiscountAmount != currentPrice.DiscountAmount) ||
+            (request.ExpectedCurrencyCode != null && !string.Equals(request.ExpectedCurrencyCode.Trim(), price.CurrencyCode.Trim(), StringComparison.OrdinalIgnoreCase)))
+            return Fail(PlaceOrderStatus.PriceChanged, "The plan price has changed. Please review the updated total before placing your order.");
 
         if (request.CouponCode is not null)
             return Fail(PlaceOrderStatus.CouponNotSupported, "Coupons are not supported yet; couponCode must be null.");
@@ -174,9 +184,9 @@ public sealed class OrderService(
             PlanName = planName,
             PlanDurationName = durationName,
             Subtotal = price.Amount,
-            DiscountAmount = 0m,
+            DiscountAmount = currentPrice.DiscountAmount,
             DeliveryCharge = 0m,
-            TotalAmount = price.Amount,
+            TotalAmount = currentPrice.EffectivePrice,
             CurrencyCode = string.IsNullOrWhiteSpace(price.CurrencyCode) ? "QAR" : price.CurrencyCode.Trim().ToUpperInvariant(),
             CouponCode = null,
             DeliveryAddressName = address.AddressName,

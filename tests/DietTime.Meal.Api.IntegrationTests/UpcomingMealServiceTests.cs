@@ -21,7 +21,7 @@ public sealed class UpcomingPostgresFactAttribute : FactAttribute
     }
 }
 
-public sealed class UpcomingMealServiceTests : IAsyncLifetime
+public sealed partial class UpcomingMealServiceTests : IAsyncLifetime
 {
     private readonly string? adminConnection = Environment.GetEnvironmentVariable("UPCOMING_MEALS_TEST_CONNECTION");
     private readonly string database = "diettime_upcoming_test_" + Guid.NewGuid().ToString("N");

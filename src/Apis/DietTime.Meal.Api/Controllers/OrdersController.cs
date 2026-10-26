@@ -52,7 +52,7 @@ public sealed class OrdersController(IOrderService orders) : ControllerBase
                 PlaceOrderStatus.DeliveryTimeSlotNotFound => ProblemResponse(404,
                     result.Status.ToString().ToSnakeCase(), result.Detail!),
             PlaceOrderStatus.TemplateUnavailable or PlaceOrderStatus.PriceUnavailable or
-                PlaceOrderStatus.IdempotencyConflict =>
+                PlaceOrderStatus.IdempotencyConflict or PlaceOrderStatus.PriceChanged =>
                 ProblemResponse(409, result.Status.ToString().ToSnakeCase(), result.Detail!),
             _ => ProblemResponse(400, result.Status.ToString().ToSnakeCase(), result.Detail!)
         };

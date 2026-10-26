@@ -1195,7 +1195,7 @@ public sealed class AdminMealService(
                     .OrderBy(package => package.DisplayOrder).Select(package => package.NameEn).FirstOrDefault(),
                 db.MealPlanPricePackages.Where(package => package.DurationDays == x.DurationDays)
                     .OrderBy(package => package.DisplayOrder).Select(package => package.NameAr).FirstOrDefault(),
-                null))
+                null, x.DiscountedPrice))
             .ToListAsync(ct);
 
         var priceIds = rows.Select(row => row.Id).ToArray();
@@ -1258,7 +1258,7 @@ public sealed class AdminMealService(
                     .OrderBy(package => package.DisplayOrder).Select(package => package.NameEn).FirstOrDefault(),
                 db.MealPlanPricePackages.Where(package => package.DurationDays == x.DurationDays)
                     .OrderBy(package => package.DisplayOrder).Select(package => package.NameAr).FirstOrDefault(),
-                null))
+                null, x.DiscountedPrice))
             .SingleOrDefaultAsync(ct);
         if (price is null) return null;
 
@@ -1310,6 +1310,7 @@ public sealed class AdminMealService(
         if (await HasPriceOverlapAsync(request, resolution.DurationDays, null, ct))
             return new(MealPlanPriceWriteStatus.Conflict);
 
+        ValidatePackageDiscount(request.Amount, request.DiscountedPrice);
         var now = clock.GetUtcNow();
         var price = new MealPlanPrice
         {
@@ -1318,7 +1319,7 @@ public sealed class AdminMealService(
             MealsPerDay = request.MealsPerDay,
             SnacksPerDay = request.SnacksPerDay,
             CurrencyCode = request.CurrencyCode.Trim().ToUpperInvariant(),
-            Amount = request.Amount,
+            Amount = request.Amount, DiscountedPrice = request.DiscountedPrice,
             EffectiveFrom = request.EffectiveFrom,
             EffectiveUntil = request.EffectiveUntil,
             IsActive = request.IsActive,
@@ -1355,7 +1356,10 @@ public sealed class AdminMealService(
         price.MealsPerDay = request.MealsPerDay;
         price.SnacksPerDay = request.SnacksPerDay;
         price.CurrencyCode = request.CurrencyCode.Trim().ToUpperInvariant();
+        var discount = request.DiscountedPriceSpecified ? request.DiscountedPrice : price.DiscountedPrice;
+        ValidatePackageDiscount(request.Amount, discount);
         price.Amount = request.Amount;
+        price.DiscountedPrice = discount;
         price.EffectiveFrom = request.EffectiveFrom;
         price.EffectiveUntil = request.EffectiveUntil;
         price.IsActive = request.IsActive;
@@ -1524,6 +1528,12 @@ public sealed class AdminMealService(
         package.IsActive = isActive;
         await db.SaveChangesAsync(ct);
         return AdminWriteResult.Success;
+    }
+
+    private static void ValidatePackageDiscount(decimal regular, decimal? discounted)
+    {
+        if (!PackagePriceRules.IsValid(regular, discounted))
+            throw new MealConfigurationException(400, "invalid_discounted_price", "Use at most two decimal places. Discounted price must be non-negative and strictly lower than regular price.");
     }
 
     private Task<bool> HasPriceOverlapAsync(

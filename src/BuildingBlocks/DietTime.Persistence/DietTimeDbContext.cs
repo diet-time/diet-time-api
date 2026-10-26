@@ -128,7 +128,8 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
         });
         b.Entity<MealPlanPrice>(e =>
         {
-            e.ToTable("meal_plan_prices");
+            e.ToTable("meal_plan_prices", t => t.HasCheckConstraint("ck_meal_plan_prices_discounted_price", "discounted_price IS NULL OR (discounted_price >= 0 AND discounted_price < amount)"));
+            e.Property(x => x.DiscountedPrice).HasPrecision(12, 2);
             e.Property(x => x.Amount).HasPrecision(12, 2);
             e.Property(x => x.CurrencyCode).HasColumnType("char(3)");
             e.Property(x => x.PackageCode).HasColumnName("package_code").HasMaxLength(30);

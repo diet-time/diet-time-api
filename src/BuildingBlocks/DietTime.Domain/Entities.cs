@@ -115,6 +115,7 @@ public sealed class MealPlanPrice : Entity
     public int SnacksPerDay { get; set; }
     public string CurrencyCode { get; set; } = "QAR";
     public decimal Amount { get; set; }
+    public decimal? DiscountedPrice { get; set; }
     public DateTimeOffset EffectiveFrom { get; set; }
     public DateTimeOffset? EffectiveUntil { get; set; }
     public bool IsActive { get; set; }

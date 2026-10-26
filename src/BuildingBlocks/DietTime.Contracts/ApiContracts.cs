@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using DietTime.Domain;
 
 namespace DietTime.Contracts;
@@ -41,7 +42,16 @@ public sealed record PlanPriceResponse(
     decimal Amount,
     string CurrencyCode,
     string? Name = null,
-    string? Description = null);
+    string? Description = null,
+    decimal? DiscountedPrice = null, decimal? OriginalPrice = null)
+{
+    public decimal RegularPrice => OriginalPrice ?? Amount;
+    public decimal EffectivePrice => PackagePriceRules.Calculate(RegularPrice, DiscountedPrice).EffectivePrice;
+    public decimal DiscountAmount => PackagePriceRules.Calculate(RegularPrice, DiscountedPrice).DiscountAmount;
+    public decimal DiscountPercentage => PackagePriceRules.Calculate(RegularPrice, DiscountedPrice).DiscountPercentage;
+    public bool HasDiscount => DiscountedPrice.HasValue;
+}
+
 public sealed record MealPlanResponse(Guid Id, string Code, string Name, string? Description, string PlanType, int DurationDays, bool IsCustomizable, IReadOnlyList<PlanPriceResponse> Prices, IReadOnlyList<MealTypeResponse> SupportedMealTypes);
 public sealed record MealPlanPurchasePlanResponse(
     Guid Id,
@@ -67,7 +77,16 @@ public sealed record MealPlanPurchasePackageResponse(
     Guid? MealPlanId = null,
     Guid? PackageOptionId = null,
     bool IsActive = true,
-    bool IsAvailable = true);
+    bool IsAvailable = true,
+    decimal? DiscountedPrice = null, decimal? OriginalPrice = null)
+{
+    public decimal RegularPrice => OriginalPrice ?? Amount;
+    public decimal EffectivePrice => PackagePriceRules.Calculate(RegularPrice, DiscountedPrice).EffectivePrice;
+    public decimal DiscountAmount => PackagePriceRules.Calculate(RegularPrice, DiscountedPrice).DiscountAmount;
+    public decimal DiscountPercentage => PackagePriceRules.Calculate(RegularPrice, DiscountedPrice).DiscountPercentage;
+    public bool HasDiscount => DiscountedPrice.HasValue;
+}
+
 public sealed record MealPlanMealConfigurationResponse(
     int MealsPerDay,
     int SnacksPerDay,
@@ -93,7 +112,16 @@ public sealed record MealPlanSelectionValidationResponse(
     int ServiceDays,
     string CurrencyCode,
     decimal Amount,
-    decimal PricePerServiceDay);
+    decimal PricePerServiceDay,
+    decimal? DiscountedPrice = null, decimal? OriginalPrice = null)
+{
+    public decimal RegularPrice => OriginalPrice ?? Amount;
+    public decimal EffectivePrice => PackagePriceRules.Calculate(RegularPrice, DiscountedPrice).EffectivePrice;
+    public decimal DiscountAmount => PackagePriceRules.Calculate(RegularPrice, DiscountedPrice).DiscountAmount;
+    public decimal DiscountPercentage => PackagePriceRules.Calculate(RegularPrice, DiscountedPrice).DiscountPercentage;
+    public bool HasDiscount => DiscountedPrice.HasValue;
+}
+
 public sealed record CalendarDayResponse(Guid TemplateDayId, DateOnly Date, MenuWeekday MenuWeekday, string DayShortName, string DayName, bool IsAvailable);
 public sealed record MealTypeResponse(Guid? Id, string Code, string Name, int DisplayOrder);
 public sealed record MealCardResponse(Guid SlotOptionId, Guid SlotId, Guid MealItemId, MealTypeResponse MealType, string Name, string? ShortDescription, string? ThumbnailUrl, decimal? CaloriesKcal, decimal? ProteinGrams, decimal? CarbohydratesGrams, decimal? FatGrams, decimal AdditionalPrice, string CurrencyCode, bool IsDefault, bool IsAvailable, IReadOnlyList<string> AllergenCodes);
@@ -328,7 +356,9 @@ public sealed record PlaceOrderRequest(
     DateOnly StartDate,
     IReadOnlyList<int> DeliveryDays,
     IReadOnlyList<PlaceOrderMealRequest> Meals,
-    string? CouponCode = null);
+    string? CouponCode = null,
+    decimal? ExpectedTotalAmount = null, decimal? ExpectedRegularPrice = null,
+    decimal? ExpectedDiscountAmount = null, string? ExpectedCurrencyCode = null);
 
 public sealed record OrderPlanResponse(
     Guid MealPlanTemplateId, Guid MealPlanPriceId, string Name, string DurationName);
@@ -526,7 +556,16 @@ public sealed record AdminMealPlanPriceResponse(
     string? PackageCode = null,
     string? PackageNameEn = null,
     string? PackageNameAr = null,
-    IReadOnlyList<AdminMealPlanPriceTranslationResponse>? Translations = null);
+    IReadOnlyList<AdminMealPlanPriceTranslationResponse>? Translations = null,
+    decimal? DiscountedPrice = null)
+{
+    public decimal RegularPrice => Amount;
+    public decimal EffectivePrice => PackagePriceRules.Calculate(RegularPrice, DiscountedPrice).EffectivePrice;
+    public decimal DiscountAmount => PackagePriceRules.Calculate(RegularPrice, DiscountedPrice).DiscountAmount;
+    public decimal DiscountPercentage => PackagePriceRules.Calculate(RegularPrice, DiscountedPrice).DiscountPercentage;
+    public bool HasDiscount => DiscountedPrice.HasValue;
+}
+
 public sealed record AdminMealPlanPriceTranslationResponse(
     string LanguageCode,
     string Name,
@@ -547,7 +586,14 @@ public sealed record UpsertMealPlanPriceRequest(
     DateTimeOffset? EffectiveUntil,
     bool IsActive,
     string? MealPlanPricePackageId = null,
-    IReadOnlyList<UpsertMealPlanPriceTranslationRequest>? Translations = null);
+    IReadOnlyList<UpsertMealPlanPriceTranslationRequest>? Translations = null)
+{
+
+    private decimal? discountedPrice;
+    public decimal? DiscountedPrice { get => discountedPrice; init { discountedPrice = value; DiscountedPriceSpecified = true; } }
+    [JsonIgnore] public bool DiscountedPriceSpecified { get; private init; }
+}
+
 public sealed record SetMealPlanPriceStatusRequest(bool IsActive);
 public sealed record MealPlanPricePackageResponse(
     string Id,

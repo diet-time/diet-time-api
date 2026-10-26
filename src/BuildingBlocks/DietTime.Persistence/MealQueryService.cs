@@ -37,7 +37,7 @@ public sealed class MealQueryService(
                 Prices = availablePrices.Where(price => price.MealPlanTemplateId == p.Id)
                     .Select(price => new PlanCardPriceCandidate(
                         price.Id,
-                        price.Amount,
+                        price.DiscountedPrice ?? price.Amount,
                         price.CurrencyCode,
                         price.DurationDays))
                     .ToList()
@@ -155,12 +155,12 @@ public sealed class MealQueryService(
         var now = clock.GetUtcNow();
         var prices = await PurchasablePlanPrices.Query(db, now).AsNoTracking()
             .Where(price => price.MealPlanTemplateId == plan.Id)
-            .OrderBy(price => price.Amount)
+            .OrderBy(price => price.DiscountedPrice ?? price.Amount)
             .Select(price => new PlanPriceResponse(
                 price.DurationDays,
                 price.MealsPerDay,
                 price.SnacksPerDay,
-                price.Amount,
+                price.DiscountedPrice ?? price.Amount,
                 price.CurrencyCode.Trim(),
                 price.Translations
                     .Where(translation => translation.LanguageCode == language)
@@ -177,7 +177,7 @@ public sealed class MealQueryService(
                     ?? price.Translations
                         .Where(translation => translation.LanguageCode == "en")
                         .Select(translation => translation.Description)
-                        .FirstOrDefault()))
+                        .FirstOrDefault(), price.DiscountedPrice, price.Amount))
             .ToListAsync(ct);
 
         var typeRows = await db.MealPlanTemplateSlots.AsNoTracking()

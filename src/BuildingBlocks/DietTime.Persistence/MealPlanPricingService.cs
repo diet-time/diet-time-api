@@ -40,7 +40,7 @@ public sealed class MealPlanPricingService(DietTimeDbContext db, TimeProvider cl
             Id = Guid.NewGuid(), MealPlanTemplateId = request.MealPlanId, PackageCode = masters.Duration.Code,
             PackageOptionId = request.PackageOptionId, DurationDays = masters.Duration.DurationDays,
             MealsPerDay = masters.Package.MealCount, SnacksPerDay = masters.Package.SnackCount,
-            Amount = request.Price, CurrencyCode = NormalizeCurrency(request.CurrencyCode), IsActive = request.IsActive,
+            Amount = request.Price, DiscountedPrice = request.DiscountedPrice, CurrencyCode = NormalizeCurrency(request.CurrencyCode), IsActive = request.IsActive,
             EffectiveFrom = now, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId
         };
         db.MealPlanPrices.Add(row);
@@ -52,16 +52,18 @@ public sealed class MealPlanPricingService(DietTimeDbContext db, TimeProvider cl
     {
         var row = await db.MealPlanPrices.SingleOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new MealConfigurationException(404, "price_not_found", "The meal plan price does not exist.");
-        var masters = await ValidateMasters(request, ct);
+        var discount = request.DiscountedPriceSpecified ? request.DiscountedPrice : row.DiscountedPrice;
+        var masters = await ValidateMasters(request with { DiscountedPrice = discount }, ct);
         await EnsureNoConflict(request, id, ct);
         row.MealPlanTemplateId = request.MealPlanId; row.PackageCode = masters.Duration.Code; row.PackageOptionId = request.PackageOptionId;
         row.DurationDays = masters.Duration.DurationDays; row.MealsPerDay = masters.Package.MealCount; row.SnacksPerDay = masters.Package.SnackCount;
-        row.Amount = request.Price; row.CurrencyCode = NormalizeCurrency(request.CurrencyCode); row.IsActive = request.IsActive; row.UpdatedAt = clock.GetUtcNow(); row.UpdatedBy = userId;
+        row.Amount = request.Price; row.DiscountedPrice = discount; row.CurrencyCode = NormalizeCurrency(request.CurrencyCode); row.IsActive = request.IsActive; row.UpdatedAt = clock.GetUtcNow(); row.UpdatedBy = userId;
         await db.SaveChangesAsync(ct);
     }
 
     private async Task<(MealPlanPricePackage Duration, MealPackageOption Package)> ValidateMasters(UpsertMealPlanPricingRequest request, CancellationToken ct)
     {
+        if (!PackagePriceRules.IsValid(request.Price, request.DiscountedPrice)) throw new MealConfigurationException(400, "invalid_discounted_price", "Use amounts with at most two decimal places. Discounted price must be non-negative and strictly lower than regular price.");
         if (request.Price <= 0) throw new MealConfigurationException(400, "invalid_price", "Price must be greater than zero.");
         if (string.IsNullOrWhiteSpace(request.CurrencyCode) || request.CurrencyCode.Trim().Length != 3) throw new MealConfigurationException(400, "invalid_currency", "Currency code must contain three characters.");
         if (!await db.MealPlanTemplates.AnyAsync(x => x.Id == request.MealPlanId, ct)) throw new MealConfigurationException(404, "meal_plan_not_found", "The selected meal plan does not exist.");
@@ -86,7 +88,7 @@ public sealed class MealPlanPricingService(DietTimeDbContext db, TimeProvider cl
         x.Plan.Translations.FirstOrDefault(t => t.LanguageCode == "en")?.Name ?? x.Plan.Code,
         duration?.Code ?? x.PackageCode ?? "", duration?.NameEn ?? "Missing duration mapping", x.PackageOptionId,
         x.PackageOption?.Name ?? "Missing package mapping", x.MealsPerDay, x.SnacksPerDay,
-        x.Amount, x.CurrencyCode.Trim(), x.IsActive, duration?.DurationDays ?? x.DurationDays, isAvailable);
+        x.Amount, x.CurrencyCode.Trim(), x.IsActive, duration?.DurationDays ?? x.DurationDays, isAvailable, x.DiscountedPrice);
     private static string NormalizeCurrency(string value) => value.Trim().ToUpperInvariant();
     private static string NormalizeDurationId(string value) => string.Join('_', value.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries)).ToUpperInvariant();
     private static MealPlanPricePackage? ResolveDuration(MealPlanPrice price, IReadOnlyList<MealPlanPricePackage> durations) =>

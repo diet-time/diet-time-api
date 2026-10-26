@@ -116,6 +116,7 @@ public enum PlaceOrderStatus
     TemplateUnavailable,
     PriceNotFound,
     PriceUnavailable,
+    PriceChanged,
     InvalidMealConfiguration,
     InvalidDeliveryDays,
     AddressNotFound,
