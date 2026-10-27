@@ -174,6 +174,8 @@ public sealed partial class UpcomingMealService(
     {
         var profile = await ProfileAsync(order.CustomerProfileId, ct);
         var alternatives = await EligibleAsync(day, order, profile, ct);
+        if (logger?.IsEnabled(LogLevel.Information) == true)
+            await LogMenuEligibilityAsync(day, order, profile, alternatives, ct);
         var saved = day.Selections.Where(s => s.Status != "CANCELLED").OrderBy(s => s.Category).ThenBy(s => s.SelectionNumber).ToArray();
         var ids = saved.Select(s => s.MenuItemId).Concat(alternatives.Select(o => o.MealItemId)).Distinct().ToArray();
         // Saved dishes remain visible even if operations later disables an option.
@@ -204,6 +206,67 @@ public sealed partial class UpcomingMealService(
                 s.SelectionSource == "DEFAULT" ? "automatic" : s.SelectionSource.ToLowerInvariant(),
                 Item(s.MenuItemId, s.MealPlanSlotOptionId ?? Guid.Empty, s.Category ?? "meal", s.MealTypeId))).ToArray(),
             alternatives.Select(o => Item(o.MealItemId, o.Id, Category(o), o.Slot.MealTypeId)).ToArray());
+    }
+
+    private async Task LogMenuEligibilityAsync(SubscriptionServiceDay day, Order order, CustomerProfile profile,
+        List<MealPlanSlotOption> eligible, CancellationToken ct)
+    {
+        if (logger is null) return;
+        var week = await MenuWeekAsync(day, ct);
+        var weekday = MenuWeekdayExtensions.FromDate(day.ServiceDate);
+        var atDelivery = SubscriptionMenuRules.QatarCutoff(day.ServiceDate, 0, order.DeliveryStartTime);
+        var allergenIds = profile.Allergens.Select(a => a.AllergenId).ToArray();
+        var template = await db.MealPlanTemplates.AsNoTracking()
+            .Where(t => t.Id == day.MealPlanTemplateId)
+            .Select(t => new { t.VersionNumber, t.IsPublished }).SingleOrDefaultAsync(ct);
+        // Read only the saved day's options, before eligibility filters, to explain missing dishes.
+        var configured = await db.MealPlanSlotOptions.AsNoTracking()
+            .Where(o => o.Slot.Day.MealPlanTemplateId == day.MealPlanTemplateId &&
+                o.Slot.Day.WeekNumber == week && o.Slot.Day.MenuWeekday == weekday)
+            .Select(o => new
+            {
+                o.Id, o.MealItemId, SlotId = o.Slot.Id, MealTypeCode = o.Slot.MealType.Code,
+                DayActive = o.Slot.Day.IsActive, SlotActive = o.Slot.IsActive,
+                o.Slot.MaximumSelection, MealTypeActive = o.Slot.MealType.IsActive,
+                OptionAvailable = o.IsAvailable, o.AdditionalPrice,
+                OptionFrom = o.AvailableFrom, OptionUntil = o.AvailableUntil,
+                MealStatus = o.MealItem.Status, MealAvailable = o.MealItem.IsAvailable,
+                MealFrom = o.MealItem.AvailableFrom, MealUntil = o.MealItem.AvailableUntil,
+                AllergenExcluded = o.MealItem.Allergens.Any(a => allergenIds.Contains(a.AllergenId))
+            }).ToListAsync(ct);
+        var eligibleIds = eligible.Select(o => o.Id).ToHashSet();
+        logger.LogInformation("Tomorrow menu eligibility. OrderId={OrderId} ServiceDayId={ServiceDayId} DeliveryDate={DeliveryDate} OrderTemplateId={OrderTemplateId} SavedTemplateId={SavedTemplateId} TemplateVersion={TemplateVersion} Published={Published} ServiceSequence={ServiceSequence} MenuWeek={MenuWeek} Weekday={Weekday} RequiredMeals={RequiredMeals} RequiredSnacks={RequiredSnacks} ConfiguredOptions={ConfiguredOptions} ConfiguredDistinctMeals={ConfiguredDistinctMeals} ConfiguredDistinctSnacks={ConfiguredDistinctSnacks} EligibleDistinctMeals={EligibleDistinctMeals} EligibleDistinctSnacks={EligibleDistinctSnacks}",
+            order.Id, day.Id, day.ServiceDate, order.MealPlanTemplateId, day.MealPlanTemplateId,
+            template?.VersionNumber, template?.IsPublished, day.ServiceSequence, week, weekday,
+            day.MealCount, day.SnackCount, configured.Count,
+            configured.Where(o => !MealTypeClassification.IsSnack(o.MealTypeCode)).Select(o => o.MealItemId).Distinct().Count(),
+            configured.Where(o => MealTypeClassification.IsSnack(o.MealTypeCode)).Select(o => o.MealItemId).Distinct().Count(),
+            eligible.Where(o => Category(o) == "meal").Select(o => o.MealItemId).Distinct().Count(),
+            eligible.Where(o => Category(o) == "snack").Select(o => o.MealItemId).Distinct().Count());
+        foreach (var option in configured.Where(o => !eligibleIds.Contains(o.Id)))
+        {
+            var reasons = new List<string>();
+            if (day.ServiceDate.DayOfWeek == DayOfWeek.Friday) reasons.Add("friday_no_service");
+            if (template?.IsPublished != true) reasons.Add("template_not_published");
+            if (!option.DayActive) reasons.Add("day_inactive");
+            if (!option.SlotActive) reasons.Add("slot_inactive");
+            if (option.MaximumSelection <= 0) reasons.Add("slot_maximum_zero");
+            if (!option.MealTypeActive) reasons.Add("meal_type_inactive");
+            if (!option.OptionAvailable) reasons.Add("option_unavailable");
+            if (option.AdditionalPrice != 0) reasons.Add("paid_option");
+            if (option.OptionFrom > atDelivery) reasons.Add("option_not_started");
+            if (option.OptionUntil <= atDelivery) reasons.Add("option_expired");
+            if (option.MealStatus != "ACTIVE") reasons.Add("meal_not_active");
+            if (!option.MealAvailable) reasons.Add("meal_unavailable");
+            if (option.MealFrom > atDelivery) reasons.Add("meal_not_started");
+            if (option.MealUntil <= atDelivery) reasons.Add("meal_expired");
+            if (option.AllergenExcluded) reasons.Add("allergen_excluded");
+            // A dish passing all database predicates was removed by preference eligibility.
+            if (reasons.Count == 0) reasons.Add("dietary_preference_excluded");
+            logger.LogInformation("Tomorrow menu option excluded. OrderId={OrderId} ServiceDayId={ServiceDayId} MenuWeek={MenuWeek} Weekday={Weekday} SlotId={SlotId} SlotOptionId={SlotOptionId} MealItemId={MealItemId} MealTypeCode={MealTypeCode} Reasons={Reasons}",
+                order.Id, day.Id, week, weekday, option.SlotId, option.Id, option.MealItemId,
+                option.MealTypeCode, string.Join(",", reasons));
+        }
     }
 
     private string? LockReason(SubscriptionServiceDay day, Order order)
