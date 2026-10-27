@@ -151,7 +151,6 @@ public sealed partial class UpcomingMealService(
         var weekday = MenuWeekdayExtensions.FromDate(day.ServiceDate);
         var week = await MenuWeekAsync(day, ct);
         var atDelivery = SubscriptionMenuRules.QatarCutoff(day.ServiceDate, 0, order.DeliveryStartTime);
-        var allergenIds = profile.Allergens.Select(a => a.AllergenId).ToArray();
         var options = await db.MealPlanSlotOptions.AsNoTracking()
             .Include(o => o.Slot).ThenInclude(s => s.MealType)
             .Include(o => o.MealItem).ThenInclude(m => m.Translations)
@@ -164,8 +163,7 @@ public sealed partial class UpcomingMealService(
                 (o.AvailableUntil == null || o.AvailableUntil > atDelivery) &&
                 o.MealItem.Status == "ACTIVE" && o.MealItem.IsAvailable &&
                 (o.MealItem.AvailableFrom == null || o.MealItem.AvailableFrom <= atDelivery) &&
-                (o.MealItem.AvailableUntil == null || o.MealItem.AvailableUntil > atDelivery) &&
-                !o.MealItem.Allergens.Any(a => allergenIds.Contains(a.AllergenId)))
+                (o.MealItem.AvailableUntil == null || o.MealItem.AvailableUntil > atDelivery))
             .ToListAsync(ct);
         return options.Where(o => MealPreferenceRules.IsEligible(o.MealItem, profile.Preferences)).ToList();
     }
@@ -215,7 +213,6 @@ public sealed partial class UpcomingMealService(
         var week = await MenuWeekAsync(day, ct);
         var weekday = MenuWeekdayExtensions.FromDate(day.ServiceDate);
         var atDelivery = SubscriptionMenuRules.QatarCutoff(day.ServiceDate, 0, order.DeliveryStartTime);
-        var allergenIds = profile.Allergens.Select(a => a.AllergenId).ToArray();
         var template = await db.MealPlanTemplates.AsNoTracking()
             .Where(t => t.Id == day.MealPlanTemplateId)
             .Select(t => new { t.VersionNumber, t.IsPublished }).SingleOrDefaultAsync(ct);
@@ -231,8 +228,7 @@ public sealed partial class UpcomingMealService(
                 OptionAvailable = o.IsAvailable, o.AdditionalPrice,
                 OptionFrom = o.AvailableFrom, OptionUntil = o.AvailableUntil,
                 MealStatus = o.MealItem.Status, MealAvailable = o.MealItem.IsAvailable,
-                MealFrom = o.MealItem.AvailableFrom, MealUntil = o.MealItem.AvailableUntil,
-                AllergenExcluded = o.MealItem.Allergens.Any(a => allergenIds.Contains(a.AllergenId))
+                MealFrom = o.MealItem.AvailableFrom, MealUntil = o.MealItem.AvailableUntil
             }).ToListAsync(ct);
         var eligibleIds = eligible.Select(o => o.Id).ToHashSet();
         logger.LogInformation("Tomorrow menu eligibility. OrderId={OrderId} ServiceDayId={ServiceDayId} DeliveryDate={DeliveryDate} OrderTemplateId={OrderTemplateId} SavedTemplateId={SavedTemplateId} TemplateVersion={TemplateVersion} Published={Published} ServiceSequence={ServiceSequence} MenuWeek={MenuWeek} Weekday={Weekday} RequiredMeals={RequiredMeals} RequiredSnacks={RequiredSnacks} ConfiguredOptions={ConfiguredOptions} ConfiguredDistinctMeals={ConfiguredDistinctMeals} ConfiguredDistinctSnacks={ConfiguredDistinctSnacks} EligibleDistinctMeals={EligibleDistinctMeals} EligibleDistinctSnacks={EligibleDistinctSnacks}",
@@ -260,7 +256,6 @@ public sealed partial class UpcomingMealService(
             if (!option.MealAvailable) reasons.Add("meal_unavailable");
             if (option.MealFrom > atDelivery) reasons.Add("meal_not_started");
             if (option.MealUntil <= atDelivery) reasons.Add("meal_expired");
-            if (option.AllergenExcluded) reasons.Add("allergen_excluded");
             // A dish passing all database predicates was removed by preference eligibility.
             if (reasons.Count == 0) reasons.Add("dietary_preference_excluded");
             logger.LogInformation("Tomorrow menu option excluded. OrderId={OrderId} ServiceDayId={ServiceDayId} MenuWeek={MenuWeek} Weekday={Weekday} SlotId={SlotId} SlotOptionId={SlotOptionId} MealItemId={MealItemId} MealTypeCode={MealTypeCode} Reasons={Reasons}",
