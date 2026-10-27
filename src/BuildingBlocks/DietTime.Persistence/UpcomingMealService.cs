@@ -103,13 +103,21 @@ public sealed partial class UpcomingMealService(
         var order = await OwnedOrderAsync(orderId, userId, ct);
         if (order is null) return null;
         var days = await db.Set<SubscriptionServiceDay>().AsNoTracking().Include(d => d.Selections)
-            .Where(d => d.OrderId == orderId).OrderBy(d => d.ServiceDate).ToListAsync(ct);
+            .Where(d => d.OrderId == orderId && d.Status != "CANCELLED" && d.Status != "SKIPPED" &&
+                (order.Status != "CANCELLED" || d.Status == "DELIVERED"))
+            .OrderBy(d => d.ServiceDate).ThenBy(d => d.Id).ToListAsync(ct);
         return days.Select(d =>
         {
             var reason = LockReason(d, order);
-            return new UpcomingMealDayResponse(orderId, d.Id, d.ServiceDate,
+            return new UpcomingMealDayResponse(d.SubscriptionId, d.Id, d.ServiceDate,
                 d.ServiceSequence ?? 0, d.MenuWeekNumber ?? 0, Status(d, reason),
-                false, SubscriptionMenuRules.TomorrowCutoff(d.ServiceDate), reason ?? "Confirm your meals from Tomorrow’s Menu on the dashboard.");
+                false, SubscriptionMenuRules.TomorrowCutoff(d.ServiceDate), reason ?? "Confirm your meals from Tomorrow’s Menu on the dashboard.")
+            {
+                OrderId = order.Id, PlanName = order.PlanName,
+                MealCount = d.MealCount ?? 0, SnackCount = d.SnackCount ?? 0,
+                SelectionStatus = CalendarSelectionStatus(d), SelectionLocked = IsSelectionLocked(d),
+                DeliveryStatus = d.Status
+            };
         }).ToArray();
     }
 
@@ -196,14 +204,18 @@ public sealed partial class UpcomingMealService(
         }
         var reason = LockReason(day, order);
         if (!SubscriptionMenuRules.IsSelectionOpen(day.ServiceDate, clock.GetUtcNow()) || (!includeEligible && reason is not null)) alternatives = [];
-        return new(order.Id, day.Id, day.ServiceDate, await MenuWeekAsync(day, ct),
+        return new(day.SubscriptionId, day.Id, day.ServiceDate, await MenuWeekAsync(day, ct),
             day.ServiceDate.DayOfWeek == DayOfWeek.Sunday ? 7 : (int)day.ServiceDate.DayOfWeek,
             day.MealCount ?? 0, day.SnackCount ?? 0, Status(day, reason), false,
             SubscriptionMenuRules.TomorrowCutoff(day.ServiceDate), reason ?? "Confirm your meals from Tomorrow’s Menu on the dashboard.", day.Revision,
             saved.Select(s => new AssignedMealResponse(s.Id,
                 s.SelectionSource == "DEFAULT" ? "automatic" : s.SelectionSource.ToLowerInvariant(),
-                Item(s.MenuItemId, s.MealPlanSlotOptionId ?? Guid.Empty, s.Category ?? "meal", s.MealTypeId))).ToArray(),
-            alternatives.Select(o => Item(o.MealItemId, o.Id, Category(o), o.Slot.MealTypeId)).ToArray());
+                Item(s.MenuItemId, s.MealPlanSlotOptionId ?? Guid.Empty, s.Category ?? "meal", s.MealTypeId)) { SelectionNumber = s.SelectionNumber }).ToArray(),
+            alternatives.Select(o => Item(o.MealItemId, o.Id, Category(o), o.Slot.MealTypeId)).ToArray())
+        {
+            OrderId = order.Id, SelectionStatus = CalendarSelectionStatus(day),
+            SelectionLocked = IsSelectionLocked(day), DeliveryStatus = day.Status
+        };
     }
 
     private async Task LogMenuEligibilityAsync(SubscriptionServiceDay day, Order order, CustomerProfile profile,
@@ -263,6 +275,13 @@ public sealed partial class UpcomingMealService(
                 option.MealTypeCode, string.Join(",", reasons));
         }
     }
+
+    private static bool IsSelectionLocked(SubscriptionServiceDay day) =>
+        day.SelectionLocked || day.SelectionStatus == "LOCKED" || day.CustomerConfirmedAt != null || day.AutoFinalizedAt != null;
+
+    private static string CalendarSelectionStatus(SubscriptionServiceDay day) =>
+        day.CustomerConfirmedAt != null ? "CUSTOMER_CONFIRMED" : day.AutoFinalizedAt != null ? "AUTO_FINALIZED"
+        : IsSelectionLocked(day) ? "LOCKED" : day.ReviewReason != null ? "NEEDS_REVIEW" : "DEFAULT_PENDING";
 
     private string? LockReason(SubscriptionServiceDay day, Order order)
     {
