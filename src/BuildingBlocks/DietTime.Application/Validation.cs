@@ -181,14 +181,14 @@ public sealed class PlaceOrderRequestValidator : AbstractValidator<PlaceOrderReq
         RuleFor(x => x.DeliveryDays)
             .Must(days => days.Distinct().Count() == days.Count)
             .WithMessage("Duplicate delivery days are not allowed.");
-        RuleFor(x => x.Meals).NotNull().NotEmpty().Must(meals => meals.Count <= 20);
+        RuleFor(x => x.Meals).Must(meals => meals is null || meals.Count <= 20);
         RuleForEach(x => x.Meals).ChildRules(meal =>
         {
             meal.RuleFor(x => x.MealTypeId).NotEmpty();
             meal.RuleFor(x => x.Quantity).GreaterThan(0);
         });
         RuleFor(x => x.Meals)
-            .Must(meals => meals.Select(meal => meal.MealTypeId).Distinct().Count() == meals.Count)
+            .Must(meals => meals is null || meals.Select(meal => meal.MealTypeId).Distinct().Count() == meals.Count)
             .WithMessage("Duplicate meal types are not allowed.");
         RuleFor(x => x.CouponCode).MaximumLength(100);
     }

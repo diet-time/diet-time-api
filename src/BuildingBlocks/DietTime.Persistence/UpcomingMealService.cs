@@ -88,7 +88,10 @@ public sealed partial class UpcomingMealService(
                 if (position != count)
                     day.ReviewReason = "Not enough eligible meals are configured for this delivery day. Our team needs to review it.";
             }
-            day.SelectionStatus = day.ReviewReason is null ? "DEFAULTED" : "PARTIAL";
+            day.SelectionStatus = day.ReviewReason is null ? "DEFAULTED" : day.Selections.Count == 0 ? "PENDING" : "PARTIAL";
+            if (day.ReviewReason is not null)
+                logger?.LogWarning("Provisional assignment incomplete for order {OrderId}, date {ServiceDate}: {Reason}",
+                    order.Id, date, day.ReviewReason);
             db.Add(day);
         }
         await db.SaveChangesAsync(ct);
@@ -132,13 +135,21 @@ public sealed partial class UpcomingMealService(
         db.CustomerProfiles.AsNoTracking().Include(p => p.Allergens).Include(p => p.Preferences)
             .SingleAsync(p => p.Id == profileId, ct);
 
+    private async Task<int> MenuWeekAsync(SubscriptionServiceDay day, CancellationToken ct)
+    {
+        if (day.MenuWeekNumber.HasValue) return day.MenuWeekNumber.Value;
+        if (day.ServiceSequence is not > 0 || day.MealPlanTemplateId is null) return 0;
+        var cycle = await db.MealPlanTemplates.Where(t => t.Id == day.MealPlanTemplateId)
+            .Select(t => t.CycleWeeks).SingleAsync(ct);
+        return SubscriptionMenuRules.MenuWeek(day.ServiceSequence.Value, cycle);
+    }
+
     private async Task<List<MealPlanSlotOption>> EligibleAsync(SubscriptionServiceDay day, Order order, CustomerProfile profile, CancellationToken ct)
     {
         if (day.ServiceDate.DayOfWeek == DayOfWeek.Friday || day.MealPlanTemplateId is null ||
             !await db.MealPlanTemplates.AnyAsync(t => t.Id == day.MealPlanTemplateId && t.IsPublished, ct)) return [];
         var weekday = MenuWeekdayExtensions.FromDate(day.ServiceDate);
-        var week = day.MenuWeekNumber ?? (day.ServiceSequence is > 0
-            ? SubscriptionMenuRules.MenuWeek(day.ServiceSequence.Value, 4) : 0);
+        var week = await MenuWeekAsync(day, ct);
         var atDelivery = SubscriptionMenuRules.QatarCutoff(day.ServiceDate, 0, order.DeliveryStartTime);
         var allergenIds = profile.Allergens.Select(a => a.AllergenId).ToArray();
         var options = await db.MealPlanSlotOptions.AsNoTracking()
@@ -185,7 +196,7 @@ public sealed partial class UpcomingMealService(
         }
         var reason = LockReason(day, order);
         if (!SubscriptionMenuRules.IsSelectionOpen(day.ServiceDate, clock.GetUtcNow()) || (!includeEligible && reason is not null)) alternatives = [];
-        return new(order.Id, day.Id, day.ServiceDate, day.MenuWeekNumber ?? 0,
+        return new(order.Id, day.Id, day.ServiceDate, await MenuWeekAsync(day, ct),
             day.ServiceDate.DayOfWeek == DayOfWeek.Sunday ? 7 : (int)day.ServiceDate.DayOfWeek,
             day.MealCount ?? 0, day.SnackCount ?? 0, Status(day, reason), false,
             SubscriptionMenuRules.TomorrowCutoff(day.ServiceDate), reason ?? "Confirm your meals from Tomorrow’s Menu on the dashboard.", day.Revision,

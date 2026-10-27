@@ -61,7 +61,7 @@ public sealed partial class UpcomingMealService
                     MenuTemplateId = day.MealPlanTemplateId,
                     MenuTemplateVersion = day.MealPlanTemplateId == template?.Id ? template.VersionNumber :
                         await db.MealPlanTemplates.Where(t => t.Id == day.MealPlanTemplateId).Select(t => (int?)t.VersionNumber).SingleOrDefaultAsync(ct),
-                    MenuWeekNumber = day.MenuWeekNumber ?? SubscriptionMenuRules.MenuWeek(day.ServiceSequence!.Value, 4)
+                    MenuWeekNumber = await MenuWeekAsync(day, ct)
                 };
         }
         logger?.LogInformation("Tomorrow menu resolved. UserId={UserId} CustomerProfileId={CustomerProfileId} OrderId={OrderId} SubscriptionId={SubscriptionId} OrderStatus={OrderStatus} QatarToday={QatarToday} Tomorrow={Tomorrow} ServiceDayId={ServiceDayId} TemplateId={TemplateId} TemplateVersion={TemplateVersion} MenuWeek={MenuWeek} Weekday={Weekday} AvailableDishCount={AvailableDishCount} SelectionCount={SelectionCount} Status={Status} EmptyReason={EmptyReason}",
@@ -291,7 +291,7 @@ public sealed partial class UpcomingMealService
         if (canConfirm && (availableMeals.Length < day.MealCount || availableSnacks.Length < day.SnackCount))
         {
             var weekday = MenuWeekdayExtensions.FromDate(day.ServiceDate);
-            var week = day.MenuWeekNumber ?? SubscriptionMenuRules.MenuWeek(day.ServiceSequence!.Value, 4);
+            var week = await MenuWeekAsync(day, ct);
             var configured = await db.MealPlanTemplateDays.AnyAsync(d => d.MealPlanTemplateId == day.MealPlanTemplateId &&
                 d.WeekNumber == week && d.MenuWeekday == weekday && d.IsActive && d.Plan.IsPublished &&
                 d.Slots.Any(s => s.IsActive && s.MaximumSelection > 0 && s.MealType.IsActive &&

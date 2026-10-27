@@ -97,34 +97,27 @@ public sealed class OrderService(
         if (request.CouponCode is not null)
             return Fail(PlaceOrderStatus.CouponNotSupported, "Coupons are not supported yet; couponCode must be null.");
 
-        var requestedMealIds = request.Meals.Select(x => x.MealTypeId).ToArray();
+        // Purchase quantities are authoritative package data, not daily dish choices.
+        if (price.MealsPerDay is < 1 or > 5 || price.SnacksPerDay < 0)
+            return Fail(PlaceOrderStatus.PriceUnavailable, "The package has invalid meal quantities.");
         var mealTypes = await db.MealTypes.AsNoTracking()
-            .Where(x => requestedMealIds.Contains(x.Id) && x.IsActive)
-            .Select(x => new MealTypeRow(
-                x.Id,
-                x.Code,
+            .Where(x => x.IsActive)
+            .OrderByDescending(x => db.MealPlanTemplateSlots.Any(slot =>
+                slot.MealTypeId == x.Id && slot.Day.MealPlanTemplateId == template.Id && slot.IsActive))
+            .ThenBy(x => x.Code).ThenBy(x => x.Id)
+            .Select(x => new MealTypeRow(x.Id, x.Code,
                 x.Translations.Where(t => t.LanguageCode == profile.PreferredLanguage).Select(t => t.Name).FirstOrDefault()
-                    ?? x.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault()
-                    ?? x.Code))
+                ?? x.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? x.Code))
             .ToListAsync(cancellationToken);
-        if (mealTypes.Count != requestedMealIds.Length)
-            return Fail(PlaceOrderStatus.InvalidMealConfiguration, "One or more selected meal types do not exist or are inactive.");
-
-        var supportedMealTypeIds = await db.MealPlanTemplateSlots.AsNoTracking()
-            .Where(x => x.IsActive && x.Day.MealPlanTemplateId == template.Id && x.Day.IsActive)
-            .Select(x => x.MealTypeId)
-            .Distinct()
-            .ToListAsync(cancellationToken);
-        if (requestedMealIds.Any(id => !supportedMealTypeIds.Contains(id)))
-            return Fail(PlaceOrderStatus.InvalidMealConfiguration, "A selected meal type is not offered by this meal plan.");
-
-        var quantities = request.Meals.ToDictionary(x => x.MealTypeId, x => x.Quantity);
-        var snackQuantity = mealTypes.Where(x => MealTypeClassification.IsSnack(x.Code))
-            .Sum(x => quantities[x.Id]);
-        var mealQuantity = request.Meals.Sum(x => x.Quantity) - snackQuantity;
-        if (mealQuantity != price.MealsPerDay || snackQuantity != price.SnacksPerDay)
-            return Fail(PlaceOrderStatus.InvalidMealConfiguration,
-                $"Selection must contain {price.MealsPerDay} meal(s) and {price.SnacksPerDay} snack(s) per day.");
+        // Reuse order_meals as a quantity snapshot. A single type can represent five
+        // regular dishes; it does not constrain which slots a customer may choose.
+        var regular = mealTypes.FirstOrDefault(t => !MealTypeClassification.IsSnack(t.Code));
+        var snack = mealTypes.FirstOrDefault(t => MealTypeClassification.IsSnack(t.Code));
+        if (regular is null || price.SnacksPerDay > 0 && snack is null)
+            return Fail(PlaceOrderStatus.InvalidMealConfiguration, "The package's meal categories need configuration.");
+        var quantities = new Dictionary<Guid, int> { [regular.Id] = price.MealsPerDay };
+        if (price.SnacksPerDay > 0) quantities[snack!.Id] = price.SnacksPerDay;
+        mealTypes = mealTypes.Where(t => quantities.ContainsKey(t.Id)).ToList();
 
         if (request.DeliveryDays.Contains(5))
             return Fail(PlaceOrderStatus.InvalidDeliveryDays, "Friday is a non-delivery day.");

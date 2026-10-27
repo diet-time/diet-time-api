@@ -359,7 +359,7 @@ public sealed record PlaceOrderRequest(
     Guid DeliveryTimeSlotId,
     DateOnly StartDate,
     IReadOnlyList<int> DeliveryDays,
-    IReadOnlyList<PlaceOrderMealRequest> Meals,
+    IReadOnlyList<PlaceOrderMealRequest>? Meals = null,
     string? CouponCode = null,
     decimal? ExpectedTotalAmount = null, decimal? ExpectedRegularPrice = null,
     decimal? ExpectedDiscountAmount = null, string? ExpectedCurrencyCode = null);

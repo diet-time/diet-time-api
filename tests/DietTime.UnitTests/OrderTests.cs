@@ -35,6 +35,15 @@ public sealed class OrderTests
     }
 
     [Fact]
+    public void Package_purchase_does_not_require_meal_choices()
+    {
+        var request = new PlaceOrderRequest(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            new DateOnly(2026, 10, 28), [1,2,3,4,6,7]);
+        Assert.True(new PlaceOrderRequestValidator().Validate(request).IsValid);
+        Assert.True(new PlaceOrderRequestValidator().Validate(request with { Meals = [] }).IsValid);
+    }
+
+    [Fact]
     public void Place_order_validator_rejects_duplicates_and_invalid_quantities()
     {
         var mealTypeId = Guid.NewGuid();

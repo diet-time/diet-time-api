@@ -981,7 +981,7 @@ public sealed class AdminMealService(
             plan.CycleWeeks);
     }
 
-    public async Task<Guid> CreatePlanAsync(CreatePlanRequest request, Guid? userId, CancellationToken ct) { var now = clock.GetUtcNow(); var cycleWeeks = request.CycleWeeks ?? 1; ValidateCycleWeeks(cycleWeeks); ValidatePlanDays(request.Days ?? [], cycleWeeks); if (request.Publish) ValidatePlanForPublication(request, request.Days ?? [], cycleWeeks); var id = Guid.NewGuid(); var p = new MealPlanTemplate { Id = id, VersionGroupId = id, VersionNumber = 1, CycleWeeks = cycleWeeks, IsLatest = true, Code = request.Code, PlanType = request.PlanType, DurationDays = request.DurationDays, IsCustomizable = request.IsCustomizable, IsActive = true, IsPublished = request.Publish, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 }; foreach (var t in request.Translations) p.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now }); AddPlanStructure(p, request.Days ?? [], now, userId); db.Add(p); await db.SaveChangesAsync(ct); return p.Id; }
+    public async Task<Guid> CreatePlanAsync(CreatePlanRequest request, Guid? userId, CancellationToken ct) { var now = clock.GetUtcNow(); var cycleWeeks = request.CycleWeeks ?? 1; ValidateCycleWeeks(cycleWeeks); ValidatePlanDays(request.Days ?? [], cycleWeeks); if (request.Publish) { ValidatePlanForPublication(request, request.Days ?? [], cycleWeeks); await RequirePackageCapacityAsync(request.Days ?? [], ct); } var id = Guid.NewGuid(); var p = new MealPlanTemplate { Id = id, VersionGroupId = id, VersionNumber = 1, CycleWeeks = cycleWeeks, IsLatest = true, Code = request.Code, PlanType = request.PlanType, DurationDays = request.DurationDays, IsCustomizable = request.IsCustomizable, IsActive = true, IsPublished = request.Publish, ValidFrom = request.ValidFrom, ValidUntil = request.ValidUntil, CreatedAt = now, UpdatedAt = now, CreatedBy = userId, UpdatedBy = userId, RowVersion = 1 }; foreach (var t in request.Translations) p.Translations.Add(new() { LanguageCode = t.LanguageCode, Name = t.Name, ShortDescription = t.ShortDescription, FullDescription = t.FullDescription, CreatedAt = now, UpdatedAt = now }); AddPlanStructure(p, request.Days ?? [], now, userId); db.Add(p); await db.SaveChangesAsync(ct); return p.Id; }
     public async Task<VersionedUpdateResponse?> UpdatePlanAsync(Guid planId, CreatePlanRequest request, Guid? userId, CancellationToken ct)
     {
         await using var tx = await db.Database.BeginTransactionAsync(ct);
@@ -1004,7 +1004,7 @@ public sealed class AdminMealService(
         var effectiveDays = request.WeekNumber.HasValue && request.Days is not null
             ? MergeWeekRequest(p.Days, request.Days, request.WeekNumber.Value)
             : request.Days ?? p.Days.Select(ToUpsertPlanDay).ToArray();
-        if (request.Publish) ValidatePlanForPublication(request, effectiveDays, cycleWeeks);
+        if (request.Publish) { ValidatePlanForPublication(request, effectiveDays, cycleWeeks); await RequirePackageCapacityAsync(effectiveDays, ct); }
         var now = clock.GetUtcNow();
         if (p.IsPublished)
         {
@@ -1730,10 +1730,11 @@ public sealed class AdminMealService(
             .SingleOrDefaultAsync(x => x.Id == templateId, ct);
         if (plan is null) return null;
         var serviceDays = Enum.GetValues<MenuWeekday>().Where(deliverySchedule.Value.IsDeliveryDay).ToArray();
+        var capacityErrors = await PackageCapacityErrorsAsync(plan.Days.Select(ToUpsertPlanDay).ToArray(), ct);
         var weeks = new List<MenuWeekValidationResponse>();
         for (var week = 1; week <= plan.CycleWeeks; week++)
         {
-            var errors = new List<MenuWeekValidationError>();
+            var errors = capacityErrors.Where(e => e.WeekNumber == week).ToList();
             var activeDays = plan.Days.Where(day => day.WeekNumber == week && day.IsActive).ToArray();
             foreach (var weekday in serviceDays.Where(weekday => activeDays.All(day => day.MenuWeekday != weekday)))
                 errors.Add(new(week, weekday, null, null, "MISSING_SERVICE_DAY", $"{weekday} is not configured as an active service day."));
@@ -1907,6 +1908,39 @@ public sealed class AdminMealService(
             throw new TemplateDayException("DUPLICATE_MEAL_TYPE", "A day cannot contain multiple slots for the same meal type.", 400);
         if (requests.Any(day => day.Slots.Any(slot => slot.Options.GroupBy(option => option.MealItemId).Any(group => group.Count() > 1))))
             throw new TemplateDayException("DUPLICATE_MEAL_OPTION", "A slot cannot contain multiple options for the same meal item.", 400);
+    }
+
+    private async Task RequirePackageCapacityAsync(IReadOnlyCollection<UpsertPlanDayRequest> days, CancellationToken ct)
+    {
+        var errors = await PackageCapacityErrorsAsync(days, ct);
+        if (errors.Count > 0)
+            throw new TemplateDayException("INSUFFICIENT_PACKAGE_OPTIONS", string.Join(" ", errors.Select(e => e.Message)), 422);
+    }
+
+    private async Task<List<MenuWeekValidationError>> PackageCapacityErrorsAsync(IReadOnlyCollection<UpsertPlanDayRequest> days, CancellationToken ct)
+    {
+        // Validate against the largest configured package, independently of slot counts.
+        var packages = await db.MealPackageOptions.AsNoTracking().Where(p => p.IsActive).ToArrayAsync(ct);
+        var errors = new List<MenuWeekValidationError>();
+        if (packages.Length == 0) return errors;
+        var mealsRequired = packages.Max(p => p.MealCount);
+        var snacksRequired = packages.Max(p => p.SnackCount);
+        var codes = await db.MealTypes.AsNoTracking().Where(t => t.IsActive).ToDictionaryAsync(t => t.Id, t => t.Code, ct);
+        var ids = days.SelectMany(d => d.Slots).SelectMany(s => s.Options).Select(o => o.MealItemId).Distinct().ToArray();
+        var items = await db.MealItems.AsNoTracking().Where(m => ids.Contains(m.Id) && m.Status == "ACTIVE" && m.IsAvailable).ToDictionaryAsync(m => m.Id, ct);
+        foreach (var day in days.Where(d => d.IsActive))
+        {
+            var options = day.Slots.Where(s => s.IsActive && s.MaximumSelection > 0 && codes.ContainsKey(s.MealTypeId))
+                .SelectMany(s => s.Options.Where(o => o.IsAvailable && o.AdditionalPrice == 0 && items.ContainsKey(o.MealItemId))
+                    .Where(o => (!items[o.MealItemId].AvailableUntil.HasValue || items[o.MealItemId].AvailableUntil > clock.GetUtcNow()))
+                    .Select(o => new { o.MealItemId, Snack = MealTypeClassification.IsSnack(codes[s.MealTypeId]) })).ToArray();
+            var meals = options.Where(o => !o.Snack).Select(o => o.MealItemId).Distinct().ToHashSet();
+            var snacks = options.Where(o => o.Snack).Select(o => o.MealItemId).Distinct().ToHashSet();
+            if (meals.Count < mealsRequired || snacks.Count < snacksRequired || meals.Union(snacks).Count() < mealsRequired + snacksRequired)
+                errors.Add(new(day.WeekNumber, ResolveWeekday(day), null, null, "INSUFFICIENT_PACKAGE_OPTIONS",
+                    $"Week {day.WeekNumber} {ResolveWeekday(day)} needs {mealsRequired} distinct regular dishes and {snacksRequired} snacks; configured: {meals.Count} meals and {snacks.Count} snacks. Dishes cannot be selected twice."));
+        }
+        return errors;
     }
 
     private void ValidatePlanForPublication(CreatePlanRequest request, IReadOnlyCollection<UpsertPlanDayRequest> days, int cycleWeeks)
