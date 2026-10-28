@@ -73,10 +73,29 @@ public sealed class CustomerAddressesController(ICustomerAddressService addresse
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Update(
-        Guid customerProfileId, Guid addressId, UpsertCustomerAddressRequest request,
+        Guid customerProfileId, Guid addressId,
+        [FluentValidation.AspNetCore.CustomizeValidator(Skip = true)] UpsertCustomerAddressRequest request,
         CancellationToken cancellationToken)
     {
         if (!TryGetUserId(out var userId)) return Unauthorized();
+        var current = await addresses.GetAsync(customerProfileId, addressId, userId, cancellationToken);
+        if (current is null) return NotFoundProblem("address_not_found", "Address not found.");
+        // Apply the new character/required rules to changed fields. Untouched
+        // legacy values remain usable for delivery-slot and default updates.
+        var errors = new UpsertCustomerAddressRequestValidator().Validate(request).Errors;
+        static string? Normalized(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        bool UnchangedLegacyField(string field) => field switch
+        {
+            nameof(request.BuildingNo) => Normalized(request.BuildingNo) == Normalized(current.BuildingNo),
+            nameof(request.StreetNo) => Normalized(request.StreetNo) == Normalized(current.StreetNo),
+            nameof(request.UnitNumber) => Normalized(request.UnitNumber) == Normalized(current.UnitNumber),
+            nameof(request.ZoneNo) => Normalized(request.ZoneNo) == Normalized(current.ZoneNo),
+            nameof(request.Area) => Normalized(request.Area) == Normalized(current.Area),
+            _ => false
+        };
+        foreach (var error in errors.Where(error => !UnchangedLegacyField(error.PropertyName)))
+            ModelState.AddModelError(error.PropertyName, error.ErrorMessage);
+        if (!ModelState.IsValid) return ValidationProblem(ModelState);
         var result = await addresses.UpdateAsync(customerProfileId, addressId, userId, request, cancellationToken);
         return WriteResult(result);
     }

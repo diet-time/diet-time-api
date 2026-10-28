@@ -154,11 +154,30 @@ public sealed class UpsertCustomerAddressRequestValidator
             .NotEmpty()
             .Must(value => CustomerAddressTypes.All.Contains(value))
             .WithMessage("Address type must be HOME, APARTMENT, OFFICE, or OTHER.");
-        RuleFor(x => x.BuildingNo).MaximumLength(50);
-        RuleFor(x => x.StreetNo).MaximumLength(50);
-        RuleFor(x => x.UnitNumber).MaximumLength(50);
-        RuleFor(x => x.ZoneNo).MaximumLength(50);
-        RuleFor(x => x.Area).NotEmpty().MaximumLength(150);
+        RuleFor(x => x.BuildingNo).Cascade(CascadeMode.Stop).NotEmpty().WithMessage("Building number is required.")
+            .Must(value => value != null && value.Trim().Length <= 50 &&
+                System.Text.RegularExpressions.Regex.IsMatch(value.Trim(), @"\A[\p{L}\p{M}\p{Nd} /-]+\z") &&
+                System.Text.RegularExpressions.Regex.IsMatch(value, @"[\p{L}\p{Nd}]"))
+            .WithMessage("Use letters, numbers and valid separators (maximum 50 characters).");
+        RuleFor(x => x.StreetNo).Cascade(CascadeMode.Stop).NotEmpty().WithMessage("Street is required.")
+            .Must(value => value != null && value.Trim().Length <= 50 &&
+                System.Text.RegularExpressions.Regex.IsMatch(value.Trim(), @"\A[\p{L}\p{M}\p{Nd} ./#,\x27’()\-]+\z") &&
+                System.Text.RegularExpressions.Regex.IsMatch(value, @"[\p{L}\p{Nd}]"))
+            .WithMessage("Use letters, numbers and valid separators (maximum 50 characters).");
+        RuleFor(x => x.UnitNumber).Must(value => string.IsNullOrWhiteSpace(value) ||
+            value.Trim().Length <= 50 && System.Text.RegularExpressions.Regex.IsMatch(value.Trim(), @"\A[\p{L}\p{M}\p{Nd} /-]+\z") &&
+            System.Text.RegularExpressions.Regex.IsMatch(value, @"[\p{L}\p{Nd}]"))
+            .WithMessage("Use a valid unit identifier (maximum 50 characters).");
+        RuleFor(x => x.ZoneNo).Cascade(CascadeMode.Stop).NotEmpty().WithMessage("Zone number is required.")
+            .Must(value => value != null && value.Trim().Length <= 50 &&
+                System.Text.RegularExpressions.Regex.IsMatch(value.Trim(), @"\A\p{Nd}+\z") &&
+                System.Text.RegularExpressions.Regex.IsMatch(value, @"[\p{L}\p{Nd}]"))
+            .WithMessage("Zone number must contain digits only.");
+        RuleFor(x => x.Area).Cascade(CascadeMode.Stop).NotEmpty().WithMessage("Area is required.")
+            .Must(value => value != null && value.Trim().Length <= 150 &&
+                System.Text.RegularExpressions.Regex.IsMatch(value.Trim(), @"\A[\p{L}\p{M} .,\x27’،()&\-]+\z") &&
+                System.Text.RegularExpressions.Regex.IsMatch(value, @"\p{L}"))
+            .WithMessage("Use English or Arabic letters and name punctuation; no digits.");
         RuleFor(x => x.Directions).MaximumLength(500);
         RuleFor(x => x.Latitude).InclusiveBetween(-90m, 90m).When(x => x.Latitude.HasValue);
         RuleFor(x => x.Longitude).InclusiveBetween(-180m, 180m).When(x => x.Longitude.HasValue);
