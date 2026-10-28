@@ -41,6 +41,15 @@ public sealed record TomorrowMenuResponse(Guid SubscriptionId, Guid? Subscriptio
     IReadOnlyList<UpcomingMealItemResponse> SelectedMeals,
     IReadOnlyList<UpcomingMealItemResponse> AvailableMeals, IReadOnlyList<UpcomingMealItemResponse> AvailableSnacks)
 {
+    public Guid OrderId { get; init; }
+    public string OrderNumber { get; init; } = "";
+    public Guid MealPlanTemplateId { get; init; }
+    public int? MealPlanVersion { get; init; }
+    public string? MealPlanImageUrl { get; init; }
+    public int SelectedMealCount { get; init; }
+    public int SelectedSnackCount { get; init; }
+    public DateTimeOffset? CustomerConfirmedAt { get; init; }
+    public DateTimeOffset? AutoFinalizedAt { get; init; }
     public string? OrderStatus { get; init; }
     public DateOnly? OrderStartDate { get; init; }
     public DateOnly? FirstDeliveryDate { get; init; }

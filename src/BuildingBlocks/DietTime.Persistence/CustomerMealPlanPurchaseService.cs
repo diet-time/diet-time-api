@@ -270,10 +270,7 @@ public sealed class CustomerMealPlanPurchaseService(
         string? publicUrl,
         string? objectKey)
     {
-        if (!string.IsNullOrWhiteSpace(thumbnailUrl)) return thumbnailUrl;
-        if (!string.IsNullOrWhiteSpace(thumbnailObjectKey)) return storage.GetThumbnailUrl(thumbnailObjectKey);
-        if (!string.IsNullOrWhiteSpace(publicUrl)) return publicUrl;
-        return string.IsNullOrWhiteSpace(objectKey) ? null : storage.GetPublicUrl(objectKey);
+        return MealPlanImages.ResolveUrl(storage, thumbnailUrl, thumbnailObjectKey, publicUrl, objectKey);
     }
 
     private static decimal DailyPrice(decimal amount, int serviceDays) =>

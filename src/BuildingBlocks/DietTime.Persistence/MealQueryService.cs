@@ -97,7 +97,7 @@ public sealed class MealQueryService(
                 x.Description,
                 x.PlanMedia is null
                     ? null
-                    : Image(x.PlanMedia.ThumbnailUrl ?? x.PlanMedia.PublicUrl, x.PlanMedia.ThumbnailObjectKey ?? x.PlanMedia.ObjectKey, true),
+                    : MealPlanImages.ResolveUrl(storage, x.PlanMedia.ThumbnailUrl, x.PlanMedia.ThumbnailObjectKey, x.PlanMedia.PublicUrl, x.PlanMedia.ObjectKey),
                 false,
                 dailyCaloriesByPlan.GetValueOrDefault(x.Id),
                 price?.Amount,

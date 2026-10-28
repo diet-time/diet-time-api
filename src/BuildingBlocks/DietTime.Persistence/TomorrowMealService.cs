@@ -69,7 +69,7 @@ public sealed partial class UpcomingMealService
             response.SubscriptionServiceDayId, response.MenuTemplateId, response.MenuTemplateVersion, response.MenuWeekNumber,
             MenuWeekdayExtensions.FromDate(tomorrow), response.AvailableMeals.Count + response.AvailableSnacks.Count,
             response.SelectedMeals.Count, response.SelectionStatus, response.EmptyReason ?? response.ReviewReason);
-        return response;
+        return await WithPurchasedPlanAsync(response, order, template, ct);
     }
 
     private async Task<(int Meals, int Snacks)> EntitlementsAsync(Order order, CancellationToken ct)
@@ -125,7 +125,7 @@ public sealed partial class UpcomingMealService
         day.Revision++;
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
-        return await TomorrowResponseAsync(day, order, language, ct);
+        return await WithPurchasedPlanAsync(await TomorrowResponseAsync(day, order, language, ct), order, null, ct);
     }
 
     public async Task FinalizeDueAsync(CancellationToken ct)
@@ -307,6 +307,25 @@ public sealed partial class UpcomingMealService
         return new(order.Id, day.Id, day.ServiceDate, order.PlanName, day.MealCount ?? 0, day.SnackCount ?? 0,
             status, locked, canConfirm, SubscriptionMenuRules.TomorrowCutoff(day.ServiceDate), now, reason,
             menu.SelectedMeals.Select(s => s.Meal.MealItemId).ToArray(), menu.SelectedMeals.Select(s => s.Meal).ToArray(),
-            availableMeals, availableSnacks) { EmptyReason = emptyStatus != null ? reason : null };
+            availableMeals, availableSnacks) {
+                EmptyReason = emptyStatus != null ? reason : null,
+                SelectedMealCount = menu.SelectedMeals.Where(s => s.Meal.Category == "meal").Select(s => s.Meal.MealItemId).Distinct().Count(),
+                SelectedSnackCount = menu.SelectedMeals.Where(s => s.Meal.Category == "snack").Select(s => s.Meal.MealItemId).Distinct().Count(),
+                CustomerConfirmedAt = day.CustomerConfirmedAt, AutoFinalizedAt = day.AutoFinalizedAt
+            };
+    }
+
+    private async Task<TomorrowMenuResponse> WithPurchasedPlanAsync(TomorrowMenuResponse response, Order order,
+        MealPlanTemplate? template, CancellationToken ct)
+    {
+        template ??= await db.MealPlanTemplates.AsNoTracking().SingleOrDefaultAsync(p => p.Id == order.MealPlanTemplateId, ct);
+        var image = template is null ? null : await MealPlanImages.ForPurchasedPlan(
+            db.MealMedia.AsNoTracking(), db.MealPlanTemplates, template).FirstOrDefaultAsync(ct);
+        return response with {
+            OrderId = order.Id, OrderNumber = order.OrderNumber,
+            MealPlanTemplateId = order.MealPlanTemplateId, MealPlanVersion = template?.VersionNumber,
+            MealPlanImageUrl = MealPlanImages.ResolveUrl(storage, image?.ThumbnailUrl,
+                image?.ThumbnailObjectKey, image?.PublicUrl, image?.ObjectKey)
+        };
     }
 }
