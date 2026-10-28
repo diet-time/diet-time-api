@@ -20,6 +20,16 @@ public sealed class TwilioWhatsAppOptions
     public string OperationsNumber { get; set; } = string.Empty;
     public string NewOrderContentSid { get; set; } = string.Empty;
 
+    // Format/presence checks only: never expose values or claim provider approval.
+    public IReadOnlyDictionary<string, bool> ConfigurationChecks() => new Dictionary<string, bool>
+    {
+        [nameof(AccountSid)] = System.Text.RegularExpressions.Regex.IsMatch((AccountSid?.Trim() ?? ""), @"\AAC[0-9a-fA-F]{32}\z"),
+        [nameof(AuthToken)] = !string.IsNullOrWhiteSpace(AuthToken),
+        [nameof(FromNumber)] = TwilioWhatsAppPhoneNumber.IsValid(FromNumber),
+        [nameof(OperationsNumber)] = TwilioWhatsAppPhoneNumber.IsValid(OperationsNumber),
+        [nameof(NewOrderContentSid)] = System.Text.RegularExpressions.Regex.IsMatch((NewOrderContentSid?.Trim() ?? ""), @"\AHX[0-9a-fA-F]{32}\z")
+    };
+
     public bool IsValid() => !Enabled ||
         (AccountSid.StartsWith("AC", StringComparison.Ordinal) && AccountSid.Length > 2 &&
          !string.IsNullOrWhiteSpace(AuthToken) &&
@@ -58,6 +68,11 @@ public sealed class TwilioWhatsAppService(
         CancellationToken cancellationToken = default)
     {
         var configuration = options.Value;
+        if (!configuration.Enabled)
+        {
+            logger.LogInformation("WhatsApp new-order notification skipped. OrderId={OrderId} Reason=twilio_whatsapp_disabled", notification.OrderId);
+            return Task.FromResult(Failure("twilio_whatsapp_disabled", "Twilio WhatsApp messaging is disabled."));
+        }
         var validationFailure = Validate(notification);
         if (validationFailure is not null)
         {
@@ -90,12 +105,8 @@ public sealed class TwilioWhatsAppService(
         };
 
         logger.LogInformation(
-            "Sending Twilio WhatsApp new-order notification. OrderId={OrderId} OrderNumber={OrderNumber} Customer={Customer} Plan={Plan} StartDate={StartDate} Duration={Duration} MealsPerDay={MealsPerDay} DeliveryDays={DeliveryDays} Address={Address} Total={Total} Status={Status} ContentSid={ContentSid} TwilioVariables={TwilioVariables}",
-            notification.OrderId, variables["1"], variables["2"], variables["4"],
-            variables["5"], variables["6"], variables["7"], variables["8"],
-            variables["9"], variables["10"], variables["11"],
-            configuration.NewOrderContentSid,
-            JsonSerializer.Serialize(variables));
+            "Sending Twilio WhatsApp new-order notification. OrderId={OrderId} OrderNumber={OrderNumber} ContentSid={ContentSid} VariableCount={VariableCount}",
+            notification.OrderId, notification.OrderNumber, configuration.NewOrderContentSid, variables.Count);
 
         return SendTemplateAsync(new TwilioWhatsAppTemplateMessage(
             configuration.OperationsNumber,
@@ -109,7 +120,10 @@ public sealed class TwilioWhatsAppService(
     {
         var configuration = options.Value;
         if (!configuration.Enabled)
+        {
+            logger.LogInformation("Twilio WhatsApp request skipped. Reason=twilio_whatsapp_disabled");
             return Failure("twilio_whatsapp_disabled", "Twilio WhatsApp messaging is disabled.");
+        }
 
         var variables = message.ContentVariables.ToDictionary(
             pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
@@ -134,26 +148,43 @@ public sealed class TwilioWhatsAppService(
                     $"{configuration.AccountSid.Trim()}:{configuration.AuthToken}"));
                 request.Headers.Authorization = new AuthenticationHeaderValue("Basic", credentials);
 
+                logger.LogInformation("Twilio WhatsApp request starting. Attempt={Attempt}", attempt);
                 using var response = await httpClient.SendAsync(request, cancellationToken);
                 var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
                 if (response.IsSuccessStatusCode)
                 {
                     var sid = ReadString(responseBody, "sid");
-                    logger.LogInformation("Twilio WhatsApp template accepted. MessageSid={MessageSid}", sid);
-                    return new WhatsAppSendResult { Success = true, MessageId = sid };
+                    var status = ReadString(responseBody, "status");
+                    if (string.IsNullOrWhiteSpace(sid))
+                    {
+                        logger.LogWarning("Twilio WhatsApp returned no Message SID. HttpStatus={HttpStatus}", (int)response.StatusCode);
+                        return Failure("invalid_provider_response", "Twilio did not return a Message SID.");
+                    }
+                    if (status is "failed" or "undelivered")
+                    {
+                        var code = ReadString(responseBody, "error_code") ?? status;
+                        logger.LogWarning("Twilio WhatsApp message failed. MessageSid={MessageSid} ProviderStatus={ProviderStatus} ProviderCode={ProviderCode}", sid, status, code);
+                        return new WhatsAppSendResult { Success = false, MessageId = sid, Status = status,
+                            ErrorCode = code, ErrorMessage = ReadString(responseBody, "error_message") ?? "Twilio reported a failed message." };
+                    }
+                    logger.LogInformation("Twilio WhatsApp template accepted. MessageSid={MessageSid} ProviderStatus={ProviderStatus}", sid, status ?? "unknown");
+                    return new WhatsAppSendResult { Success = true, MessageId = sid, Status = status };
                 }
 
                 var failure = ReadFailure(response.StatusCode, responseBody);
+                logger.LogWarning("Twilio WhatsApp request rejected. HttpStatus={HttpStatus} ProviderCode={ProviderCode} Attempt={Attempt}", (int)response.StatusCode, failure.ErrorCode, attempt);
                 if (!IsTransient(response.StatusCode) || attempt == MaximumAttempts)
                     return failure;
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
+                logger.LogWarning("Twilio WhatsApp request timed out. Attempt={Attempt}", attempt);
                 if (attempt == MaximumAttempts)
                     return Failure("timeout", "The Twilio WhatsApp request timed out.");
             }
             catch (HttpRequestException)
             {
+                logger.LogWarning("Twilio WhatsApp request could not reach provider. Attempt={Attempt}", attempt);
                 if (attempt == MaximumAttempts)
                     return Failure("http_error", "Twilio WhatsApp could not be reached.");
             }
@@ -214,7 +245,8 @@ public sealed class TwilioWhatsAppService(
         {
             using var json = JsonDocument.Parse(body);
             if (!json.RootElement.TryGetProperty(property, out var value)) return null;
-            return value.ValueKind == JsonValueKind.String ? value.GetString() : value.ToString();
+            return value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined ? null
+                : value.ValueKind == JsonValueKind.String ? value.GetString() : value.ToString();
         }
         catch (JsonException)
         {

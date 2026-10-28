@@ -205,6 +205,12 @@ builder.Services.AddRateLimiter(o =>
 });
 
 var app = builder.Build();
+var whatsappConfiguration = app.Services.GetRequiredService<IOptions<TwilioWhatsAppOptions>>().Value;
+var whatsappChecks = whatsappConfiguration.ConfigurationChecks();
+app.Logger.LogInformation(
+    "Twilio WhatsApp runtime configuration. Enabled={Enabled} ConfigurationComplete={ConfigurationComplete} InvalidOrMissingSettings={InvalidOrMissingSettings}",
+    whatsappConfiguration.Enabled, whatsappChecks.Values.All(valid => valid),
+    string.Join(",", whatsappChecks.Where(check => !check.Value).Select(check => check.Key)));
 app.UseMiddleware<CorrelationIdMiddleware>(); app.UseSerilogRequestLogging(); app.UseMiddleware<ExceptionMiddleware>(); app.UseMiddleware<SecurityHeadersMiddleware>(); app.UseRateLimiter();
 if (!app.Environment.IsProduction()) { app.UseSwagger(); app.UseSwaggerUI(o => o.SwaggerEndpoint("/swagger/v1/swagger.json", "Diet Time Meal API v1")); }
 app.UseCors("Flutter"); if (!app.Environment.IsDevelopment()) app.UseHttpsRedirection(); app.UseAuthentication(); app.UseAuthorization(); app.MapControllers(); app.MapHealthChecks("/health");

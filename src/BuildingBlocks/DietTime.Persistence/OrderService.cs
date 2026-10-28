@@ -46,6 +46,7 @@ public sealed class OrderService(
         if (replay is not null)
         {
             await transaction.CommitAsync(cancellationToken);
+            logger.LogInformation("WhatsApp new-order notification skipped for replayed order. OrderId={OrderId} Reason=idempotent_replay", replay.Id);
             return new(PlaceOrderStatus.Replayed, replay);
         }
         if (await db.Orders.AsNoTracking().AnyAsync(x => x.IdempotencyKey == key, cancellationToken))
@@ -311,6 +312,7 @@ public sealed class OrderService(
     {
         try
         {
+            logger.LogInformation("Dispatching WhatsApp new-order notification after commit. OrderId={OrderId}", orderId);
             var order = await db.Orders.AsNoTracking()
                 .Include(x => x.DeliveryDays)
                 .SingleAsync(x => x.Id == orderId, cancellationToken);
@@ -344,9 +346,11 @@ public sealed class OrderService(
 
             if (result.Success)
                 logger.LogInformation(
-                    "WhatsApp new-order notification sent. OrderId={OrderId} OrderNumber={OrderNumber} WhatsAppMessageId={MessageId}",
-                    order.Id, order.OrderNumber, result.MessageId);
-            else if (result.ErrorCode != "twilio_whatsapp_disabled")
+                    "WhatsApp new-order notification accepted by Twilio. OrderId={OrderId} OrderNumber={OrderNumber} WhatsAppMessageId={MessageId} ProviderStatus={ProviderStatus}",
+                    order.Id, order.OrderNumber, result.MessageId, result.Status ?? "unknown");
+            else if (result.ErrorCode == "twilio_whatsapp_disabled")
+                logger.LogInformation("WhatsApp new-order notification skipped. OrderId={OrderId} Reason=twilio_whatsapp_disabled", order.Id);
+            else
                 logger.LogError(
                     "Failed to send WhatsApp new-order notification. OrderId={OrderId} OrderNumber={OrderNumber} ErrorCode={ErrorCode}",
                     order.Id, order.OrderNumber, result.ErrorCode);

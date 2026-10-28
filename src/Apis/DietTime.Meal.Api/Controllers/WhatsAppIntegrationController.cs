@@ -13,8 +13,27 @@ namespace DietTime.Meal.Api.Controllers;
 [Route("api/admin/integrations/whatsapp")]
 [Route("api/v{version:apiVersion}/admin/integrations/whatsapp")]
 public sealed class WhatsAppIntegrationController(
-    ITwilioWhatsAppService twilioWhatsApp) : ControllerBase
+    ITwilioWhatsAppService twilioWhatsApp,
+    Microsoft.Extensions.Options.IOptions<TwilioWhatsAppOptions> options) : ControllerBase
 {
+    /// <summary>Reports loaded configuration presence/format without exposing values or sending a message.</summary>
+    [HttpGet("twilio/configuration")]
+    public IActionResult Configuration()
+    {
+        var configuration = options.Value;
+        var checks = configuration.ConfigurationChecks();
+        return Ok(new
+        {
+            Enabled = configuration.Enabled,
+            ConfigurationComplete = checks.Values.All(valid => valid),
+            Checks = checks,
+            InvalidOrMissingSettings = checks.Where(check => !check.Value).Select(check => check.Key).ToArray(),
+            NotificationRecipient = "OperationsNumber",
+            NotificationTrigger = "New order committed; idempotent replays do not resend",
+            ProviderVerified = false
+        });
+    }
+
     [HttpPost("twilio/messages")]
     [ProducesResponseType(typeof(SendWhatsAppTemplateResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]

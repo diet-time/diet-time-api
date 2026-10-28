@@ -186,6 +186,85 @@ public sealed class WhatsAppTests
         Assert.Equal(0, handler.CallCount);
     }
 
+    [Fact]
+    public void Configuration_diagnostics_report_presence_and_format_without_returning_values()
+    {
+        var options = new TwilioWhatsAppOptions { AccountSid = "AC" + new string('1', 32), AuthToken = "private-token",
+            FromNumber = "+14155238886", OperationsNumber = "+97455555555", NewOrderContentSid = "HX" + new string('2', 32) };
+        var checks = options.ConfigurationChecks();
+        Assert.Equal(5, checks.Count); Assert.All(checks.Values, Assert.True);
+        options.NewOrderContentSid = "HXnot-a-real-sid";
+        Assert.False(options.ConfigurationChecks()["NewOrderContentSid"]);
+        Assert.DoesNotContain("private-token", JsonSerializer.Serialize(checks));
+    }
+
+    [Fact]
+    public async Task Missing_message_sid_cannot_be_reported_as_a_success()
+    {
+        var handler = new RecordingHandler((_, _) => new(HttpStatusCode.Created) { Content = new StringContent("{\"status\":\"queued\"}") });
+        var service = DiagnosticService(handler);
+        var result = await service.SendTemplateAsync(new("+97455555555", "HXtemplate", new Dictionary<string,string> { ["1"] = "value" }));
+        Assert.False(result.Success); Assert.Equal("invalid_provider_response", result.ErrorCode);
+    }
+
+    [Theory]
+    [InlineData("failed")]
+    [InlineData("undelivered")]
+    public async Task Failed_provider_status_is_not_mistaken_for_delivery(string status)
+    {
+        var handler = new RecordingHandler((_, _) => new(HttpStatusCode.Created) {
+            Content = new StringContent(JsonSerializer.Serialize(new { sid = "SMtest", status, error_code = 63015, error_message = "Sandbox recipient not joined" })) });
+        var result = await DiagnosticService(handler).SendTemplateAsync(new("+97455555555", "HXtemplate", new Dictionary<string,string> { ["1"] = "value" }));
+        Assert.False(result.Success); Assert.Equal("63015", result.ErrorCode); Assert.Equal(status, result.Status); Assert.Equal("SMtest", result.MessageId);
+    }
+
+    [Fact]
+    public async Task Queued_provider_status_is_preserved_without_claiming_handset_delivery()
+    {
+        var handler = new RecordingHandler((_, _) => new(HttpStatusCode.Created) { Content = new StringContent("{\"sid\":\"SMtest\",\"status\":\"queued\"}") });
+        var result = await DiagnosticService(handler).SendTemplateAsync(new("+97455555555", "HXtemplate", new Dictionary<string,string> { ["1"] = "value" }));
+        Assert.True(result.Success); Assert.Equal("queued", result.Status);
+    }
+
+    [Fact]
+    public async Task Disabled_new_order_is_logged_before_validating_optional_order_data()
+    {
+        var handler = new RecordingHandler((_, _) => throw new InvalidOperationException("Must not send"));
+        var logs = new DiagnosticLogger();
+        var service = DiagnosticService(handler, enabled: false, logs);
+        var result = await service.SendNewOrderNotificationAsync(new(Guid.NewGuid(), "ORD-1", "", "", "", "", 0, default, "", "", 0, "", ""));
+        Assert.False(result.Success); Assert.Equal("twilio_whatsapp_disabled", result.ErrorCode); Assert.Equal(0, handler.CallCount);
+        Assert.Contains(logs.Lines, line => line.Contains("twilio_whatsapp_disabled"));
+    }
+
+    [Fact]
+    public async Task Rejections_log_provider_code_and_status_without_logging_customer_data()
+    {
+        var handler = new RecordingHandler((_, _) => new(HttpStatusCode.BadRequest) { Content = new StringContent("{\"code\":21656,\"message\":\"Invalid variables\"}") });
+        var logs = new DiagnosticLogger();
+        var result = await DiagnosticService(handler, logger: logs).SendNewOrderNotificationAsync(new(Guid.NewGuid(), "ORD-1", "Private Customer", "+97455555555", "Balance", "Monthly", 4,
+            new DateOnly(2026,10,29), "Sun, Mon", "Private address", 1000, "QAR", "CONFIRMED"));
+        Assert.False(result.Success);
+        Assert.Contains(logs.Lines, line => line.Contains("21656") && line.Contains("400"));
+        var combined = string.Join(" ", logs.Lines);
+        Assert.DoesNotContain("Private Customer", combined); Assert.DoesNotContain("Private address", combined); Assert.DoesNotContain("+97455555555", combined); Assert.DoesNotContain("private-token", combined);
+    }
+
+    private static TwilioWhatsAppService DiagnosticService(RecordingHandler handler, bool enabled = true, DiagnosticLogger? logger = null) => new(
+        new HttpClient(handler) { BaseAddress = new("https://api.twilio.com/") },
+        Options.Create(new TwilioWhatsAppOptions { Enabled = enabled, AccountSid = "AC" + new string('1',32), AuthToken = "private-token",
+            FromNumber = "+14155238886", OperationsNumber = "+97455555555", NewOrderContentSid = "HX" + new string('2',32) }),
+        (Microsoft.Extensions.Logging.ILogger<TwilioWhatsAppService>?)logger ?? NullLogger<TwilioWhatsAppService>.Instance);
+
+    private sealed class DiagnosticLogger : Microsoft.Extensions.Logging.ILogger<TwilioWhatsAppService>
+    {
+        public List<string> Lines { get; } = [];
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel level) => true;
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel level, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Lines.Add(formatter(state, exception));
+    }
+
     private static IReadOnlyDictionary<string, string> ParseForm(string body) =>
         body.Split('&', StringSplitOptions.RemoveEmptyEntries)
             .Select(field => field.Split('=', 2))

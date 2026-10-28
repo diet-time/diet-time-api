@@ -4,6 +4,7 @@ public sealed class WhatsAppSendResult
 {
     public bool Success { get; init; }
     public string? MessageId { get; init; }
+    public string? Status { get; init; }
     public string? ErrorCode { get; init; }
     public string? ErrorMessage { get; init; }
 }
