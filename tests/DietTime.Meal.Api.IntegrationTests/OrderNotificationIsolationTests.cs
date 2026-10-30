@@ -53,7 +53,7 @@ public sealed partial class UpcomingMealServiceTests
             Assert.Equal(1, provider.Calls);
             provider.Release.SetResult(new WhatsAppSendResult { Success = false, ErrorCode = "63016", Status = "undelivered" });
             var details = await client.GetFromJsonAsync<JsonElement>($"/api/v1/orders/{orderId}");
-            Assert.Equal("CONFIRMED", details.GetProperty("status").GetString());
+            Assert.Equal("PENDING_APPROVAL", details.GetProperty("status").GetString());
         }
         finally { provider.Release.TrySetResult(new WhatsAppSendResult { Success = false, ErrorCode = "test_cleanup" }); }
     }

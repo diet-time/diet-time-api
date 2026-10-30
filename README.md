@@ -126,16 +126,31 @@ TwilioWhatsApp__OperationsNumber=+97474452435
 TwilioWhatsApp__NewOrderContentSid=<approved new-order Content SID beginning with HX>
 ```
 
-New orders enqueue the configured Twilio content template for `OperationsNumber`
-only after the order transaction commits. The API returns the confirmed order without
-waiting for Twilio, so provider delays, retries and failures cannot block checkout or
-the dashboard refresh. A background worker uses its own dependency-injection scope
-and a 60-second send deadline. Failures are logged, and idempotent order replays do
-not enqueue another message.
+New orders return `PENDING_APPROVAL` without waiting for Twilio. Notification events
+are saved in the same PostgreSQL transaction as the order or staff action. The bounded
+in-memory channel only wakes the background worker; its five-second database poll
+recovers work after a restart or a full channel. Provider failures cannot change order
+status or block checkout and dashboard refresh. The worker claims events with leases,
+uses a separate dependency-injection scope, and has a 60-second send deadline.
 
-Notifications remain best effort: the bounded queue holds up to 1,024 pending order IDs
-in memory, and pending messages do not survive an API restart. A full or stopping queue
-logs an error without changing the confirmed order. No database migration is required.
+Configure approved customer templates independently (none are supplied by default):
+
+```text
+OrderWhatsAppTemplates__ReceivedContentSid=HX...
+OrderWhatsAppTemplates__ApprovedContentSid=HX...
+OrderWhatsAppTemplates__RejectedContentSid=HX...
+OrderWhatsAppTemplates__OnHoldContentSid=HX...
+OrderWhatsAppTemplates__PaymentReceivedContentSid=HX...
+```
+
+Each customer template uses variables `1` order number, `2` plan name, `3` event label,
+and `4` message or staff reason. The existing operations template retains its eleven
+variables. Missing configuration leaves durable events in `WAITING_CONFIGURATION`,
+checked again after five minutes. No free-form WhatsApp fallback is sent. Transient
+provider failures are retried; permanent failures are logged and retained as `FAILED`.
+`SENT` means Twilio accepted the message, not that WhatsApp delivered it. Unique
+history/audience keys prevent duplicate events on action retries, but a network failure
+after provider acceptance can still cause duplicate delivery on transport retry.
 
 Example request body:
 
@@ -146,6 +161,88 @@ Example request body:
   "contentVariables": { "1": "12/1", "2": "3pm" }
 }
 ```
+
+## Staff order approval
+
+Apply the EF migration `20261030020000_StaffOrderApproval` as the schema owner
+before deploying the API and clients if these schema changes have not already been
+applied. The standalone SQL script has been removed.
+It extends the existing orders and status-history tables and adds a durable notification
+outbox. Existing status, payment, price and service records are not rewritten and no
+historical notification events are generated. Legacy `PENDING` orders remain eligible
+for explicit review; other legacy statuses retain their records and require operational
+review where no supported transition exists.
+
+New orders start in `PENDING_APPROVAL`; their purchased schedule is saved, but service
+days and default meals are initialized only after approval and payment eligibility.
+The React Admin Orders screen supports review, reasons, history, payment recording,
+explicit date revision and concurrency conflicts. Flutter shows Order Submitted,
+Pending Confirmation, hold/rejection reasons and separate payment status, and refreshes
+orders when returning to the app and periodically while viewing them.
+
+Admin-only endpoints under `/api/admin/orders`:
+
+- `GET /` lists orders with optional `status`, `pageNumber` and `pageSize`.
+- `GET /{id}` returns the purchased order snapshot and audit history.
+- `POST /{id}/approve`, `/reject`, `/hold`, `/resume`, `/cancel`, `/activate`, `/complete`
+  accept `{ "expectedRowVersion": 1, "reason": "..." }`.
+- `POST /{id}/payment` also accepts `paymentStatus`; a verification reference/reason
+  is mandatory. This records manual payment/refund status without moving funds.
+- `POST /{id}/revise-dates` accepts `expectedRowVersion`, `startDate`, `serviceWeekdays` and
+  `reason`. It preserves purchased duration and requires explicit agreement; approval
+  never silently moves dates.
+
+Customer `POST /api/v1/orders/{id}/cancel` checks ownership and accepts the current
+row version and reason. Cancellation is allowed during review or before confirmed
+service/preparation starts; later cancellation requires contacting Diet Time.
+
+Transitions are centralized: pending review → confirmed/rejected/on hold/cancelled;
+on hold → pending review/cancelled; confirmed → active/cancelled; active → completed
+only after every purchased service day is delivered. Reasons are required for rejection,
+hold, cancellation, manual payments and revised dates. Row locks and version checks
+return HTTP 409 for conflicting or repeated actions without duplicating service records.
+Payment status is independent: approval never marks an order paid. Paid rejected or
+cancelled orders become `REFUND_PENDING`; refunds require the existing manual process.
+
+`Orders__RequiresPrepayment=false` preserves the manual/offline fulfillment policy.
+Set it to `true` to require recorded payment before fulfillment for newly placed orders;
+the policy is snapshotted on each order. Confirmed prepaid orders can await payment.
+Late payment before service initialization blocks fulfillment until explicit date revision.
+Pending, held, rejected, cancelled and payment-blocked orders cannot enter kitchen,
+dispatch or meal confirmation flows. Takeaway orders remain excluded from dispatch.
+Overlapping orders retain independent schedules, prices and status histories.
+
+Implementation files:
+
+- API: `StaffOrdersController.cs`, `OrdersController.cs`, `Program.cs` and
+  `OrderNotificationWorker.cs` expose review/cancellation and run outbox processing.
+- Domain/application/contracts: `Entities.cs`, `OrderNotification.cs`,
+  `OrderWorkflowPolicy.cs`, `WhatsApp.cs`, `ApiContracts.cs` and
+  `OrderApprovalContracts.cs` define status policy, audit, payment and response data.
+- Persistence: `StaffOrderService.cs`, `OrderService.cs`, `OrderConfigurations.cs`,
+  `DietTimeDbContext.cs`, `OrderNotificationEvents.cs` and
+  `OrderWhatsAppNotificationSender.cs` implement transactional review and notifications.
+  `UpcomingMealService.cs`, `TomorrowMealService.cs`, `AdminUpcomingMealsController.cs`,
+  `OperationsDashboardService.cs` and `AdminDeliveryCalendarService.cs` gate fulfillment.
+- Admin SPA: `staffOrdersApi.ts`, `features/orders/OrdersPage.tsx` and its test,
+  `app/router.tsx` and `layouts/Sidebar.tsx` provide the staff workflow.
+- Flutter: `orders_repository.dart`, `order_models.dart`, `order_status.dart`,
+  `order_placed_screen.dart`, `plan_summary_screen.dart`,
+  `customer_dashboard_screen.dart`, `order_details_screen.dart` and
+  `authenticated_landing_screen.dart` handle submission, review and refresh.
+- Tests: `StaffOrderApprovalTests.cs`, `StaffApprovalMigrationTests.cs` and
+  `OrderWorkflowPolicyTests.cs` cover the new policy. Existing order notification,
+  package selection/delivery, questionnaire, menu image, dashboard and checkout tests
+  were updated for explicit approval rather than automatic confirmation.
+
+Validation: 210 .NET unit tests, 58 selected PostgreSQL-backed API regression tests,
+318 Flutter tests and 98 admin tests passed. Five workflow tests were rerun after
+expanding their edge-case assertions and passed. Admin type checking/lint and Flutter
+analysis passed. Three older integration tests still reference previously removed
+standalone SQL files (`20261026_package_discounted_price.sql`,
+`tomorrow_menu_diagnostics.sql`, `20261026_address_delivery_slots.sql`); those tests
+were excluded from the 58-test regression run. No production database was changed
+and live WhatsApp delivery was not tested.
 
 ## Calendar behavior
 

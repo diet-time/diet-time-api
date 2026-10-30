@@ -8,6 +8,23 @@ public interface IOrderNotificationQueue
 public interface IOrderNotificationSender
 {
     Task SendAsync(Guid orderId, CancellationToken cancellationToken);
+    Task SendPendingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+}
+
+public sealed class OrderWhatsAppTemplateOptions
+{
+    public const string SectionName = "OrderWhatsAppTemplates";
+    public string ReceivedContentSid { get; set; } = "";
+    public string ApprovedContentSid { get; set; } = "";
+    public string RejectedContentSid { get; set; } = "";
+    public string OnHoldContentSid { get; set; } = "";
+    public string PaymentReceivedContentSid { get; set; } = "";
+    public string ForEvent(string code) => code switch
+    {
+        "ORDER_RECEIVED" => ReceivedContentSid, "ORDER_APPROVED" => ApprovedContentSid,
+        "ORDER_REJECTED" => RejectedContentSid, "ORDER_ON_HOLD" => OnHoldContentSid,
+        "PAYMENT_RECEIVED" => PaymentReceivedContentSid, _ => ""
+    };
 }
 
 public sealed class WhatsAppSendResult

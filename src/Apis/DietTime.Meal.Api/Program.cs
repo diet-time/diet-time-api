@@ -163,6 +163,8 @@ builder.Services.AddScoped<ICustomerProfileService, CustomerProfileService>();
 builder.Services.AddScoped<ICustomerAddressService, CustomerAddressService>();
 builder.Services.AddScoped<IDeliveryTimeSlotService, DeliveryTimeSlotService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
+builder.Services.AddScoped<StaffOrderService>();
+builder.Services.Configure<OrderWhatsAppTemplateOptions>(builder.Configuration.GetSection(OrderWhatsAppTemplateOptions.SectionName));
 builder.Services.AddScoped<IOrderNotificationSender, OrderWhatsAppNotificationSender>();
 builder.Services.AddSingleton<OrderNotificationWorker>();
 builder.Services.AddSingleton<IOrderNotificationQueue>(services => services.GetRequiredService<OrderNotificationWorker>());

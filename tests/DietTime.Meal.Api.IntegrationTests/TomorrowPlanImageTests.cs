@@ -28,7 +28,7 @@ public sealed partial class UpcomingMealServiceTests
         Assert.Equal(menu.SubscriptionServiceDayId, payload.GetProperty("subscriptionServiceDayId").GetGuid());
         Assert.Equal(3, payload.GetProperty("selectedMealCount").GetInt32());
         Assert.Equal(1, payload.GetProperty("selectedSnackCount").GetInt32());
-        Assert.Equal(JsonValueKind.Null, payload.GetProperty("customerConfirmedAt").ValueKind);
+        Assert.False(payload.TryGetProperty("customerConfirmedAt", out var confirmedAt) && confirmedAt.ValueKind != JsonValueKind.Null);
         var confirmed = await Service().ConfirmAsync(order.Id, menu.SubscriptionServiceDayId!.Value, userId, "en", Request(menu), default);
         Assert.Equal("https://cdn.test/balance-thumb.jpg", confirmed.MealPlanImageUrl);
         Assert.Equal(order.OrderNumber, confirmed.OrderNumber);

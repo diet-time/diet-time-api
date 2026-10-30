@@ -13,6 +13,7 @@ public sealed class OrderOptions
 {
     public const string SectionName = "Orders";
     public int MinimumLeadTimeDays { get; set; } = 1;
+    public bool RequiresPrepayment { get; set; } // Default preserves the existing offline payment policy.
 }
 
 public sealed class OrderService(
@@ -20,8 +21,7 @@ public sealed class OrderService(
     TimeProvider clock,
     IOptions<OrderOptions> options,
     IOrderNotificationQueue notifications,
-    ILogger<OrderService> logger,
-    IUpcomingMealService upcomingMeals) : IOrderService
+    ILogger<OrderService> logger) : IOrderService
 {
     public async Task<PlaceOrderResult> PlaceAsync(
         PlaceOrderRequest request,
@@ -233,7 +233,8 @@ public sealed class OrderService(
             DeliveryTimeSlotName = slot?.Name ?? string.Empty,
             DeliveryStartTime = slot?.StartTime ?? default,
             DeliveryEndTime = slot?.EndTime ?? default,
-            Status = OrderStatuses.Confirmed,
+            Status = OrderStatuses.PendingApproval,
+            RequiresPrepayment = options.Value.RequiresPrepayment,
             PaymentStatus = PaymentStatuses.Pending,
             PlacedAt = now,
             IdempotencyKey = key,
@@ -252,20 +253,23 @@ public sealed class OrderService(
         foreach (var day in request.DeliveryDays.Order())
             order.DeliveryDays.Add(new OrderDeliveryDay
                 { Id = Guid.NewGuid(), OrderId = order.Id, DayOfWeek = day });
-        order.StatusHistory.Add(new OrderStatusHistory
+        var submitted = new OrderStatusHistory
         {
-            Id = Guid.NewGuid(), OrderId = order.Id, Status = OrderStatuses.Confirmed,
-            Notes = "Order placed by customer", ChangedAt = now
-        });
+            Id = Guid.NewGuid(), OrderId = order.Id, Status = OrderStatuses.PendingApproval,
+            Notes = "Order submitted for staff approval", ChangedAt = now, ChangedBy = userId
+        };
+        order.StatusHistory.Add(submitted);
 
         db.Orders.Add(order);
+        OrderNotificationEvents.Add(db, order, submitted, "ORDER_RECEIVED", now, staff: true);
         await db.SaveChangesAsync(cancellationToken);
-        await upcomingMeals.InitializeAsync(order, cancellationToken);
+        // The order retains the full agreed schedule. Service days and default meals are
+        // initialized only after staff approval and any required prepayment.
         await transaction.CommitAsync(cancellationToken);
         logger.LogInformation("Order {OrderNumber} placed for customer profile {CustomerProfileId}",
             order.OrderNumber, order.CustomerProfileId);
         if (!notifications.TryEnqueue(order.Id))
-            logger.LogError("WhatsApp notification queue is full or stopping; order remains confirmed. OrderId={OrderId}", order.Id);
+            logger.LogWarning("Notification wake-up queue full or stopping; durable order events remain pending. OrderId={OrderId}", order.Id);
         return new(PlaceOrderStatus.Created, Map(order, mealTypes.ToDictionary(x => x.Id, x => x.Code)));
     }
 
@@ -304,7 +308,7 @@ public sealed class OrderService(
                 x.Id, x.OrderNumber, x.PlanName, x.PlanDurationName, x.StartDate, x.EndDate,
                 x.Status, x.PaymentStatus, x.TotalAmount, x.CurrencyCode.Trim(), x.PlacedAt, x.FulfillmentMethod,
                 x.TakeawayBranchId.HasValue ? new TakeawayBranchResponse(x.TakeawayBranchId.Value, x.TakeawayBranchName!, x.TakeawayBranchAddress) : null,
-                EntitlementCount(x, codes, false), EntitlementCount(x, codes, true))).ToArray();
+                EntitlementCount(x, codes, false), EntitlementCount(x, codes, true), MapReview(x))).ToArray();
         return new(items, pageNumber, pageSize, count);
     }
 
@@ -322,7 +326,7 @@ public sealed class OrderService(
         return Map(order, codes);
     }
 
-    private static PlaceOrderResponse Map(Order order, IReadOnlyDictionary<Guid, string> codes) => new(
+    internal static PlaceOrderResponse Map(Order order, IReadOnlyDictionary<Guid, string> codes) => new(
         order.Id,
         order.OrderNumber,
         order.Status,
@@ -344,7 +348,13 @@ public sealed class OrderService(
             order.CurrencyCode.Trim()),
         order.PlacedAt, order.FulfillmentMethod,
         order.TakeawayBranchId.HasValue ? new(order.TakeawayBranchId.Value, order.TakeawayBranchName!, order.TakeawayBranchAddress) : null,
-        EntitlementCount(order, codes, false), EntitlementCount(order, codes, true));
+        EntitlementCount(order, codes, false), EntitlementCount(order, codes, true), MapReview(order));
+
+    internal static OrderReviewResponse MapReview(Order order) => new(order.RowVersion,
+        order.ApprovedBy, order.ApprovedAt, order.RejectedBy, order.RejectedAt, order.RejectionReason,
+        order.HoldReason, order.RequiresPrepayment,
+        order.Status == OrderStatuses.Confirmed && order.RequiresPrepayment && order.PaymentStatus != PaymentStatuses.Paid,
+        OrderWorkflowPolicy.CanFulfill(order), order.FulfillmentBlockedReason);
 
     // Count the purchased quantity snapshot, independent of localized slot names and current prices.
     private static int? EntitlementCount(Order order, IReadOnlyDictionary<Guid, string> codes, bool snack) =>

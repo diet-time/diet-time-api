@@ -28,7 +28,7 @@ public sealed class AdminUpcomingMealsController(DietTimeDbContext db, IUpcoming
         var conflicts = existing.Any(d => d.OrderId != orderId) || dates.Any(d => existing.Any(e => e.ServiceSequence == d.ServiceSequence && e.ServiceDate != d.ServiceDate));
         return Ok(new { orderId, order.CustomerProfileId, order.OrderNumber, order.Status, order.StartDate, order.EndDate,
             TemplateId = template.Id, TemplateVersion = template.VersionNumber, QatarToday = today,
-            CanInitialize = order.Status is "CONFIRMED" or "ACTIVE" && order.EndDate >= today &&
+            CanInitialize = OrderWorkflowPolicy.CanFulfill(order) && order.EndDate >= today &&
                 dates.Length > 0 && order.DeliveryDays.All(d => d.DayOfWeek != 5) && !conflicts,
             HasLinkOrSequenceConflicts = conflicts, ExistingServiceDays = existing,
             MissingServiceDays = dates.Where(d => !existing.Any(e => e.ServiceDate == d.ServiceDate)).ToArray() });
@@ -43,7 +43,7 @@ public sealed class AdminUpcomingMealsController(DietTimeDbContext db, IUpcoming
         var order = await db.Orders.Include(o => o.Meals).Include(o => o.DeliveryDays)
             .SingleOrDefaultAsync(o => o.Id == orderId, ct);
         if (order is null) return NotFound();
-        if (order.Status is not ("CONFIRMED" or "ACTIVE") || order.EndDate < today)
+        if (!OrderWorkflowPolicy.CanFulfill(order) || order.EndDate < today)
             return Conflict(new ProblemDetails { Status = 409, Title = "Only active orders with upcoming deliveries can be initialized." });
         if (order.DeliveryDays.Any(d => d.DayOfWeek == 5))
             return Conflict(new ProblemDetails { Status = 409, Title = "This legacy order includes Friday. Operations must review its delivery schedule before initialization." });

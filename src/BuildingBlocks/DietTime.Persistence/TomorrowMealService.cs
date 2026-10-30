@@ -32,7 +32,7 @@ public sealed partial class UpcomingMealService
                 MenuTemplateId = order.MealPlanTemplateId, MenuTemplateVersion = template?.VersionNumber, EmptyReason = reason
             };
         TomorrowMenuResponse response;
-        if (order.Status is not ("CONFIRMED" or "ACTIVE"))
+        if (!OrderWorkflowPolicy.CanFulfill(order))
             response = Empty(order.Status is "PENDING" or "PENDING_ACTIVATION" or "PAUSED" ? "PENDING_ACTIVATION" : "INACTIVE_ORDER",
                 order.Status == "PAUSED" ? "Your plan is paused. Meal selection will resume when the plan is active."
                 : "Your order exists, but it is not active for meal selection yet.");
@@ -84,6 +84,7 @@ public sealed partial class UpcomingMealService
         string language, ConfirmMealsRequest request, CancellationToken ct)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM public.orders WHERE id = {orderId} FOR SHARE", ct);
         var order = await OwnedOrderAsync(orderId, userId, ct) ?? throw Missing();
         var day = await LockDayAsync(dayId, orderId, ct);
         order = await OwnedOrderAsync(orderId, userId, ct) ?? throw Missing();
@@ -163,10 +164,12 @@ public sealed partial class UpcomingMealService
     private async Task FinalizeDayAsync(Guid dayId, Guid orderId, CancellationToken ct)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM public.orders WHERE id = {orderId} FOR SHARE", ct);
         var day = await LockDayAsync(dayId, orderId, ct);
         if (day.SelectionLocked || day.SelectionStatus == "LOCKED" || day.CustomerConfirmedAt != null || day.AutoFinalizedAt != null ||
             clock.GetUtcNow() < SubscriptionMenuRules.TomorrowCutoff(day.ServiceDate)) return;
         var order = await db.Orders.AsNoTracking().SingleAsync(o => o.Id == orderId, ct);
+        if (!OrderWorkflowPolicy.CanFulfill(order)) return;
         var chosen = new List<MealPlanSlotOption>();
         var valid = Active(order, day) && day.ServiceDate.DayOfWeek != DayOfWeek.Friday &&
             day.MealCount is >= 1 and <= 5 && day.SnackCount is >= 0;
@@ -271,7 +274,7 @@ public sealed partial class UpcomingMealService
     }
 
     private static bool Active(Order order, SubscriptionServiceDay day) =>
-        order.Status is "CONFIRMED" or "ACTIVE" && day.Status is "PLANNED" or "CONFIRMED" &&
+        OrderWorkflowPolicy.CanFulfill(order) && day.Status is "PLANNED" or "CONFIRMED" &&
         order.StartDate <= day.ServiceDate && order.EndDate >= day.ServiceDate;
 
     private async Task<TomorrowMenuResponse> TomorrowResponseAsync(SubscriptionServiceDay day, Order order, string language, CancellationToken ct)

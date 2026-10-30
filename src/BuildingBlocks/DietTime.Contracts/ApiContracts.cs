@@ -417,7 +417,7 @@ public sealed record PlaceOrderResponse(
     DateTimeOffset PlacedAt,
     string FulfillmentMethod = FulfillmentMethods.HomeDelivery,
     TakeawayBranchResponse? TakeawayBranch = null,
-    int? MealCount = null, int? SnackCount = null);
+    int? MealCount = null, int? SnackCount = null, OrderReviewResponse? Review = null);
 public sealed record CustomerOrderSummaryResponse(
     Guid Id,
     string OrderNumber,
@@ -432,7 +432,7 @@ public sealed record CustomerOrderSummaryResponse(
     DateTimeOffset PlacedAt,
     string FulfillmentMethod = FulfillmentMethods.HomeDelivery,
     TakeawayBranchResponse? TakeawayBranch = null,
-    int? MealCount = null, int? SnackCount = null);
+    int? MealCount = null, int? SnackCount = null, OrderReviewResponse? Review = null);
 public sealed record CustomerOrdersResponse(
     IReadOnlyList<CustomerOrderSummaryResponse> Items,
     int PageNumber,

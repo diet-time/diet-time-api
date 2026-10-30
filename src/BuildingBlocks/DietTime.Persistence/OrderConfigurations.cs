@@ -9,6 +9,10 @@ public sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
     public void Configure(EntityTypeBuilder<Order> e)
     {
         e.ToTable("orders", "public");
+        e.Property(x => x.RequiresPrepayment).HasDefaultValue(false);
+        e.Property(x => x.FulfillmentBlockedReason).HasMaxLength(500);
+        e.Property(x => x.RejectionReason).HasMaxLength(500);
+        e.Property(x => x.HoldReason).HasMaxLength(500);
         e.Property(x => x.TakeawayBranchId).HasColumnName("takeaway_branch_id");
         e.Property(x => x.TakeawayBranchName).HasColumnName("takeaway_branch_name").HasMaxLength(200);
         e.Property(x => x.TakeawayBranchAddress).HasColumnName("takeaway_branch_address").HasMaxLength(500);
@@ -47,7 +51,7 @@ public sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
         e.Property(x => x.DeliveryTimeSlotName).HasColumnName("delivery_time_slot_name").HasMaxLength(100).IsRequired();
         e.Property(x => x.DeliveryStartTime).HasColumnName("delivery_start_time").HasColumnType("time without time zone");
         e.Property(x => x.DeliveryEndTime).HasColumnName("delivery_end_time").HasColumnType("time without time zone");
-        e.Property(x => x.Status).HasColumnName("status").HasMaxLength(30).IsRequired();
+        e.Property(x => x.Status).HasColumnName("status").HasMaxLength(30).HasDefaultValue(OrderStatuses.PendingApproval).IsRequired();
         e.Property(x => x.PaymentStatus).HasColumnName("payment_status").HasMaxLength(30).IsRequired();
         e.Property(x => x.PlacedAt).HasColumnName("placed_at");
         e.Property(x => x.IdempotencyKey).HasColumnName("idempotency_key").HasMaxLength(100).IsRequired();
@@ -107,6 +111,9 @@ public sealed class OrderStatusHistoryConfiguration : IEntityTypeConfiguration<O
         e.Property(x => x.Status).HasColumnName("status").HasMaxLength(30).IsRequired();
         e.Property(x => x.Notes).HasColumnName("notes").HasMaxLength(500);
         e.Property(x => x.ChangedAt).HasColumnName("changed_at");
+        e.Property(x => x.PreviousStatus).HasMaxLength(30);
+        e.Property(x => x.PreviousPaymentStatus).HasMaxLength(30);
+        e.Property(x => x.PaymentStatus).HasMaxLength(30);
         e.HasIndex(x => new { x.OrderId, x.ChangedAt }).HasDatabaseName("ix_order_status_history_order_changed");
         e.HasOne(x => x.Order).WithMany(x => x.StatusHistory).HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Cascade);
     }

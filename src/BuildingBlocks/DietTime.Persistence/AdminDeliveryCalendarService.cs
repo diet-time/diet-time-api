@@ -19,6 +19,7 @@ public sealed class AdminDeliveryCalendarService(
         CancellationToken cancellationToken)
     {
         var query = db.Orders.AsNoTracking()
+            .Where(OrderWorkflowPolicy.FulfillmentFilter)
             .Where(order => order.StartDate <= endDate && order.EndDate >= startDate);
 
         if (planId.HasValue)
@@ -101,6 +102,7 @@ public sealed class AdminDeliveryCalendarService(
         if (date.DayOfWeek == DayOfWeek.Friday) return DeliveryPreparationAggregation.Build(date, [], []);
         var apiWeekday = OperationsDashboardScheduling.ToApiWeekday(date.DayOfWeek);
         var scheduledOrders = await db.Orders.AsNoTracking()
+            .Where(OrderWorkflowPolicy.FulfillmentFilter)
             .Where(order => (order.Status == OrderStatuses.Confirmed || order.Status == "ACTIVE") &&
                 order.StartDate <= date && order.EndDate >= date &&
                 order.DeliveryDays.Any(day => day.DayOfWeek == apiWeekday) &&

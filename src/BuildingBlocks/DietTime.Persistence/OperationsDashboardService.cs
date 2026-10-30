@@ -40,6 +40,7 @@ public sealed class OperationsDashboardService(
         // One compact read model supplies workload, next-delivery, and attention metrics.
         // Includes are split into a fixed three queries, avoiding a cartesian product and N+1 reads.
         var orders = await db.Orders.AsNoTracking()
+            .Where(OrderWorkflowPolicy.FulfillmentFilter)
             .Where(order => activeStatuses.Contains(order.Status) && order.EndDate >= date)
             .Include(order => order.DeliveryDays)
             .Include(order => order.Meals)
@@ -133,7 +134,7 @@ public sealed class OperationsDashboardService(
     {
         var activeStatuses = NormalizeStatuses(options.ActiveOrderStatuses, [OrderStatuses.Confirmed]);
         var weekday = OperationsDashboardScheduling.ToApiWeekday(date.DayOfWeek);
-        var query = db.Orders.AsNoTracking().Where(order =>
+        var query = db.Orders.AsNoTracking().Where(OrderWorkflowPolicy.FulfillmentFilter).Where(order =>
             order.FulfillmentMethod == FulfillmentMethods.HomeDelivery &&
             activeStatuses.Contains(order.Status) && order.StartDate <= date && order.EndDate >= date &&
             order.DeliveryDays.Any(day => day.DayOfWeek == weekday));

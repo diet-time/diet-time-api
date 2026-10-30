@@ -527,6 +527,7 @@ public sealed partial class UpcomingMealServiceTests : IAsyncLifetime
         db.Add(price);
         var dates = SubscriptionMenuRules.ServiceDates(new(2026, 10, 27), new(2026, 12, 1), new HashSet<int> { 1, 2, 3, 4, 6, 7 }).Take(12).ToArray();
         order = new Order { Id = Guid.NewGuid(), OrderNumber = "ORD-TEST", IdempotencyKey = Guid.NewGuid().ToString(),
+            Status = OrderStatuses.Confirmed,
             CustomerProfileId = profile.Id, MealPlanTemplateId = plan.Id, MealPlanPriceId = price.Id,
             StartDate = dates[0], EndDate = dates[^1], PlanName = "Complete Balance", DeliveryStartTime = new(9, 0), CreatedAt = now, UpdatedAt = now };
         foreach (var weekday in new[] { 1, 2, 3, 4, 6, 7 })

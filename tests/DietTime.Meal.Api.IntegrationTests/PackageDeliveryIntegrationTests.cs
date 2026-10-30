@@ -95,7 +95,16 @@ public sealed partial class UpcomingMealServiceTests
         {
             using var message = new HttpRequestMessage(HttpMethod.Post, "/api/v1/orders") { Content = JsonContent.Create(request) };
             message.Headers.Add("Idempotency-Key", key ?? Guid.NewGuid().ToString());
-            return await client.SendAsync(message);
+            var response = await client.SendAsync(message);
+            if (response.StatusCode == HttpStatusCode.Created && !response.Headers.Contains("Idempotent-Replayed"))
+            {
+                // This test exercises fulfillment after staff acceptance; placement itself remains pending.
+                using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+                var placedId = json.RootElement.GetProperty("id").GetGuid();
+                var approval = await client.PostAsJsonAsync($"/api/admin/orders/{placedId}/approve", new OrderReviewRequest(1));
+                Assert.Equal(HttpStatusCode.OK, approval.StatusCode);
+            }
+            return response;
         }
 
         var delivery = await Submit(body);

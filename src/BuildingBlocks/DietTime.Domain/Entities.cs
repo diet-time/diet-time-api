@@ -240,16 +240,35 @@ public sealed class DeliveryTimeSlot : Entity
 
 public static class OrderStatuses
 {
+    public const string PendingApproval = "PENDING_APPROVAL";
+    public const string OnHold = "ON_HOLD";
     public const string Confirmed = "CONFIRMED";
+    public const string Rejected = "REJECTED";
+    public const string Cancelled = "CANCELLED";
+    public const string Active = "ACTIVE";
+    public const string Completed = "COMPLETED";
 }
 
 public static class PaymentStatuses
 {
     public const string Pending = "PENDING";
+    public const string Unpaid = "UNPAID";
+    public const string Paid = "PAID";
+    public const string Failed = "FAILED";
+    public const string RefundPending = "REFUND_PENDING";
+    public const string Refunded = "REFUNDED";
 }
 
 public sealed class Order : Entity
 {
+    public bool RequiresPrepayment { get; set; }
+    public string? FulfillmentBlockedReason { get; set; }
+    public Guid? ApprovedBy { get; set; }
+    public DateTimeOffset? ApprovedAt { get; set; }
+    public Guid? RejectedBy { get; set; }
+    public DateTimeOffset? RejectedAt { get; set; }
+    public string? RejectionReason { get; set; }
+    public string? HoldReason { get; set; }
     public Guid? TakeawayBranchId { get; set; }
     public string? TakeawayBranchName { get; set; }
     public string? TakeawayBranchAddress { get; set; }
@@ -285,7 +304,7 @@ public sealed class Order : Entity
     public string DeliveryTimeSlotName { get; set; } = "";
     public TimeOnly DeliveryStartTime { get; set; }
     public TimeOnly DeliveryEndTime { get; set; }
-    public string Status { get; set; } = OrderStatuses.Confirmed;
+    public string Status { get; set; } = OrderStatuses.PendingApproval;
     public string PaymentStatus { get; set; } = PaymentStatuses.Pending;
     public DateTimeOffset PlacedAt { get; set; }
     public string IdempotencyKey { get; set; } = "";
@@ -317,6 +336,10 @@ public sealed class OrderDeliveryDay : Entity
 
 public sealed class OrderStatusHistory : Entity
 {
+    public string? PreviousStatus { get; set; }
+    public Guid? ChangedBy { get; set; }
+    public string? PreviousPaymentStatus { get; set; }
+    public string? PaymentStatus { get; set; }
     public Guid OrderId { get; set; }
     public Order Order { get; set; } = null!;
     public string Status { get; set; } = "";

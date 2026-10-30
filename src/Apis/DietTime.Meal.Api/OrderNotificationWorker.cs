@@ -3,7 +3,7 @@ using DietTime.Application;
 
 namespace DietTime.Meal.Api;
 
-/// <summary>Best-effort notifications, isolated from checkout and request-scoped services.</summary>
+/// <summary>Wakes durable outbox processing without blocking checkout; polls also recover missed wake-ups.</summary>
 public sealed class OrderNotificationWorker(
     IServiceScopeFactory scopes,
     ILogger<OrderNotificationWorker> logger) : BackgroundService, IOrderNotificationQueue
@@ -22,15 +22,22 @@ public sealed class OrderNotificationWorker(
     {
         try
         {
-            await foreach (var orderId in pending.Reader.ReadAllAsync(stoppingToken))
+            while (!stoppingToken.IsCancellationRequested)
             {
+                using var wake = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                wake.CancelAfter(TimeSpan.FromSeconds(5));
+                Guid orderId = Guid.Empty;
+                try { orderId = await pending.Reader.ReadAsync(wake.Token); }
+                catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested) { }
+                catch (ChannelClosedException) { return; }
                 try
                 {
                     using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                     timeout.CancelAfter(TimeSpan.FromSeconds(60));
                     await using var scope = scopes.CreateAsyncScope();
-                    await scope.ServiceProvider.GetRequiredService<IOrderNotificationSender>()
-                        .SendAsync(orderId, timeout.Token);
+                    var sender = scope.ServiceProvider.GetRequiredService<IOrderNotificationSender>();
+                    if (orderId == Guid.Empty) await sender.SendPendingAsync(timeout.Token);
+                    else await sender.SendAsync(orderId, timeout.Token);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
                 catch (Exception error)

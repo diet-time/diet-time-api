@@ -39,6 +39,8 @@ public sealed partial class UpcomingMealServiceTests
             var purchase = await client.SendAsync(message);
             Assert.True(purchase.StatusCode == HttpStatusCode.Created, await purchase.Content.ReadAsStringAsync());
             var id = (await purchase.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+            Assert.False(await db.Set<SubscriptionServiceDay>().AnyAsync(d => d.OrderId == id));
+            Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/api/admin/orders/{id}/approve", new OrderReviewRequest(1))).StatusCode);
             var days = await db.Set<SubscriptionServiceDay>().AsNoTracking().Where(d => d.OrderId == id).ToArrayAsync();
             Assert.Equal(12, days.Length);
             Assert.All(days, d => { Assert.Equal(count, d.MealCount); Assert.Equal(1, d.SnackCount); Assert.False(d.SelectionLocked); });
@@ -112,6 +114,8 @@ public sealed partial class UpcomingMealServiceTests
         var result = await client.SendAsync(message);
         Assert.True(result.StatusCode == HttpStatusCode.Created, await result.Content.ReadAsStringAsync());
         var id = (await result.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        Assert.False(await db.Set<SubscriptionServiceDay>().AnyAsync(d => d.OrderId == id));
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/api/admin/orders/{id}/approve", new OrderReviewRequest(1))).StatusCode);
         var days = await db.Set<SubscriptionServiceDay>().AsNoTracking().Include(d => d.Selections).Where(d => d.OrderId == id).ToArrayAsync();
         Assert.Equal(12, days.Length);
         Assert.All(days, d => { Assert.Equal(5, d.MealCount); Assert.Equal("PENDING", d.SelectionStatus); Assert.NotNull(d.ReviewReason); Assert.False(d.SelectionLocked); Assert.Null(d.AutoFinalizedAt); Assert.Null(d.CustomerConfirmedAt); Assert.Empty(d.Selections); });

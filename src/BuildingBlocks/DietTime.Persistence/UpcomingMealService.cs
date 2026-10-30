@@ -21,6 +21,7 @@ public sealed partial class UpcomingMealService(
 {
     public async Task InitializeAsync(Order order, CancellationToken ct)
     {
+        if (!OrderWorkflowPolicy.CanFulfill(order)) throw new UpcomingMealException(409, "order_not_approved", "Staff approval and payment eligibility are required before initializing meals.");
         _ = policy; // Retained constructor contract; the new business cutoff is fixed at 21:00 Qatar.
         await using var transaction = db.Database.CurrentTransaction is null
             ? await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct) : null;
@@ -286,7 +287,7 @@ public sealed partial class UpcomingMealService(
         if (!SubscriptionMenuRules.IsSelectionOpen(day.ServiceDate, clock.GetUtcNow()))
             return "Meal selection is available only for tomorrow before 9:00 PM Qatar time.";
         if (day.Status == "DELIVERED") return "This delivery has been completed.";
-        if (order.Status is not ("CONFIRMED" or "ACTIVE")) return "This subscription is not active.";
+        if (!OrderWorkflowPolicy.CanFulfill(order)) return "This order is awaiting staff confirmation or payment and is unavailable for meal selection.";
         if (day.SelectionLocked || day.SelectionStatus == "LOCKED" || day.Status is not ("PLANNED" or "CONFIRMED"))
             return "Your meals are locked for kitchen preparation.";
         if (day.ReviewReason is not null) return day.ReviewReason;

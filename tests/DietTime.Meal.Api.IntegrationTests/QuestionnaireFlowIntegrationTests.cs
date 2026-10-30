@@ -66,10 +66,12 @@ public sealed partial class UpcomingMealServiceTests
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/customer/meal-plans/BALANCE/purchase-options")).StatusCode);
         client.DefaultRequestHeaders.Add("X-Development-User-Id", userId.ToString());
         var price = await db.MealPlanPrices.SingleAsync();
+        var branch = new DietTime.Domain.TakeawayBranch { Id = Guid.NewGuid(), Name = "Test branch", IsActive = true };
+        db.Add(branch); await db.SaveChangesAsync();
         using var message = new HttpRequestMessage(HttpMethod.Post, "/api/v1/orders") {
             Content = JsonContent.Create(new {
                 customerProfileId = profile.Id, mealPlanTemplateId = price.MealPlanTemplateId,
-                mealPlanPriceId = price.Id, fulfillmentMethod = "TAKEAWAY",
+                mealPlanPriceId = price.Id, fulfillmentMethod = "TAKEAWAY", takeawayBranchId = branch.Id,
                 startDate = "2026-11-01", deliveryDays = new[] { 1, 2, 3, 4, 6, 7 }
             })
         };

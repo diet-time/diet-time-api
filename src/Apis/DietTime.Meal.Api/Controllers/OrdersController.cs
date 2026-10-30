@@ -3,6 +3,7 @@ using System.Security.Claims;
 using Asp.Versioning;
 using DietTime.Application;
 using DietTime.Contracts;
+using DietTime.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -12,8 +13,15 @@ namespace DietTime.Meal.Api.Controllers;
 [ApiVersion(1)]
 [Authorize]
 [Route("api/v{version:apiVersion}/orders")]
-public sealed class OrdersController(IOrderService orders) : ControllerBase
+public sealed class OrdersController(IOrderService orders, StaffOrderService workflow) : ControllerBase
 {
+    [HttpPost("{orderId:guid}/cancel")]
+    public async Task<IActionResult> Cancel(Guid orderId, OrderReviewRequest request, CancellationToken ct)
+    {
+        if (!TryGetUserId(out var userId)) return Unauthorized();
+        try { return Ok((await workflow.ChangeAsync(orderId, "cancel", request.ExpectedRowVersion, request.Reason, userId, ct, customerUserId: userId)).Order); }
+        catch (OrderReviewException error) { return ProblemResponse(error.Status, error.Code, error.Message); }
+    }
     /// <summary>Validates and places a meal-plan order atomically.</summary>
     /// <remarks>
     /// Send a stable <c>Idempotency-Key</c> header for a checkout attempt. Reusing it returns

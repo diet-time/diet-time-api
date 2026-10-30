@@ -50,6 +50,7 @@ public sealed class DeliveryEligibilityTests
         Assert.True(new MealPlanPricePackage().IsDeliveryEnabled);
         Assert.True(new UpsertMealPlanPricePackageRequest("TEST", "Test", "Test", 9, 0, true).IsDeliveryEnabled);
         Assert.Equal(FulfillmentMethods.HomeDelivery, new Order().FulfillmentMethod);
+        Assert.Equal(OrderStatuses.PendingApproval, new Order().Status);
         Assert.Equal(FulfillmentMethods.HomeDelivery, Request().FulfillmentMethod);
     }
 
