@@ -1,5 +1,15 @@
 namespace DietTime.Application;
 
+public interface IOrderNotificationQueue
+{
+    bool TryEnqueue(Guid orderId);
+}
+
+public interface IOrderNotificationSender
+{
+    Task SendAsync(Guid orderId, CancellationToken cancellationToken);
+}
+
 public sealed class WhatsAppSendResult
 {
     public bool Success { get; init; }

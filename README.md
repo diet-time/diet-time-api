@@ -126,9 +126,16 @@ TwilioWhatsApp__OperationsNumber=+97474452435
 TwilioWhatsApp__NewOrderContentSid=<approved new-order Content SID beginning with HX>
 ```
 
-New orders send the configured Twilio content template to `OperationsNumber`
-only after the order transaction commits. Provider failures are logged without
-failing checkout, and idempotent order replays do not send another message.
+New orders enqueue the configured Twilio content template for `OperationsNumber`
+only after the order transaction commits. The API returns the confirmed order without
+waiting for Twilio, so provider delays, retries and failures cannot block checkout or
+the dashboard refresh. A background worker uses its own dependency-injection scope
+and a 60-second send deadline. Failures are logged, and idempotent order replays do
+not enqueue another message.
+
+Notifications remain best effort: the bounded queue holds up to 1,024 pending order IDs
+in memory, and pending messages do not survive an API restart. A full or stopping queue
+logs an error without changing the confirmed order. No database migration is required.
 
 Example request body:
 

@@ -19,7 +19,7 @@ public sealed class OrderService(
     DietTimeDbContext db,
     TimeProvider clock,
     IOptions<OrderOptions> options,
-    ITwilioWhatsAppService whatsApp,
+    IOrderNotificationQueue notifications,
     ILogger<OrderService> logger,
     IUpcomingMealService upcomingMeals) : IOrderService
 {
@@ -264,7 +264,8 @@ public sealed class OrderService(
         await transaction.CommitAsync(cancellationToken);
         logger.LogInformation("Order {OrderNumber} placed for customer profile {CustomerProfileId}",
             order.OrderNumber, order.CustomerProfileId);
-        await SendWhatsAppNotificationAsync(order.Id, cancellationToken);
+        if (!notifications.TryEnqueue(order.Id))
+            logger.LogError("WhatsApp notification queue is full or stopping; order remains confirmed. OrderId={OrderId}", order.Id);
         return new(PlaceOrderStatus.Created, Map(order));
     }
 
@@ -343,63 +344,6 @@ public sealed class OrderService(
         MenuWeekday.Sunday => 7, _ => throw new ArgumentOutOfRangeException(nameof(weekday))
     };
 
-    private async Task SendWhatsAppNotificationAsync(
-        Guid orderId,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            logger.LogInformation("Dispatching WhatsApp new-order notification after commit. OrderId={OrderId}", orderId);
-            var order = await db.Orders.AsNoTracking()
-                .Include(x => x.DeliveryDays)
-                .SingleAsync(x => x.Id == orderId, cancellationToken);
-            var customer = await (
-                from profile in db.CustomerProfiles.AsNoTracking()
-                join user in db.Users.AsNoTracking() on profile.UserId equals user.Id
-                where profile.Id == order.CustomerProfileId
-                select new { profile.PreferredName, user.UserName, user.PhoneNumber })
-                .SingleAsync(cancellationToken);
-            var mealsPerDay = await db.MealPlanPrices.AsNoTracking()
-                .Where(x => x.Id == order.MealPlanPriceId)
-                .Select(x => x.MealsPerDay)
-                .SingleAsync(cancellationToken);
-
-            var notification = new NewOrderWhatsAppNotification(
-                order.Id,
-                order.OrderNumber,
-                FirstNonEmpty(customer.PreferredName, customer.UserName),
-                customer.PhoneNumber?.Trim() ?? string.Empty,
-                order.PlanName,
-                order.PlanDurationName,
-                mealsPerDay,
-                order.StartDate,
-                FormatDeliveryDays(order),
-                FormatDeliveryAddress(order),
-                order.TotalAmount,
-                order.CurrencyCode,
-                order.Status);
-            var result = await whatsApp.SendNewOrderNotificationAsync(
-                notification, cancellationToken);
-
-            if (result.Success)
-                logger.LogInformation(
-                    "WhatsApp new-order notification accepted by Twilio. OrderId={OrderId} OrderNumber={OrderNumber} WhatsAppMessageId={MessageId} ProviderStatus={ProviderStatus}",
-                    order.Id, order.OrderNumber, result.MessageId, result.Status ?? "unknown");
-            else if (result.ErrorCode == "twilio_whatsapp_disabled")
-                logger.LogInformation("WhatsApp new-order notification skipped. OrderId={OrderId} Reason=twilio_whatsapp_disabled", order.Id);
-            else
-                logger.LogError(
-                    "Failed to send WhatsApp new-order notification. OrderId={OrderId} OrderNumber={OrderNumber} ErrorCode={ErrorCode}",
-                    order.Id, order.OrderNumber, result.ErrorCode);
-        }
-        catch (Exception exception)
-        {
-            logger.LogError(exception,
-                "Failed to send WhatsApp new-order notification after commit. OrderId={OrderId}",
-                orderId);
-        }
-    }
-
     internal static string FormatDeliveryDays(Order order)
     {
         var configured = order.DeliveryDays.Select(x => x.DayOfWeek).ToHashSet();
@@ -442,9 +386,6 @@ public sealed class OrderService(
 
     private static string? Labeled(string label, string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : $"{label} {value.Trim()}";
-
-    private static string FirstNonEmpty(params string?[] values) =>
-        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
 
     private static string LocalizedName(IEnumerable<NameRow> names, string language, string fallback)
     {
