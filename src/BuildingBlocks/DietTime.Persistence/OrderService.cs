@@ -266,7 +266,7 @@ public sealed class OrderService(
             order.OrderNumber, order.CustomerProfileId);
         if (!notifications.TryEnqueue(order.Id))
             logger.LogError("WhatsApp notification queue is full or stopping; order remains confirmed. OrderId={OrderId}", order.Id);
-        return new(PlaceOrderStatus.Created, Map(order));
+        return new(PlaceOrderStatus.Created, Map(order, mealTypes.ToDictionary(x => x.Id, x => x.Code)));
     }
 
     public Task<PlaceOrderResponse?> GetAsync(
@@ -294,27 +294,35 @@ public sealed class OrderService(
             query = query.Where(x => x.Status == normalized);
         }
         var count = await query.CountAsync(cancellationToken);
-        var items = await query.OrderByDescending(x => x.PlacedAt).ThenByDescending(x => x.Id)
+        var page = await query.Include(x => x.Meals).OrderByDescending(x => x.PlacedAt).ThenByDescending(x => x.Id)
             .Skip((pageNumber - 1) * pageSize).Take(pageSize)
-            .Select(x => new CustomerOrderSummaryResponse(
+            .ToListAsync(cancellationToken);
+        var typeIds = page.SelectMany(x => x.Meals).Select(x => x.MealTypeId).Distinct().ToArray();
+        var codes = await db.MealTypes.AsNoTracking().Where(x => typeIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, x => x.Code, cancellationToken);
+        var items = page.Select(x => new CustomerOrderSummaryResponse(
                 x.Id, x.OrderNumber, x.PlanName, x.PlanDurationName, x.StartDate, x.EndDate,
                 x.Status, x.PaymentStatus, x.TotalAmount, x.CurrencyCode.Trim(), x.PlacedAt, x.FulfillmentMethod,
-                x.TakeawayBranchId.HasValue ? new TakeawayBranchResponse(x.TakeawayBranchId.Value, x.TakeawayBranchName!, x.TakeawayBranchAddress) : null))
-            .ToListAsync(cancellationToken);
+                x.TakeawayBranchId.HasValue ? new TakeawayBranchResponse(x.TakeawayBranchId.Value, x.TakeawayBranchName!, x.TakeawayBranchAddress) : null,
+                EntitlementCount(x, codes, false), EntitlementCount(x, codes, true))).ToArray();
         return new(items, pageNumber, pageSize, count);
     }
 
-    private static async Task<PlaceOrderResponse?> LoadOrderAsync(
+    private async Task<PlaceOrderResponse?> LoadOrderAsync(
         IQueryable<Order> query, CancellationToken cancellationToken)
     {
         var order = await query.AsNoTracking()
             .Include(x => x.Meals)
             .Include(x => x.DeliveryDays)
             .SingleOrDefaultAsync(cancellationToken);
-        return order is null ? null : Map(order);
+        if (order is null) return null;
+        var typeIds = order.Meals.Select(x => x.MealTypeId).Distinct().ToArray();
+        var codes = await db.MealTypes.AsNoTracking().Where(x => typeIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, x => x.Code, cancellationToken);
+        return Map(order, codes);
     }
 
-    private static PlaceOrderResponse Map(Order order) => new(
+    private static PlaceOrderResponse Map(Order order, IReadOnlyDictionary<Guid, string> codes) => new(
         order.Id,
         order.OrderNumber,
         order.Status,
@@ -335,7 +343,13 @@ public sealed class OrderService(
         new(order.Subtotal, order.DiscountAmount, order.DeliveryCharge, order.TotalAmount,
             order.CurrencyCode.Trim()),
         order.PlacedAt, order.FulfillmentMethod,
-        order.TakeawayBranchId.HasValue ? new(order.TakeawayBranchId.Value, order.TakeawayBranchName!, order.TakeawayBranchAddress) : null);
+        order.TakeawayBranchId.HasValue ? new(order.TakeawayBranchId.Value, order.TakeawayBranchName!, order.TakeawayBranchAddress) : null,
+        EntitlementCount(order, codes, false), EntitlementCount(order, codes, true));
+
+    // Count the purchased quantity snapshot, independent of localized slot names and current prices.
+    private static int? EntitlementCount(Order order, IReadOnlyDictionary<Guid, string> codes, bool snack) =>
+        order.Meals.Any(x => !codes.ContainsKey(x.MealTypeId)) ? null : order.Meals
+            .Where(x => MealTypeClassification.IsSnack(codes[x.MealTypeId]) == snack).Sum(x => x.Quantity);
 
     private static int ToApiWeekday(MenuWeekday weekday) => weekday switch
     {

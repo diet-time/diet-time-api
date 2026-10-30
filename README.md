@@ -213,6 +213,18 @@ scheduling conflict can be identified, so `deliveryConflicts` is returned as `0`
 
 ## Package delivery and fulfillment
 
+Customer order detail and list responses include nullable `mealCount` and `snackCount`.
+These aggregate purchased `order_meals` quantities using meal-type codes, independent
+of localized names and subsequent price edits. Existing meal rows and identifiers remain
+unchanged; no database migration is needed for these response fields.
+
+The customer UI uses aggregate meal/snack labels, separate calendar date/count indicators,
+and the existing inline checkout calendar and branch selection. Meal-plan selection omits
+daily prices and calorie estimates; package prices and discounts remain backend-driven.
+The wellness BMI scale uses proportional adult category segments and a shared numeric
+domain for its marker. Youth profiles show an age/sex-specific assessment note rather
+than adult categories; no pediatric percentiles or missing nutrition targets are invented.
+
 Delivery availability belongs to the existing duration master, `public.meal_plan_price_packages`,
 not the meal/snack quantity options. The duration Add/Edit form exposes **Enable Delivery**.
 New packages default to enabled. Customer purchase options and duration APIs return `isDeliveryEnabled`.

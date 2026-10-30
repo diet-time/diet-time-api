@@ -102,6 +102,8 @@ public sealed partial class UpcomingMealServiceTests
         Assert.Equal(HttpStatusCode.Created, delivery.StatusCode);
         var deliveryJson = await delivery.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("HOME_DELIVERY", deliveryJson.GetProperty("fulfillmentMethod").GetString());
+        Assert.Equal(price.MealsPerDay, deliveryJson.GetProperty("mealCount").GetInt32());
+        Assert.Equal(price.SnacksPerDay, deliveryJson.GetProperty("snackCount").GetInt32());
         Assert.False(deliveryJson.TryGetProperty("takeawayBranch", out var deliveryBranch) && deliveryBranch.ValueKind != JsonValueKind.Null);
         var deliveryId = deliveryJson.GetProperty("id").GetGuid();
 
@@ -137,6 +139,8 @@ public sealed partial class UpcomingMealServiceTests
         var takeawayJson = await takeaway.Content.ReadFromJsonAsync<JsonElement>();
         var takeawayId = takeawayJson.GetProperty("id").GetGuid();
         Assert.Equal("TAKEAWAY", takeawayJson.GetProperty("fulfillmentMethod").GetString());
+        Assert.Equal(price.MealsPerDay, takeawayJson.GetProperty("mealCount").GetInt32());
+        Assert.Equal(price.SnacksPerDay, takeawayJson.GetProperty("snackCount").GetInt32());
         Assert.Equal(branch.Id, takeawayJson.GetProperty("takeawayBranch").GetProperty("id").GetGuid());
         Assert.Equal(branch.Name, takeawayJson.GetProperty("takeawayBranch").GetProperty("name").GetString());
         var savedDates = takeawayJson.GetProperty("delivery").GetProperty("serviceDates").EnumerateArray().Select(x => DateOnly.Parse(x.GetString()!)).ToArray();
