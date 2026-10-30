@@ -9,8 +9,26 @@ public sealed class WhatsAppSendResult
     public string? ErrorMessage { get; init; }
 }
 
+public sealed class WhatsAppMessageStatusResult
+{
+    public bool Success { get; init; }
+    public string? MessageId { get; init; }
+    public string? Status { get; init; }
+    public string? ErrorCode { get; init; }
+    public string? ErrorMessage { get; init; }
+    public int? ProviderHttpStatusCode { get; init; }
+    public bool DeliveryConfirmed => Status is "delivered" or "read";
+}
+
+public static class TwilioMessageSid
+{
+    public static bool IsValid(string? sid) => System.Text.RegularExpressions.Regex.IsMatch(
+        sid ?? "", @"\A(?:SM|MM)[0-9a-fA-F]{32}\z");
+}
+
 public interface ITwilioWhatsAppService
 {
+    Task<WhatsAppMessageStatusResult> GetMessageStatusAsync(string messageSid, CancellationToken cancellationToken = default);
     Task<WhatsAppSendResult> SendNewOrderNotificationAsync(
         NewOrderWhatsAppNotification notification,
         CancellationToken cancellationToken = default);

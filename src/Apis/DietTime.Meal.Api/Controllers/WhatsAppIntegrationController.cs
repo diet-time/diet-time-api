@@ -34,6 +34,24 @@ public sealed class WhatsAppIntegrationController(
         });
     }
 
+    /// <summary>Fetches delivery status without sending another message.</summary>
+    [HttpGet("twilio/messages/{messageSid}")]
+    public async Task<IActionResult> MessageStatus(string messageSid, CancellationToken cancellationToken)
+    {
+        if (!TwilioMessageSid.IsValid(messageSid))
+        {
+            ModelState.AddModelError(nameof(messageSid), "Use SM or MM followed by 32 hexadecimal characters.");
+            return ValidationProblem(ModelState);
+        }
+        var result = await twilioWhatsApp.GetMessageStatusAsync(messageSid, cancellationToken);
+        if (result.Success)
+            return Ok(new { result.MessageId, result.Status, result.DeliveryConfirmed, result.ErrorCode, result.ErrorMessage });
+        var status = result.ProviderHttpStatusCode == 404 ? 404
+            : result.ErrorCode == "missing_credentials" ? 503 : 502;
+        return StatusCode(status, new ProblemDetails { Status = status, Title = "Twilio message status lookup failed",
+            Detail = result.ErrorMessage, Extensions = { ["providerCode"] = result.ErrorCode } });
+    }
+
     [HttpPost("twilio/messages")]
     [ProducesResponseType(typeof(SendWhatsAppTemplateResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]

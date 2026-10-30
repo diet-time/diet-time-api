@@ -88,6 +88,19 @@ public sealed class OrderService(
         if (!await PurchasablePlanPrices.Query(db, now).AnyAsync(item => item.Id == price.Id, cancellationToken))
             return Fail(PlaceOrderStatus.PriceUnavailable, "The selected plan, package or duration is no longer purchasable.");
 
+        if (!FulfillmentMethods.IsValid(request.FulfillmentMethod))
+            return Fail(PlaceOrderStatus.InvalidFulfillmentMethod, "Choose TAKEAWAY or HOME_DELIVERY.");
+        // Keep eligibility stable until the new order snapshot is committed.
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT code FROM public.meal_plan_price_packages WHERE code = {price.PackageCode} FOR SHARE", cancellationToken);
+        var duration = await db.MealPlanPricePackages.AsNoTracking().SingleAsync(
+            x => x.Code == price.PackageCode, cancellationToken);
+        if (!duration.IsActive || duration.DurationDays != price.DurationDays)
+            return Fail(PlaceOrderStatus.PriceUnavailable, "The selected package is no longer purchasable.");
+        if (!FulfillmentMethods.IsAllowed(duration.IsDeliveryEnabled, request.FulfillmentMethod))
+            return Fail(PlaceOrderStatus.DeliveryDisabled, "This package is available for takeaway only.");
+        var isDelivery = request.FulfillmentMethod == FulfillmentMethods.HomeDelivery;
+
         var currentPrice = PackagePriceRules.Calculate(price.Amount, price.DiscountedPrice);
         if ((request.ExpectedTotalAmount.HasValue && request.ExpectedTotalAmount != currentPrice.EffectivePrice) ||
             (request.ExpectedRegularPrice.HasValue && request.ExpectedRegularPrice != currentPrice.RegularPrice) ||
@@ -126,15 +139,15 @@ public sealed class OrderService(
         if (request.DeliveryDays.Any(day => !configuredDays.Contains(day)))
             return Fail(PlaceOrderStatus.InvalidDeliveryDays, "A selected delivery weekday is not configured for this plan.");
 
-        var address = await db.CustomerAddresses.AsNoTracking().SingleOrDefaultAsync(
+        var address = !isDelivery ? null : await db.CustomerAddresses.AsNoTracking().SingleOrDefaultAsync(
             x => x.Id == request.CustomerAddressId && x.CustomerProfileId == profile.Id && x.IsActive,
             cancellationToken);
-        if (address is null)
+        if (isDelivery && address is null)
             return Fail(PlaceOrderStatus.AddressNotFound, "The selected active address was not found for this customer.");
 
-        var slot = await db.DeliveryTimeSlots.AsNoTracking().SingleOrDefaultAsync(
+        var slot = !isDelivery ? null : await db.DeliveryTimeSlots.AsNoTracking().SingleOrDefaultAsync(
             x => x.Id == request.DeliveryTimeSlotId && x.IsActive, cancellationToken);
-        if (slot is null)
+        if (isDelivery && slot is null)
             return Fail(PlaceOrderStatus.DeliveryTimeSlotNotFound, "The selected delivery time slot was not found or is inactive.");
 
         var minimumStartDate = today.AddDays(Math.Max(1, options.Value.MinimumLeadTimeDays));
@@ -172,8 +185,9 @@ public sealed class OrderService(
             CustomerProfileId = profile.Id,
             MealPlanTemplateId = template.Id,
             MealPlanPriceId = price.Id,
-            CustomerAddressId = address.Id,
-            DeliveryTimeSlotId = slot.Id,
+            CustomerAddressId = address?.Id,
+            FulfillmentMethod = request.FulfillmentMethod,
+            DeliveryTimeSlotId = slot?.Id,
             StartDate = request.StartDate,
             EndDate = endDate,
             DeliveryDaysPerWeek = request.DeliveryDays.Count,
@@ -185,20 +199,20 @@ public sealed class OrderService(
             TotalAmount = currentPrice.EffectivePrice,
             CurrencyCode = string.IsNullOrWhiteSpace(price.CurrencyCode) ? "QAR" : price.CurrencyCode.Trim().ToUpperInvariant(),
             CouponCode = null,
-            DeliveryAddressName = address.AddressName,
-            DeliveryAddressType = address.AddressType,
-            DeliveryBuildingNo = address.BuildingNo,
-            DeliveryStreetNo = address.StreetNo,
-            DeliveryUnitNumber = address.UnitNumber,
-            DeliveryZoneNo = address.ZoneNo,
-            DeliveryArea = address.Area,
-            DeliveryDirections = address.Directions,
-            DeliveryLatitude = address.Latitude,
-            DeliveryLongitude = address.Longitude,
-            DeliveryFormattedAddress = address.FormattedAddress,
-            DeliveryTimeSlotName = slot.Name,
-            DeliveryStartTime = slot.StartTime,
-            DeliveryEndTime = slot.EndTime,
+            DeliveryAddressName = address?.AddressName,
+            DeliveryAddressType = address?.AddressType ?? CustomerAddressTypes.Other,
+            DeliveryBuildingNo = address?.BuildingNo,
+            DeliveryStreetNo = address?.StreetNo,
+            DeliveryUnitNumber = address?.UnitNumber,
+            DeliveryZoneNo = address?.ZoneNo,
+            DeliveryArea = address?.Area ?? string.Empty,
+            DeliveryDirections = address?.Directions,
+            DeliveryLatitude = address?.Latitude,
+            DeliveryLongitude = address?.Longitude,
+            DeliveryFormattedAddress = address?.FormattedAddress,
+            DeliveryTimeSlotName = slot?.Name ?? string.Empty,
+            DeliveryStartTime = slot?.StartTime ?? default,
+            DeliveryEndTime = slot?.EndTime ?? default,
             Status = OrderStatuses.Confirmed,
             PaymentStatus = PaymentStatuses.Pending,
             PlacedAt = now,
@@ -263,7 +277,7 @@ public sealed class OrderService(
             .Skip((pageNumber - 1) * pageSize).Take(pageSize)
             .Select(x => new CustomerOrderSummaryResponse(
                 x.Id, x.OrderNumber, x.PlanName, x.PlanDurationName, x.StartDate, x.EndDate,
-                x.Status, x.PaymentStatus, x.TotalAmount, x.CurrencyCode.Trim(), x.PlacedAt))
+                x.Status, x.PaymentStatus, x.TotalAmount, x.CurrencyCode.Trim(), x.PlacedAt, x.FulfillmentMethod))
             .ToListAsync(cancellationToken);
         return new(items, pageNumber, pageSize, count);
     }
@@ -290,14 +304,14 @@ public sealed class OrderService(
             order.DeliveryDays.OrderBy(x => x.DayOfWeek).Select(x => x.DayOfWeek).ToArray(),
             order.StartDate,
             order.EndDate,
-            new(order.DeliveryTimeSlotId, order.DeliveryTimeSlotName, order.DeliveryStartTime, order.DeliveryEndTime),
-            new(order.CustomerAddressId, order.DeliveryAddressName, order.DeliveryAddressType,
+            order.DeliveryTimeSlotId.HasValue ? new(order.DeliveryTimeSlotId.Value, order.DeliveryTimeSlotName, order.DeliveryStartTime, order.DeliveryEndTime) : null,
+            order.CustomerAddressId.HasValue ? new(order.CustomerAddressId.Value, order.DeliveryAddressName, order.DeliveryAddressType,
                 order.DeliveryBuildingNo, order.DeliveryStreetNo, order.DeliveryUnitNumber,
                 order.DeliveryZoneNo, order.DeliveryArea, order.DeliveryDirections,
-                order.DeliveryLatitude, order.DeliveryLongitude, order.DeliveryFormattedAddress)),
+                order.DeliveryLatitude, order.DeliveryLongitude, order.DeliveryFormattedAddress) : null),
         new(order.Subtotal, order.DiscountAmount, order.DeliveryCharge, order.TotalAmount,
             order.CurrencyCode.Trim()),
-        order.PlacedAt);
+        order.PlacedAt, order.FulfillmentMethod);
 
     private static int ToApiWeekday(MenuWeekday weekday) => weekday switch
     {
@@ -381,6 +395,7 @@ public sealed class OrderService(
 
     internal static string FormatDeliveryAddress(Order order)
     {
+        if (order.FulfillmentMethod == FulfillmentMethods.Takeaway) return "Takeaway — collect from Diet Time";
         if (!string.IsNullOrWhiteSpace(order.DeliveryFormattedAddress))
             return order.DeliveryFormattedAddress.Trim();
         var parts = new[]

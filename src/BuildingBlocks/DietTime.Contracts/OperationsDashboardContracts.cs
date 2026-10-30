@@ -47,7 +47,7 @@ public sealed record DashboardDeliveryDto(
     int MealCount,
     string DeliveryArea,
     string DeliveryAddress,
-    string Status);
+    string Status, string FulfillmentMethod = "HOME_DELIVERY");
 
 public sealed record UpcomingPlanActivityDto(
     IReadOnlyList<PlanActivityDayDto> Starting,

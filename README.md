@@ -203,3 +203,33 @@ stored service-date range and configured delivery weekdays. The current schema h
 delivery execution record or completion status, so `completedDeliveries` is returned as
 `null`. It also has no route, driver, or per-delivery assignment data from which a genuine
 scheduling conflict can be identified, so `deliveryConflicts` is returned as `0`.
+
+## Package delivery and fulfillment
+
+Delivery availability belongs to the existing duration master, `public.meal_plan_price_packages`,
+not the meal/snack quantity options. The duration Add/Edit form exposes **Enable Delivery**.
+New packages default to enabled. Customer purchase options and duration APIs return `isDeliveryEnabled`.
+
+Apply the EF migration `20261030000000_EnablePackageDelivery` as the schema owner before
+deploying the API and clients against the intended database. The migration uses bounded lock
+and statement timeouts; retry during a quieter period if a timeout rolls it back. It seeds the
+existing 6-day duration as takeaway only and leaves other durations, including 12 and 24 days,
+enabled. Rerunning it preserves subsequent administrator choices.
+
+Order requests accept `fulfillmentMethod: "TAKEAWAY"` or `"HOME_DELIVERY"`. Omitting it retains
+Home Delivery behavior for older clients. Takeaway accepts null/omitted `customerAddressId` and
+`deliveryTimeSlotId`; Home Delivery still requires both. `deliveryDays` remains the service-day
+schedule for either method. The API validates the selected package's current setting and stores
+fulfillment on the order. Order details and summaries return that snapshot; takeaway details
+have no delivery address or slot. Package edits never recalculate confirmed orders.
+
+The dashboard and order calendar show both fulfillment methods. Kitchen preparation includes
+both; `/api/admin/dashboard/operations/deliveries` returns Home Delivery orders only. Existing
+orders retain Home Delivery fulfillment. Migration rollback is intentionally a reviewed forward
+change, so fulfillment history cannot be discarded by an automatic EF downgrade.
+
+Delivery regression tests are in `DeliveryEligibilityTests.cs` and `PackageDeliveryIntegrationTests.cs`.
+To run the PostgreSQL tests, set `UPCOMING_MEALS_TEST_CONNECTION` to a local test server whose
+user can create databases, then filter `dotnet test` to `Package_delivery_is_authoritative`,
+`Delivery_migration_seeds_once`, or `Duration_create_update`. Each test creates and drops its
+own isolated database.

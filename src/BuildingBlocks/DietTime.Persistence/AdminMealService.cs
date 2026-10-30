@@ -1443,7 +1443,7 @@ public sealed class AdminMealService(
         var rows = await ordered.Skip((page - 1) * pageSize).Take(pageSize)
             .Select(x => new MealPlanPricePackageResponse(
                 x.Code, x.Code, x.NameEn, x.NameAr, x.DurationDays, x.DisplayOrder,
-                x.IsActive, null, null))
+                x.IsActive, null, null, x.IsDeliveryEnabled))
             .ToListAsync(ct);
         return new(rows, new(page, pageSize, count, (int)Math.Ceiling(count / (double)pageSize)));
     }
@@ -1455,7 +1455,7 @@ public sealed class AdminMealService(
             .ThenBy(x => x.DurationDays)
             .ThenBy(x => x.Code)
             .Select(x => new MealPlanPricePackageLookupResponse(
-                x.Code, x.Code, x.NameEn, x.NameEn, x.NameAr, x.DurationDays, x.DisplayOrder))
+                x.Code, x.Code, x.NameEn, x.NameEn, x.NameAr, x.DurationDays, x.DisplayOrder, x.IsDeliveryEnabled))
             .ToListAsync(ct);
 
     public Task<MealPlanPricePackageResponse?> GetMealPlanPricePackageAsync(string packageId, CancellationToken ct) =>
@@ -1463,7 +1463,7 @@ public sealed class AdminMealService(
             .Where(x => x.Code == NormalizePackageCode(packageId))
             .Select(x => new MealPlanPricePackageResponse(
                 x.Code, x.Code, x.NameEn, x.NameAr, x.DurationDays, x.DisplayOrder,
-                x.IsActive, null, null))
+                x.IsActive, null, null, x.IsDeliveryEnabled))
             .SingleOrDefaultAsync(ct);
 
     public async Task<(MealPlanPricePackageWriteResult Result, string? Id)> CreateMealPlanPricePackageAsync(
@@ -1481,7 +1481,8 @@ public sealed class AdminMealService(
             NameAr = request.NameAr.Trim(),
             DurationDays = request.DurationDays,
             DisplayOrder = request.DisplayOrder,
-            IsActive = request.IsActive
+            IsActive = request.IsActive,
+            IsDeliveryEnabled = request.IsDeliveryEnabled
         };
         db.MealPlanPricePackages.Add(package);
         await db.SaveChangesAsync(ct);
@@ -1511,6 +1512,7 @@ public sealed class AdminMealService(
         package.DurationDays = request.DurationDays;
         package.DisplayOrder = request.DisplayOrder;
         package.IsActive = request.IsActive;
+        package.IsDeliveryEnabled = request.IsDeliveryEnabled;
         await db.SaveChangesAsync(ct);
         return MealPlanPricePackageWriteResult.Success;
     }

@@ -250,6 +250,59 @@ public sealed class WhatsAppTests
         Assert.DoesNotContain("Private Customer", combined); Assert.DoesNotContain("Private address", combined); Assert.DoesNotContain("+97455555555", combined); Assert.DoesNotContain("private-token", combined);
     }
 
+
+    [Theory]
+    [InlineData("MM", "queued", false)]
+    [InlineData("SM", "delivered", true)]
+    [InlineData("MM", "read", true)]
+    [InlineData("MM", "failed", false)]
+    [InlineData("MM", "undelivered", false)]
+    public async Task Lookup_reads_provider_status_without_sending_even_when_messaging_is_disabled(string prefix, string status, bool delivered)
+    {
+        var sid = prefix + new string('a', 32);
+        var failed = status is "failed" or "undelivered";
+        var handler = new RecordingHandler((_, _) => new(HttpStatusCode.OK) { Content = new StringContent(
+            JsonSerializer.Serialize(new { sid, status, error_code = failed ? (int?)63015 : null, error_message = failed ? "Recipient not joined" : null, to = "private-recipient", body = "private-body" })) });
+        var result = await DiagnosticService(handler, enabled: false).GetMessageStatusAsync(sid);
+        Assert.True(result.Success); Assert.Equal(status, result.Status); Assert.Equal(delivered, result.DeliveryConfirmed);
+        Assert.Equal(failed ? "63015" : null, result.ErrorCode);
+        Assert.Equal("https://api.twilio.com/2010-04-01/Accounts/AC" + new string('1',32) + "/Messages/" + sid + ".json", handler.RequestUri);
+        Assert.Equal("GET", handler.Method); Assert.Null(handler.Body); Assert.Equal(1, handler.CallCount);
+        Assert.Equal("Basic " + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("AC" + new string('1',32) + ":private-token")), handler.Authorization);
+        var json = JsonSerializer.Serialize(result); Assert.DoesNotContain("private-recipient", json); Assert.DoesNotContain("private-body", json);
+    }
+
+    [Theory]
+    [InlineData("../Messages")]
+    [InlineData("HXaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")]
+    [InlineData("MMtest")]
+    public async Task Invalid_lookup_id_never_calls_provider(string sid)
+    {
+        var handler = new RecordingHandler((_, _) => throw new InvalidOperationException());
+        var result = await DiagnosticService(handler).GetMessageStatusAsync(sid);
+        Assert.False(result.Success); Assert.Equal("invalid_message_sid", result.ErrorCode); Assert.Equal(0, handler.CallCount);
+    }
+
+    [Theory]
+    [InlineData(401, 20003)]
+    [InlineData(404, 20404)]
+    public async Task Lookup_preserves_provider_request_failure(int status, int code)
+    {
+        var handler = new RecordingHandler((_, _) => new((HttpStatusCode)status) { Content = new StringContent(JsonSerializer.Serialize(new { code, message = "Lookup rejected" })) });
+        var result = await DiagnosticService(handler).GetMessageStatusAsync("MM" + new string('a',32));
+        Assert.False(result.Success); Assert.Equal(status, result.ProviderHttpStatusCode); Assert.Equal(code.ToString(), result.ErrorCode);
+    }
+
+    [Fact]
+    public async Task Lookup_rejects_mismatched_record_and_handles_timeout()
+    {
+        var sid = "MM" + new string('a',32);
+        var handler = new RecordingHandler((_, _) => new(HttpStatusCode.OK) { Content = new StringContent("{\"sid\":\"wrong\",\"status\":\"delivered\"}") });
+        Assert.Equal("invalid_provider_response", (await DiagnosticService(handler).GetMessageStatusAsync(sid)).ErrorCode);
+        handler = new RecordingHandler((_, _) => throw new TaskCanceledException());
+        Assert.Equal("timeout", (await DiagnosticService(handler).GetMessageStatusAsync(sid)).ErrorCode);
+    }
+
     private static TwilioWhatsAppService DiagnosticService(RecordingHandler handler, bool enabled = true, DiagnosticLogger? logger = null) => new(
         new HttpClient(handler) { BaseAddress = new("https://api.twilio.com/") },
         Options.Create(new TwilioWhatsAppOptions { Enabled = enabled, AccountSid = "AC" + new string('1',32), AuthToken = "private-token",
@@ -277,6 +330,7 @@ public sealed class WhatsAppTests
     {
         public int CallCount { get; private set; }
         public string? Body { get; private set; }
+        public string? Method { get; private set; }
         public string? RequestUri { get; private set; }
         public string? Authorization { get; private set; }
 
@@ -284,6 +338,7 @@ public sealed class WhatsAppTests
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
+            Method = request.Method.Method;
             CallCount++;
             Body = request.Content is null
                 ? null

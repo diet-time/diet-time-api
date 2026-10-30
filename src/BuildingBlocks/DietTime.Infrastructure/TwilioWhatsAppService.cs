@@ -61,6 +61,45 @@ public sealed class TwilioWhatsAppService(
     IOptions<TwilioWhatsAppOptions> options,
     ILogger<TwilioWhatsAppService> logger) : ITwilioWhatsAppService
 {
+    public async Task<WhatsAppMessageStatusResult> GetMessageStatusAsync(string messageSid, CancellationToken cancellationToken = default)
+    {
+        if (!TwilioMessageSid.IsValid(messageSid))
+            return new() { ErrorCode = "invalid_message_sid", ErrorMessage = "Message SID must contain SM or MM followed by 32 hexadecimal characters." };
+        var configuration = options.Value;
+        var checks = configuration.ConfigurationChecks();
+        if (!checks["AccountSid"] || !checks["AuthToken"])
+            return new() { ErrorCode = "missing_credentials", ErrorMessage = "Twilio account credentials are missing or invalid." };
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get,
+                $"2010-04-01/Accounts/{configuration.AccountSid.Trim()}/Messages/{messageSid}.json");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(
+                Encoding.UTF8.GetBytes($"{configuration.AccountSid.Trim()}:{configuration.AuthToken}")));
+            using var response = await httpClient.SendAsync(request, cancellationToken);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                var failure = ReadFailure(response.StatusCode, body);
+                logger.LogWarning("Twilio message lookup rejected. HttpStatus={HttpStatus} ProviderCode={ProviderCode}", (int)response.StatusCode, failure.ErrorCode);
+                return new() { ProviderHttpStatusCode = (int)response.StatusCode, ErrorCode = failure.ErrorCode, ErrorMessage = failure.ErrorMessage };
+            }
+            var sid = ReadString(body, "sid");
+            var status = ReadString(body, "status");
+            if (sid != messageSid || string.IsNullOrWhiteSpace(status))
+                return new() { ErrorCode = "invalid_provider_response", ErrorMessage = "Twilio returned an incomplete or mismatched message record." };
+            return new() { Success = true, MessageId = sid, Status = status,
+                ErrorCode = ReadString(body, "error_code"), ErrorMessage = ReadString(body, "error_message") };
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new() { ErrorCode = "timeout", ErrorMessage = "The Twilio message lookup timed out." };
+        }
+        catch (HttpRequestException)
+        {
+            return new() { ErrorCode = "http_error", ErrorMessage = "Twilio could not be reached." };
+        }
+    }
+
     private const int MaximumAttempts = 3;
 
     public Task<WhatsAppSendResult> SendNewOrderNotificationAsync(

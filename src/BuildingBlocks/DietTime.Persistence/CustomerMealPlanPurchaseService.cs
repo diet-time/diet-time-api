@@ -106,7 +106,7 @@ public sealed class CustomerMealPlanPurchaseService(
                     ?? price.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault(),
                 price.Translations.Where(t => t.LanguageCode == language).Select(t => t.Description).FirstOrDefault()
                     ?? price.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Description).FirstOrDefault(),
-                price.PackageOption!.Id, price.PackageOption.Name, price.PackageOption.DisplayOrder, price.DiscountedPrice))
+                price.PackageOption!.Id, price.PackageOption.Name, price.PackageOption.DisplayOrder, price.DiscountedPrice, duration.IsDeliveryEnabled))
             .ToListAsync(ct);
 
         var typeRows = await db.MealPlanTemplateSlots.AsNoTracking()
@@ -185,7 +185,7 @@ public sealed class CustomerMealPlanPurchaseService(
                         DailyPrice(row.DiscountedPrice ?? row.Amount, row.ServiceDays),
                         row.Name,
                         row.Description,
-                        row.PackageCode, row.PackageName, plan.Id, row.PackageOptionId, true, true, row.DiscountedPrice, row.Amount, now, today.AddDays(leadDays), leadDays))
+                        row.PackageCode, row.PackageName, plan.Id, row.PackageOptionId, true, true, row.DiscountedPrice, row.Amount, now, today.AddDays(leadDays), leadDays, row.IsDeliveryEnabled))
                     .ToArray(), group.Key.PackageOptionId, group.Key.PackageOptionName))
             .ToArray();
 
@@ -239,7 +239,7 @@ public sealed class CustomerMealPlanPurchaseService(
         var package = await db.MealPlanPricePackages.AsNoTracking()
             .Where(item => item.Code == price.PackageCode && item.DurationDays == price.DurationDays)
             .OrderBy(item => item.DisplayOrder)
-            .Select(item => new { item.DurationDays, item.IsActive })
+            .Select(item => new { item.DurationDays, item.IsActive, item.IsDeliveryEnabled })
             .FirstOrDefaultAsync(ct);
 
         if (package is null)
@@ -261,7 +261,7 @@ public sealed class CustomerMealPlanPurchaseService(
                 package.DurationDays,
                 price.CurrencyCode.Trim(),
                 price.DiscountedPrice ?? price.Amount,
-                DailyPrice(price.DiscountedPrice ?? price.Amount, package.DurationDays), price.DiscountedPrice, price.Amount));
+                DailyPrice(price.DiscountedPrice ?? price.Amount, package.DurationDays), price.DiscountedPrice, price.Amount, package.IsDeliveryEnabled));
     }
 
     private string? ResolveImage(
@@ -308,5 +308,5 @@ public sealed class CustomerMealPlanPurchaseService(
         string? Description,
         Guid PackageOptionId,
         string PackageOptionName,
-        int OptionDisplayOrder, decimal? DiscountedPrice);
+        int OptionDisplayOrder, decimal? DiscountedPrice, bool IsDeliveryEnabled);
 }

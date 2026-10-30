@@ -53,6 +53,35 @@ public sealed class TwilioConfigurationApiTests
         Assert.Equal(5, data.GetProperty("invalidOrMissingSettings").GetArrayLength()); Assert.Equal(0, noSend.Calls);
     }
 
+
+    [Theory]
+    [InlineData(null, 401)]
+    [InlineData("Customer", 403)]
+    [InlineData("Admin", 200)]
+    public async Task Delivery_lookup_requires_admin_and_never_sends(string? role, int expected)
+    {
+        var service = new NeverSend(); await using var factory = Factory(service, true);
+        using var client = factory.CreateClient();
+        if (role != null) client.DefaultRequestHeaders.Authorization = new("Bearer", Token(role));
+        var response = await client.GetAsync("/api/v1/admin/integrations/whatsapp/twilio/messages/MM" + new string('a',32));
+        Assert.Equal(expected, (int)response.StatusCode); Assert.Equal(0, service.Calls);
+        Assert.Equal(expected == 200 ? 1 : 0, service.Lookups);
+        if (expected != 200) return;
+        var data = JsonSerializer.Deserialize<JsonElement>(await response.Content.ReadAsStringAsync());
+        Assert.Equal("undelivered", data.GetProperty("status").GetString()); Assert.False(data.GetProperty("deliveryConfirmed").GetBoolean());
+        Assert.Equal("63015", data.GetProperty("errorCode").GetString());
+        Assert.False(data.TryGetProperty("to", out _)); Assert.False(data.TryGetProperty("body", out _));
+    }
+
+    [Fact]
+    public async Task Delivery_lookup_validates_sid_before_calling_service()
+    {
+        var service = new NeverSend(); await using var factory = Factory(service, true);
+        using var client = factory.CreateClient(); client.DefaultRequestHeaders.Authorization = new("Bearer", Token("Admin"));
+        var response = await client.GetAsync("/api/v1/admin/integrations/whatsapp/twilio/messages/MMinvalid");
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode); Assert.Equal(0, service.Lookups); Assert.Equal(0, service.Calls);
+    }
+
     private static WebApplicationFactory<Program> Factory(NeverSend noSend, bool enabled) => new ApiFactory("Host=localhost;Database=unused;Username=unused;Password=unused", services => {
         var worker = services.FirstOrDefault(d => d.ImplementationType == typeof(TomorrowMealFinalizationWorker));
         if (worker != null) services.Remove(worker);
@@ -73,6 +102,9 @@ public sealed class TwilioConfigurationApiTests
 
     private sealed class NeverSend : ITwilioWhatsAppService
     {
+        public int Lookups { get; private set; }
+        public Task<WhatsAppMessageStatusResult> GetMessageStatusAsync(string sid, CancellationToken ct = default)
+        { Lookups++; return Task.FromResult(new WhatsAppMessageStatusResult { Success = true, MessageId = sid, Status = "undelivered", ErrorCode = "63015", ErrorMessage = "Recipient not joined" }); }
         public int Calls { get; private set; }
         public Task<WhatsAppSendResult> SendTemplateAsync(TwilioWhatsAppTemplateMessage message, CancellationToken ct = default) { Calls++; throw new InvalidOperationException("Diagnostics must not send"); }
         public Task<WhatsAppSendResult> SendNewOrderNotificationAsync(NewOrderWhatsAppNotification notification, CancellationToken ct = default) { Calls++; throw new InvalidOperationException("Diagnostics must not send"); }

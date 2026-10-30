@@ -95,6 +95,7 @@ public sealed class MealPlanTemplateSlotTranslation : Translation { public Guid 
 public sealed class MealPlanSlotOption : Entity { public Guid MealPlanTemplateSlotId { get; set; } public MealPlanTemplateSlot Slot { get; set; } = null!; public Guid MealItemId { get; set; } public MealItem MealItem { get; set; } = null!; public decimal AdditionalPrice { get; set; } public bool IsDefault { get; set; } public bool IsAvailable { get; set; } public int DisplayOrder { get; set; } public DateTimeOffset? AvailableFrom { get; set; } public DateTimeOffset? AvailableUntil { get; set; } public DateTimeOffset CreatedAt { get; set; } public DateTimeOffset UpdatedAt { get; set; } public Guid? CreatedBy { get; set; } public Guid? UpdatedBy { get; set; } }
 public sealed class MealPlanPricePackage
 {
+    public bool IsDeliveryEnabled { get; set; } = true;
     public string Code { get; set; } = "";
     public string NameEn { get; set; } = "";
     public string NameAr { get; set; } = "";
@@ -253,8 +254,9 @@ public sealed class Order : Entity
     public Guid CustomerProfileId { get; set; }
     public Guid MealPlanTemplateId { get; set; }
     public Guid MealPlanPriceId { get; set; }
-    public Guid CustomerAddressId { get; set; }
-    public Guid DeliveryTimeSlotId { get; set; }
+    public Guid? CustomerAddressId { get; set; }
+    public Guid? DeliveryTimeSlotId { get; set; }
+    public string FulfillmentMethod { get; set; } = FulfillmentMethods.HomeDelivery;
     public DateOnly StartDate { get; set; }
     public DateOnly EndDate { get; set; }
     public int DeliveryDaysPerWeek { get; set; }
@@ -454,4 +456,13 @@ public sealed class UserAttribute : Entity
     // Common keys
     public const string PasswordKey = "PWD";
     public const string PasswordGenerationKey = "PWDGEN";
+}
+
+public static class FulfillmentMethods
+{
+    public const string HomeDelivery = "HOME_DELIVERY";
+    public const string Takeaway = "TAKEAWAY";
+    public static bool IsValid(string? method) => method is HomeDelivery or Takeaway;
+    public static bool IsAllowed(bool isDeliveryEnabled, string? method) =>
+        IsValid(method) && (method == Takeaway || isDeliveryEnabled);
 }

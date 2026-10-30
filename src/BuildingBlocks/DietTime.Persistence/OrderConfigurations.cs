@@ -16,6 +16,7 @@ public sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
         e.Property(x => x.MealPlanTemplateId).HasColumnName("meal_plan_template_id");
         e.Property(x => x.MealPlanPriceId).HasColumnName("meal_plan_price_id");
         e.Property(x => x.CustomerAddressId).HasColumnName("customer_address_id");
+        e.Property(x => x.FulfillmentMethod).HasColumnName("fulfillment_method").HasMaxLength(30).HasDefaultValue(FulfillmentMethods.HomeDelivery).IsRequired();
         e.Property(x => x.DeliveryTimeSlotId).HasColumnName("delivery_time_slot_id");
         e.Property(x => x.StartDate).HasColumnName("start_date");
         e.Property(x => x.EndDate).HasColumnName("end_date");

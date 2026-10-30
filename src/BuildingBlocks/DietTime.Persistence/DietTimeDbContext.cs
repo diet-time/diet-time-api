@@ -118,6 +118,7 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
             e.Property(x => x.NameEn).HasColumnName("name_en").HasMaxLength(100).IsRequired();
             e.Property(x => x.NameAr).HasColumnName("name_ar").HasMaxLength(100).IsRequired();
             e.Property(x => x.DurationDays).HasColumnName("duration_days").IsRequired();
+            e.Property(x => x.IsDeliveryEnabled).HasColumnName("is_delivery_enabled").HasDefaultValue(true);
             e.Property(x => x.DisplayOrder).HasColumnName("display_order").IsRequired();
             e.Property(x => x.IsActive).HasColumnName("is_active").IsRequired();
             e.ToTable(t =>

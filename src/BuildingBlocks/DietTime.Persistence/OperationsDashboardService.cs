@@ -96,7 +96,7 @@ public sealed class OperationsDashboardService(
             : await db.Orders.AsNoTracking().CountAsync(
                 order => reviewStatuses.Contains(order.Status), cancellationToken);
         var attention = new DashboardAttentionDto(
-            futureOrders.Count(order => !HasValidAddress(order)),
+            futureOrders.Count(order => order.FulfillmentMethod == FulfillmentMethods.HomeDelivery && !HasValidAddress(order)),
             reviewCount,
             finalServiceDates.Where(item => item.Date!.Value >= date && item.Date.Value <= endingLimit)
                 .Select(item => item.Order.CustomerProfileId).Distinct().Count(),
@@ -134,6 +134,7 @@ public sealed class OperationsDashboardService(
         var activeStatuses = NormalizeStatuses(options.ActiveOrderStatuses, [OrderStatuses.Confirmed]);
         var weekday = OperationsDashboardScheduling.ToApiWeekday(date.DayOfWeek);
         var query = db.Orders.AsNoTracking().Where(order =>
+            order.FulfillmentMethod == FulfillmentMethods.HomeDelivery &&
             activeStatuses.Contains(order.Status) && order.StartDate <= date && order.EndDate >= date &&
             order.DeliveryDays.Any(day => day.DayOfWeek == weekday));
         var total = await query.CountAsync(cancellationToken);
@@ -190,9 +191,9 @@ public sealed class OperationsDashboardService(
                 order.MealPlanTemplateId,
                 order.PlanName,
                 MealCount(order),
-                order.DeliveryArea,
-                FormatAddress(order),
-                order.Status))
+                order.FulfillmentMethod == FulfillmentMethods.Takeaway ? string.Empty : order.DeliveryArea,
+                order.FulfillmentMethod == FulfillmentMethods.Takeaway ? string.Empty : FormatAddress(order),
+                order.Status, order.FulfillmentMethod))
             .OrderBy(delivery => orders.First(order => order.Id == delivery.OrderId).DeliveryStartTime)
             .ThenBy(delivery => delivery.CustomerName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(delivery => delivery.OrderNumber, StringComparer.OrdinalIgnoreCase)

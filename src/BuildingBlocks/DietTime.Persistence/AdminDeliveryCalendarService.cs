@@ -74,7 +74,7 @@ public sealed class AdminDeliveryCalendarService(
                 order.PlanName,
                 order.Meals.Sum(meal => meal.Quantity),
                 order.DeliveryTimeSlotName,
-                order.Status)).ToArray();
+                order.Status, order.FulfillmentMethod)).ToArray();
             var mealTypeTotals = scheduledOrders.SelectMany(order => order.Meals)
                 .GroupBy(meal => meal.MealTypeName)
                 .Select(group => new AdminDeliveryMealTypeTotalResponse(group.Key, group.Sum(meal => meal.Quantity)))

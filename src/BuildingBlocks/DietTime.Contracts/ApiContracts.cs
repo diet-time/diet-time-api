@@ -43,7 +43,7 @@ public sealed record PlanPriceResponse(
     string CurrencyCode,
     string? Name = null,
     string? Description = null,
-    decimal? DiscountedPrice = null, decimal? OriginalPrice = null)
+    decimal? DiscountedPrice = null, decimal? OriginalPrice = null, bool IsDeliveryEnabled = true)
 {
     public decimal RegularPrice => OriginalPrice ?? Amount;
     public decimal EffectivePrice => PackagePriceRules.Calculate(RegularPrice, DiscountedPrice).EffectivePrice;
@@ -79,7 +79,7 @@ public sealed record MealPlanPurchasePackageResponse(
     bool IsActive = true,
     bool IsAvailable = true,
     decimal? DiscountedPrice = null, decimal? OriginalPrice = null,
-    DateTimeOffset? ServerNow = null, DateOnly? EarliestStartDate = null, int StartDateLeadTimeDays = 1)
+    DateTimeOffset? ServerNow = null, DateOnly? EarliestStartDate = null, int StartDateLeadTimeDays = 1, bool IsDeliveryEnabled = true)
 {
     public decimal RegularPrice => OriginalPrice ?? Amount;
     public decimal EffectivePrice => PackagePriceRules.Calculate(RegularPrice, DiscountedPrice).EffectivePrice;
@@ -114,7 +114,7 @@ public sealed record MealPlanSelectionValidationResponse(
     string CurrencyCode,
     decimal Amount,
     decimal PricePerServiceDay,
-    decimal? DiscountedPrice = null, decimal? OriginalPrice = null)
+    decimal? DiscountedPrice = null, decimal? OriginalPrice = null, bool IsDeliveryEnabled = true)
 {
     public decimal RegularPrice => OriginalPrice ?? Amount;
     public decimal EffectivePrice => PackagePriceRules.Calculate(RegularPrice, DiscountedPrice).EffectivePrice;
@@ -355,14 +355,15 @@ public sealed record PlaceOrderRequest(
     Guid CustomerProfileId,
     Guid MealPlanTemplateId,
     Guid MealPlanPriceId,
-    Guid CustomerAddressId,
-    Guid DeliveryTimeSlotId,
+    Guid? CustomerAddressId,
+    Guid? DeliveryTimeSlotId,
     DateOnly StartDate,
     IReadOnlyList<int> DeliveryDays,
     IReadOnlyList<PlaceOrderMealRequest>? Meals = null,
     string? CouponCode = null,
     decimal? ExpectedTotalAmount = null, decimal? ExpectedRegularPrice = null,
-    decimal? ExpectedDiscountAmount = null, string? ExpectedCurrencyCode = null);
+    decimal? ExpectedDiscountAmount = null, string? ExpectedCurrencyCode = null,
+    string FulfillmentMethod = FulfillmentMethods.HomeDelivery);
 
 public sealed record OrderPlanResponse(
     Guid MealPlanTemplateId, Guid MealPlanPriceId, string Name, string DurationName);
@@ -386,8 +387,8 @@ public sealed record OrderDeliveryResponse(
     IReadOnlyList<int> Days,
     DateOnly StartDate,
     DateOnly EndDate,
-    OrderTimeSlotResponse TimeSlot,
-    OrderAddressResponse Address);
+    OrderTimeSlotResponse? TimeSlot,
+    OrderAddressResponse? Address);
 public sealed record OrderPricingResponse(
     decimal Subtotal,
     decimal DiscountAmount,
@@ -403,7 +404,8 @@ public sealed record PlaceOrderResponse(
     IReadOnlyList<OrderMealResponse> Meals,
     OrderDeliveryResponse Delivery,
     OrderPricingResponse Pricing,
-    DateTimeOffset PlacedAt);
+    DateTimeOffset PlacedAt,
+    string FulfillmentMethod = FulfillmentMethods.HomeDelivery);
 public sealed record CustomerOrderSummaryResponse(
     Guid Id,
     string OrderNumber,
@@ -415,7 +417,8 @@ public sealed record CustomerOrderSummaryResponse(
     string PaymentStatus,
     decimal TotalAmount,
     string CurrencyCode,
-    DateTimeOffset PlacedAt);
+    DateTimeOffset PlacedAt,
+    string FulfillmentMethod = FulfillmentMethods.HomeDelivery);
 public sealed record CustomerOrdersResponse(
     IReadOnlyList<CustomerOrderSummaryResponse> Items,
     int PageNumber,
@@ -608,7 +611,8 @@ public sealed record MealPlanPricePackageResponse(
     int DisplayOrder,
     bool IsActive,
     DateTimeOffset? CreatedAt,
-    DateTimeOffset? UpdatedAt);
+    DateTimeOffset? UpdatedAt,
+    bool IsDeliveryEnabled = true);
 public sealed record MealPlanPricePackageLookupResponse(
     string Id,
     string Code,
@@ -616,14 +620,16 @@ public sealed record MealPlanPricePackageLookupResponse(
     string NameEn,
     string NameAr,
     int DurationDays,
-    int DisplayOrder);
+    int DisplayOrder,
+    bool IsDeliveryEnabled = true);
 public sealed record UpsertMealPlanPricePackageRequest(
     string Code,
     string NameEn,
     string NameAr,
     int DurationDays,
     int DisplayOrder,
-    bool IsActive);
+    bool IsActive,
+    bool IsDeliveryEnabled = true);
 public sealed record SetMealPlanPricePackageStatusRequest(bool IsActive);
 public sealed record UpsertPlanOptionRequest(Guid MealItemId, decimal AdditionalPrice, bool IsDefault, bool IsAvailable, int DisplayOrder);
 public sealed record UpsertPlanSlotRequest(Guid MealTypeId, int DisplayOrder, int MinimumSelection, int MaximumSelection, bool IsRequired, TimeOnly? SelectionCutoffTime, bool AllowsPaidUpgrade, IReadOnlyList<UpsertPlanOptionRequest> Options, bool IsActive = true);
