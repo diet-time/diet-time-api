@@ -487,7 +487,7 @@ public sealed partial class UpcomingMealServiceTests : IAsyncLifetime
         var now = clock.Now;
         userId = Guid.NewGuid();
         db.Users.Add(new ApplicationUser { Id = userId, UserName = "upcoming-test", SecurityStamp = Guid.NewGuid().ToString() });
-        var profile = new CustomerProfile { Id = Guid.NewGuid(), UserId = userId, IsActive = true, PreferredLanguage = "en", CreatedAt = now, UpdatedAt = now };
+        var profile = new CustomerProfile { GenderCode = "FEMALE", DateOfBirth = new(1995, 1, 1), HeightCm = 165, WeightKg = 70, GoalCode = "LOSE_WEIGHT", DailyRoutineCode = "OFFICE_WORK", ActivityLevelCode = "MODERATE", OnboardingStatus = "COMPLETED", Id = Guid.NewGuid(), UserId = userId, IsActive = true, PreferredLanguage = "en", CreatedAt = now, UpdatedAt = now };
         db.Add(profile);
         var mealType = new MealType { Id = Guid.NewGuid(), Code = "MEAL", IsActive = true };
         var snackType = new MealType { Id = Guid.NewGuid(), Code = "SNACK", IsActive = true };

@@ -60,6 +60,9 @@ public sealed class OrderService(
         if (profile is null || profile.UserId != userId)
             return Fail(PlaceOrderStatus.CustomerNotFound, "Customer profile was not found or is not accessible.");
 
+        if (!CustomerQuestionnaireRules.IsComplete(profile, today))
+            return Fail(PlaceOrderStatus.QuestionnaireIncomplete, "Complete your questionnaire before placing an order.");
+
         var template = await db.MealPlanTemplates
             .Include(x => x.Translations)
             .Include(x => x.Days.Where(day => day.IsActive))

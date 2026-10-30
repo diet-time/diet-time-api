@@ -108,6 +108,7 @@ public interface IDeliveryTimeSlotService
 
 public enum PlaceOrderStatus
 {
+    QuestionnaireIncomplete,
     DeliveryDisabled,
     InvalidFulfillmentMethod,
     Created,

@@ -224,8 +224,10 @@ public sealed class UpsertCustomerProfileRequest
     public string OnboardingStatus { get; init; } = "IN_PROGRESS";
     public bool? AllergensConfirmed { get; init; }
     public bool? PreferencesConfirmed { get; init; }
-    public List<CustomerPreferenceRequest> Preferences { get => preferences; init => preferences = value ?? []; }
-    public List<CustomerAllergenRequest> Allergens { get => allergens; init => allergens = value ?? []; }
+    public List<CustomerPreferenceRequest> Preferences { get => preferences; init { preferences = value ?? []; PreferencesSpecified = true; } }
+    public List<CustomerAllergenRequest> Allergens { get => allergens; init { allergens = value ?? []; AllergensSpecified = true; } }
+    [JsonIgnore] public bool PreferencesSpecified { get; private init; }
+    [JsonIgnore] public bool AllergensSpecified { get; private init; }
 }
 
 public sealed record CustomerPreferenceRequest(
@@ -308,7 +310,11 @@ public sealed record CustomerProfileResponse(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     long RowVersion,
-    bool AllergensConfirmed = false, bool PreferencesConfirmed = false);
+    bool AllergensConfirmed = false, bool PreferencesConfirmed = false,
+    bool IsQuestionnaireComplete = false, string NextStepCode = "BASIC_DETAILS")
+{
+    public bool ShouldShowOnboarding => !IsQuestionnaireComplete;
+}
 
 public sealed record UpsertCustomerAddressRequest(
     string? AddressName,

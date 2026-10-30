@@ -233,3 +233,34 @@ To run the PostgreSQL tests, set `UPCOMING_MEALS_TEST_CONNECTION` to a local tes
 user can create databases, then filter `dotnet test` to `Package_delivery_is_authoritative`,
 `Delivery_migration_seeds_once`, or `Duration_create_update`. Each test creates and drops its
 own isolated database.
+
+## Questionnaire after login
+
+Guests can browse meal plans and select a package without a profile. Flutter keeps the
+selected package in its checkout draft while OTP login and questionnaire screens run.
+Checkout loads the authenticated customer's saved profile, restores partial answers, and
+requests the questionnaire only when required information is incomplete. A cached complete
+profile skips this loading step. Start-date and fulfillment selection follow completion.
+
+The existing `GET` and `PUT /api/v1/customer/profile` endpoints remain responsible for
+questionnaire persistence. Ownership comes from the authenticated user's claims; a supplied
+customer ID cannot select another customer's profile. Responses now include
+`isQuestionnaireComplete`, `nextStepCode`, and `shouldShowOnboarding`. Completion requires
+valid mandatory answers and completed onboarding status. Older completed profiles retain
+compatibility with the questionnaire confirmation flags introduced later.
+
+Partial updates preserve omitted scalar answers and omitted preference/allergen collections.
+Explicitly supplied collections replace the corresponding saved selections, including empty
+arrays for no selections. Existing profile locking and the unique user mapping prevent
+duplicate profiles. No database migration or additional questionnaire tables are required.
+
+New order submissions with incomplete questionnaires return HTTP 400 with code
+`questionnaire_incomplete`. Existing order reads and idempotent replays continue to work.
+Ordinary login sends customers with current orders to the dashboard and other customers to
+plan browsing. Explicit checkout intent continues the selected order, allowing additional
+orders without repeating completed questionnaires. Profile still provides questionnaire
+editing; **Not Now** returns to browsing without marking an incomplete questionnaire complete.
+
+Regression coverage is in `QuestionnaireCompletionTests.cs`,
+`QuestionnaireFlowIntegrationTests.cs`, and Flutter's `questionnaire_checkout_flow_test.dart`
+and updated journey tests.

@@ -155,7 +155,7 @@ public sealed class OrderApiTests : IAsyncLifetime
         db.Users.AddRange(
             new ApplicationUser { Id = userId, UserName = "order-owner", PhoneNumber = "+97450123456", SecurityStamp = Guid.NewGuid().ToString() },
             new ApplicationUser { Id = otherUserId, UserName = "other-order-user", SecurityStamp = Guid.NewGuid().ToString() });
-        db.CustomerProfiles.Add(new CustomerProfile { Id = profileId, UserId = userId, PreferredName = "Ahmed Ali", IsActive = true, PreferredLanguage = "en", OnboardingStatus = "COMPLETED", CreatedAt = now, UpdatedAt = now, RowVersion = 1 });
+        db.CustomerProfiles.Add(new CustomerProfile { GenderCode = "FEMALE", DateOfBirth = new(1995, 1, 1), HeightCm = 165, WeightKg = 70, GoalCode = "LOSE_WEIGHT", DailyRoutineCode = "OFFICE_WORK", ActivityLevelCode = "MODERATE", Id = profileId, UserId = userId, PreferredName = "Ahmed Ali", IsActive = true, PreferredLanguage = "en", OnboardingStatus = "COMPLETED", CreatedAt = now, UpdatedAt = now, RowVersion = 1 });
         var types = new[]
         {
             Type(lunchId, "LUNCH", "Lunch", now), Type(dinnerId, "DINNER", "Dinner", now),

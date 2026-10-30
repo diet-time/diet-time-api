@@ -70,25 +70,27 @@ public sealed class CustomerProfileService(
             profile.RowVersion++;
         }
 
-        profile.GenderCode = NormalizeCode(request.GenderCode);
-        profile.DateOfBirth = request.DateOfBirth;
-        profile.HeightCm = request.HeightCm;
-        profile.WeightKg = request.WeightKg;
+        profile.GenderCode = NormalizeCode(request.GenderCode) ?? profile.GenderCode;
+        profile.DateOfBirth = request.DateOfBirth ?? profile.DateOfBirth;
+        profile.HeightCm = request.HeightCm ?? profile.HeightCm;
+        profile.WeightKg = request.WeightKg ?? profile.WeightKg;
         (profile.Bmi, profile.BmiCategoryCode) =
-            CustomerProfileCalculations.Bmi(request.HeightCm, request.WeightKg);
-        profile.GoalCode = NormalizeCode(request.GoalCode);
-        profile.DailyRoutineCode = NormalizeCode(request.DailyRoutineCode);
-        profile.ActivityLevelCode = NormalizeCode(request.ActivityLevelCode);
+            CustomerProfileCalculations.Bmi(profile.HeightCm, profile.WeightKg);
+        profile.GoalCode = NormalizeCode(request.GoalCode) ?? profile.GoalCode;
+        profile.DailyRoutineCode = NormalizeCode(request.DailyRoutineCode) ?? profile.DailyRoutineCode;
+        profile.ActivityLevelCode = NormalizeCode(request.ActivityLevelCode) ?? profile.ActivityLevelCode;
         profile.PreferredLanguage = request.PreferredLanguage.Trim().ToLowerInvariant();
         profile.OnboardingStatus = request.OnboardingStatus.Trim().ToUpperInvariant();
         profile.AllergensConfirmed = request.AllergensConfirmed ?? profile.AllergensConfirmed;
         profile.PreferencesConfirmed = request.PreferencesConfirmed ?? profile.PreferencesConfirmed;
-        if (profile.OnboardingStatus == "COMPLETED")
+        if (CustomerQuestionnaireRules.IsComplete(profile, today))
             profile.OnboardingCompletedAt ??= now;
+        else if (profile.OnboardingStatus == "COMPLETED")
+            profile.OnboardingStatus = "IN_PROGRESS";
         profile.UpdatedAt = now;
         profile.UpdatedBy = userId;
 
-        SynchronizePreferences(profile, request.Preferences, now);
+        if (request.PreferencesSpecified) SynchronizePreferences(profile, request.Preferences, now);
         var nutritionTarget = RecalculateNutritionTarget(profile, today, userId, now);
 
         if (nutritionTarget is not null)
@@ -98,8 +100,8 @@ public sealed class CustomerProfileService(
             db.CustomerNutritionTargets.Add(nutritionTarget);
         }
         await SaveChangesWithConcurrencyDiagnosticsAsync(userId, ct);
-        await SynchronizeAllergensAsync(
-            profile.Id, request.Allergens, userId, now, ct);
+        if (request.AllergensSpecified)
+            await SynchronizeAllergensAsync(profile.Id, request.Allergens, userId, now, ct);
         await db.Entry(profile).Collection(x => x.Allergens).Query()
             .Include(x => x.Allergen)
             .ThenInclude(x => x.Translations)
@@ -600,7 +602,8 @@ public sealed class CustomerProfileService(
                 .ToArray(),
             profile.CreatedAt,
             profile.UpdatedAt,
-            profile.RowVersion, profile.AllergensConfirmed, profile.PreferencesConfirmed);
+            profile.RowVersion, profile.AllergensConfirmed, profile.PreferencesConfirmed,
+            CustomerQuestionnaireRules.IsComplete(profile, today), CustomerQuestionnaireRules.NextStep(profile, today));
     }
 
     private static string ResolveAllergenName(Allergen allergen, string language) =>
