@@ -74,7 +74,7 @@ public sealed class AdminDeliveryCalendarService(
                 order.PlanName,
                 order.Meals.Sum(meal => meal.Quantity),
                 order.DeliveryTimeSlotName,
-                order.Status, order.FulfillmentMethod)).ToArray();
+                order.Status, order.FulfillmentMethod, order.TakeawayBranchName, order.TakeawayBranchAddress)).ToArray();
             var mealTypeTotals = scheduledOrders.SelectMany(order => order.Meals)
                 .GroupBy(meal => meal.MealTypeName)
                 .Select(group => new AdminDeliveryMealTypeTotalResponse(group.Key, group.Sum(meal => meal.Quantity)))
@@ -138,7 +138,7 @@ public sealed class AdminDeliveryCalendarService(
             from day in db.Set<SubscriptionServiceDay>().AsNoTracking()
             join order in db.Orders.AsNoTracking() on day.OrderId equals (Guid?)order.Id
             where day.ServiceDate == date && scheduledIds.Contains(order.Id)
-            select new { Day = day, order.OrderNumber, order.CustomerProfileId }).ToListAsync(cancellationToken);
+            select new { Day = day, order.OrderNumber, order.CustomerProfileId, order.FulfillmentMethod, order.TakeawayBranchName, order.TakeawayBranchAddress }).ToListAsync(cancellationToken);
         var profileIds = details.Select(d => d.CustomerProfileId).Distinct().ToArray();
         var profiles = await db.CustomerProfiles.AsNoTracking().Include(p => p.Preferences).Include(p => p.Allergens)
             .ThenInclude(a => a.Allergen).Where(p => profileIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, cancellationToken);
@@ -167,7 +167,8 @@ public sealed class AdminDeliveryCalendarService(
                     d.Day.CustomerConfirmedAt != null ? "CUSTOMER_CONFIRMED" : d.Day.AutoFinalizedAt != null ? "AUTO_FINALIZED" : "UNFINALIZED",
                     rows.Select(r => r.SelectionSource).Distinct().ToArray(),
                     rows.GroupBy(r => new { r.Name, r.Category }).Select(g => new KitchenDishResponse(g.Key.Name, g.Key.Category ?? "meal", g.Count())).ToArray(),
-                    profile?.Preferences.Select(p => p.PreferenceCode).Concat(profile.Allergens.Select(a => "ALLERGEN: " + a.Allergen.Code)).ToArray() ?? [], d.Day.ReviewReason);
+                    profile?.Preferences.Select(p => p.PreferenceCode).Concat(profile.Allergens.Select(a => "ALLERGEN: " + a.Allergen.Code)).ToArray() ?? [], d.Day.ReviewReason,
+                    d.FulfillmentMethod, d.TakeawayBranchName, d.TakeawayBranchAddress);
             }).ToArray()
         };
     }

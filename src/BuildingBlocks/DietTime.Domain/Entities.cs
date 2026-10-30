@@ -250,6 +250,9 @@ public static class PaymentStatuses
 
 public sealed class Order : Entity
 {
+    public Guid? TakeawayBranchId { get; set; }
+    public string? TakeawayBranchName { get; set; }
+    public string? TakeawayBranchAddress { get; set; }
     public string OrderNumber { get; set; } = "";
     public Guid CustomerProfileId { get; set; }
     public Guid MealPlanTemplateId { get; set; }

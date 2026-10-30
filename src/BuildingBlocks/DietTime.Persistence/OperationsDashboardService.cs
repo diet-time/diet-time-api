@@ -193,7 +193,7 @@ public sealed class OperationsDashboardService(
                 MealCount(order),
                 order.FulfillmentMethod == FulfillmentMethods.Takeaway ? string.Empty : order.DeliveryArea,
                 order.FulfillmentMethod == FulfillmentMethods.Takeaway ? string.Empty : FormatAddress(order),
-                order.Status, order.FulfillmentMethod))
+                order.Status, order.FulfillmentMethod, order.TakeawayBranchName, order.TakeawayBranchAddress))
             .OrderBy(delivery => orders.First(order => order.Id == delivery.OrderId).DeliveryStartTime)
             .ThenBy(delivery => delivery.CustomerName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(delivery => delivery.OrderNumber, StringComparer.OrdinalIgnoreCase)

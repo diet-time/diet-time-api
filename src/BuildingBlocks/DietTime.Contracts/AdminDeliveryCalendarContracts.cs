@@ -9,7 +9,7 @@ public sealed record AdminDeliveryCalendarOrderResponse(
     string PlanName,
     int MealCount,
     string DeliverySlot,
-    string Status, string FulfillmentMethod = "HOME_DELIVERY");
+    string Status, string FulfillmentMethod = "HOME_DELIVERY", string? TakeawayBranchName = null, string? TakeawayBranchAddress = null);
 
 public sealed record AdminDeliveryMealTypeTotalResponse(
     string MealType,

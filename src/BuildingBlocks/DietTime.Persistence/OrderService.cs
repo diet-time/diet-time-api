@@ -103,6 +103,17 @@ public sealed class OrderService(
         if (!FulfillmentMethods.IsAllowed(duration.IsDeliveryEnabled, request.FulfillmentMethod))
             return Fail(PlaceOrderStatus.DeliveryDisabled, "This package is available for takeaway only.");
         var isDelivery = request.FulfillmentMethod == FulfillmentMethods.HomeDelivery;
+        TakeawayBranch? branch = null;
+        if (!isDelivery)
+        {
+            // Prevent an administrator deactivating the selected branch during placement.
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT id FROM public.takeaway_branches WHERE id = {request.TakeawayBranchId} FOR SHARE", cancellationToken);
+            branch = await db.TakeawayBranches.AsNoTracking().SingleOrDefaultAsync(
+                x => x.Id == request.TakeawayBranchId && x.IsActive, cancellationToken);
+            if (branch is null)
+                return Fail(PlaceOrderStatus.InvalidTakeawayBranch, "Choose an active takeaway branch.");
+        }
 
         var currentPrice = PackagePriceRules.Calculate(price.Amount, price.DiscountedPrice);
         if ((request.ExpectedTotalAmount.HasValue && request.ExpectedTotalAmount != currentPrice.EffectivePrice) ||
@@ -166,6 +177,9 @@ public sealed class OrderService(
 
         var endDate = OrderSchedulingRules.CalculateEndDate(
             request.StartDate, request.DeliveryDays, price.DurationDays);
+        var serviceDates = SubscriptionMenuRules.ServiceDates(request.StartDate, endDate, request.DeliveryDays.ToHashSet()).ToArray();
+        if (request.ServiceDates is not null && !request.ServiceDates.SequenceEqual(serviceDates))
+            return Fail(PlaceOrderStatus.InvalidStartDate, "The selected service dates do not match this package and its service weekdays. Please review your dates.");
         var planName = LocalizedName(template.Translations.Select(x => new NameRow(x.LanguageCode, x.Name)),
             profile.PreferredLanguage, template.Code);
         var durationName = LocalizedName(price.Translations.Select(x => new NameRow(x.LanguageCode, x.Name)),
@@ -190,6 +204,9 @@ public sealed class OrderService(
             MealPlanPriceId = price.Id,
             CustomerAddressId = address?.Id,
             FulfillmentMethod = request.FulfillmentMethod,
+            TakeawayBranchId = branch?.Id,
+            TakeawayBranchName = branch?.Name,
+            TakeawayBranchAddress = branch?.Address,
             DeliveryTimeSlotId = slot?.Id,
             StartDate = request.StartDate,
             EndDate = endDate,
@@ -280,7 +297,8 @@ public sealed class OrderService(
             .Skip((pageNumber - 1) * pageSize).Take(pageSize)
             .Select(x => new CustomerOrderSummaryResponse(
                 x.Id, x.OrderNumber, x.PlanName, x.PlanDurationName, x.StartDate, x.EndDate,
-                x.Status, x.PaymentStatus, x.TotalAmount, x.CurrencyCode.Trim(), x.PlacedAt, x.FulfillmentMethod))
+                x.Status, x.PaymentStatus, x.TotalAmount, x.CurrencyCode.Trim(), x.PlacedAt, x.FulfillmentMethod,
+                x.TakeawayBranchId.HasValue ? new TakeawayBranchResponse(x.TakeawayBranchId.Value, x.TakeawayBranchName!, x.TakeawayBranchAddress) : null))
             .ToListAsync(cancellationToken);
         return new(items, pageNumber, pageSize, count);
     }
@@ -311,10 +329,12 @@ public sealed class OrderService(
             order.CustomerAddressId.HasValue ? new(order.CustomerAddressId.Value, order.DeliveryAddressName, order.DeliveryAddressType,
                 order.DeliveryBuildingNo, order.DeliveryStreetNo, order.DeliveryUnitNumber,
                 order.DeliveryZoneNo, order.DeliveryArea, order.DeliveryDirections,
-                order.DeliveryLatitude, order.DeliveryLongitude, order.DeliveryFormattedAddress) : null),
+                order.DeliveryLatitude, order.DeliveryLongitude, order.DeliveryFormattedAddress) : null,
+            SubscriptionMenuRules.ServiceDates(order.StartDate, order.EndDate, order.DeliveryDays.Select(x => x.DayOfWeek).ToHashSet()).ToArray()),
         new(order.Subtotal, order.DiscountAmount, order.DeliveryCharge, order.TotalAmount,
             order.CurrencyCode.Trim()),
-        order.PlacedAt, order.FulfillmentMethod);
+        order.PlacedAt, order.FulfillmentMethod,
+        order.TakeawayBranchId.HasValue ? new(order.TakeawayBranchId.Value, order.TakeawayBranchName!, order.TakeawayBranchAddress) : null);
 
     private static int ToApiWeekday(MenuWeekday weekday) => weekday switch
     {
@@ -398,7 +418,10 @@ public sealed class OrderService(
 
     internal static string FormatDeliveryAddress(Order order)
     {
-        if (order.FulfillmentMethod == FulfillmentMethods.Takeaway) return "Takeaway — collect from Diet Time";
+        if (order.FulfillmentMethod == FulfillmentMethods.Takeaway)
+            return string.IsNullOrWhiteSpace(order.TakeawayBranchName) ? "Takeaway — collect from Diet Time"
+                : string.Join(", ", new[] { "Takeaway — " + order.TakeawayBranchName, order.TakeawayBranchAddress }
+                    .Where(part => !string.IsNullOrWhiteSpace(part)));
         if (!string.IsNullOrWhiteSpace(order.DeliveryFormattedAddress))
             return order.DeliveryFormattedAddress.Trim();
         var parts = new[]

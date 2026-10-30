@@ -228,6 +228,24 @@ both; `/api/admin/dashboard/operations/deliveries` returns Home Delivery orders 
 orders retain Home Delivery fulfillment. Migration rollback is intentionally a reviewed forward
 change, so fulfillment history cannot be discarded by an automatic EF downgrade.
 
+Takeaway branch checkout requires the additional EF migration
+`20261030010000_AddTakeawayBranches` before deploying the API to a database without
+the branch schema. It seeds Izghawa and Azizia idempotently, leaves unknown
+addresses null, and preserve existing orders and any subsequent branch edits.
+Administrators can configure `address`, `is_active`, `updated_at` and `updated_by` in
+`public.takeaway_branches`; inactive branches are not offered for new orders.
+
+Authenticated `GET /api/v1/takeaway-branches` returns active branches. New takeaway orders
+must send an active `takeawayBranchId`; Home Delivery ignores this field. The order stores
+the branch ID and a name/address snapshot, returned as `takeawayBranch` in order details
+and summaries. Calendar, operations and kitchen reports also expose the saved branch.
+An existing takeaway order without a branch remains readable; its branch is not inferred.
+
+Checkout selects dates in the existing calendar bottom sheet on Your Plan Details.
+Requests can include `serviceDates`; the API verifies them against the purchased duration,
+start date and service weekdays and persists the schedule in `subscription_service_days`.
+Older clients may omit this array; the server still generates the authoritative schedule.
+
 Delivery regression tests are in `DeliveryEligibilityTests.cs` and `PackageDeliveryIntegrationTests.cs`.
 To run the PostgreSQL tests, set `UPCOMING_MEALS_TEST_CONNECTION` to a local test server whose
 user can create databases, then filter `dotnet test` to `Package_delivery_is_authoritative`,

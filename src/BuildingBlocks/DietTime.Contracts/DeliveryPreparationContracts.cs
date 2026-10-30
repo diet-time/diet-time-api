@@ -33,4 +33,5 @@ public sealed record DeliveryPreparationPlanResponse(
 public sealed record KitchenDishResponse(string MealName, string Category, int Quantity);
 public sealed record KitchenSelectionResponse(Guid ServiceDayId, string OrderReference, Guid CustomerReference,
     string FinalizationStatus, IReadOnlyList<string> SelectionSources, IReadOnlyList<KitchenDishResponse> Dishes,
-    IReadOnlyList<string> DietaryRestrictions, string? ReviewReason);
+    IReadOnlyList<string> DietaryRestrictions, string? ReviewReason,
+    string FulfillmentMethod = "HOME_DELIVERY", string? TakeawayBranchName = null, string? TakeawayBranchAddress = null);

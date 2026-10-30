@@ -9,6 +9,10 @@ public sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
     public void Configure(EntityTypeBuilder<Order> e)
     {
         e.ToTable("orders", "public");
+        e.Property(x => x.TakeawayBranchId).HasColumnName("takeaway_branch_id");
+        e.Property(x => x.TakeawayBranchName).HasColumnName("takeaway_branch_name").HasMaxLength(200);
+        e.Property(x => x.TakeawayBranchAddress).HasColumnName("takeaway_branch_address").HasMaxLength(500);
+        e.HasOne<TakeawayBranch>().WithMany().HasForeignKey(x => x.TakeawayBranchId).OnDelete(DeleteBehavior.Restrict).HasConstraintName("fk_orders_takeaway_branches");
         e.HasKey(x => x.Id);
         e.Property(x => x.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
         e.Property(x => x.OrderNumber).HasColumnName("order_number").HasMaxLength(30).IsRequired();

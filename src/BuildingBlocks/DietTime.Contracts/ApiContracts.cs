@@ -357,6 +357,7 @@ public sealed record DeliveryTimeSlotResponse(
 public sealed record DeliveryTimeSlotListResponse(IReadOnlyList<DeliveryTimeSlotResponse> Items);
 
 public sealed record PlaceOrderMealRequest(Guid MealTypeId, int Quantity);
+public sealed record TakeawayBranchResponse(Guid Id, string Name, string? Address);
 public sealed record PlaceOrderRequest(
     Guid CustomerProfileId,
     Guid MealPlanTemplateId,
@@ -369,7 +370,9 @@ public sealed record PlaceOrderRequest(
     string? CouponCode = null,
     decimal? ExpectedTotalAmount = null, decimal? ExpectedRegularPrice = null,
     decimal? ExpectedDiscountAmount = null, string? ExpectedCurrencyCode = null,
-    string FulfillmentMethod = FulfillmentMethods.HomeDelivery);
+    string FulfillmentMethod = FulfillmentMethods.HomeDelivery,
+    Guid? TakeawayBranchId = null,
+    IReadOnlyList<DateOnly>? ServiceDates = null);
 
 public sealed record OrderPlanResponse(
     Guid MealPlanTemplateId, Guid MealPlanPriceId, string Name, string DurationName);
@@ -394,7 +397,8 @@ public sealed record OrderDeliveryResponse(
     DateOnly StartDate,
     DateOnly EndDate,
     OrderTimeSlotResponse? TimeSlot,
-    OrderAddressResponse? Address);
+    OrderAddressResponse? Address,
+    IReadOnlyList<DateOnly>? ServiceDates = null);
 public sealed record OrderPricingResponse(
     decimal Subtotal,
     decimal DiscountAmount,
@@ -411,7 +415,8 @@ public sealed record PlaceOrderResponse(
     OrderDeliveryResponse Delivery,
     OrderPricingResponse Pricing,
     DateTimeOffset PlacedAt,
-    string FulfillmentMethod = FulfillmentMethods.HomeDelivery);
+    string FulfillmentMethod = FulfillmentMethods.HomeDelivery,
+    TakeawayBranchResponse? TakeawayBranch = null);
 public sealed record CustomerOrderSummaryResponse(
     Guid Id,
     string OrderNumber,
@@ -424,7 +429,8 @@ public sealed record CustomerOrderSummaryResponse(
     decimal TotalAmount,
     string CurrencyCode,
     DateTimeOffset PlacedAt,
-    string FulfillmentMethod = FulfillmentMethods.HomeDelivery);
+    string FulfillmentMethod = FulfillmentMethods.HomeDelivery,
+    TakeawayBranchResponse? TakeawayBranch = null);
 public sealed record CustomerOrdersResponse(
     IReadOnlyList<CustomerOrderSummaryResponse> Items,
     int PageNumber,

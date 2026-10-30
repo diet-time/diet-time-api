@@ -111,6 +111,7 @@ public enum PlaceOrderStatus
     QuestionnaireIncomplete,
     DeliveryDisabled,
     InvalidFulfillmentMethod,
+    InvalidTakeawayBranch,
     Created,
     Replayed,
     IdempotencyConflict,

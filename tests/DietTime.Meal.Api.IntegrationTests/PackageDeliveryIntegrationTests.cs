@@ -81,11 +81,15 @@ public sealed partial class UpcomingMealServiceTests
             services.PostConfigure<DietTime.Infrastructure.TwilioWhatsAppOptions>(o => o.Enabled = false);
         });
         using var client = factory.CreateClient();
+        // A bearer token exercises JWT; local development otherwise authenticates a fallback user.
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "invalid-test-token");
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/v1/takeaway-branches")).StatusCode);
+        client.DefaultRequestHeaders.Authorization = null;
         client.DefaultRequestHeaders.Add("X-Development-User-Id", userId.ToString());
         var price = await db.MealPlanPrices.SingleAsync();
         var duration = await db.MealPlanPricePackages.SingleAsync();
         var body = new PlaceOrderRequest(order.CustomerProfileId, order.MealPlanTemplateId, price.Id,
-            address.Id, slot.Id, new(2026, 10, 27), [1, 2, 3, 4, 6, 7]);
+            address.Id, slot.Id, new(2026, 10, 27), [1, 2, 3, 4, 6, 7], TakeawayBranchId: Guid.NewGuid());
 
         async Task<HttpResponseMessage> Submit(PlaceOrderRequest request, string? key = null)
         {
@@ -98,6 +102,7 @@ public sealed partial class UpcomingMealServiceTests
         Assert.Equal(HttpStatusCode.Created, delivery.StatusCode);
         var deliveryJson = await delivery.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("HOME_DELIVERY", deliveryJson.GetProperty("fulfillmentMethod").GetString());
+        Assert.False(deliveryJson.TryGetProperty("takeawayBranch", out var deliveryBranch) && deliveryBranch.ValueKind != JsonValueKind.Null);
         var deliveryId = deliveryJson.GetProperty("id").GetGuid();
 
         duration.IsDeliveryEnabled = false;
@@ -107,16 +112,42 @@ public sealed partial class UpcomingMealServiceTests
         Assert.Equal("delivery_disabled", (await invalid.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
 
         var takeawayKey = Guid.NewGuid().ToString();
-        var takeawayRequest = body with { FulfillmentMethod = "TAKEAWAY", CustomerAddressId = null, DeliveryTimeSlotId = null };
+        var branch = new TakeawayBranch { Id = Guid.NewGuid(), Name = "Diet Time – Izghawa Branch", IsActive = true };
+        db.Add(branch);
+        await db.SaveChangesAsync();
+        var takeawayRequest = body with { FulfillmentMethod = "TAKEAWAY", CustomerAddressId = null, DeliveryTimeSlotId = null, TakeawayBranchId = branch.Id };
+        Assert.Equal(HttpStatusCode.BadRequest, (await Submit(takeawayRequest with { TakeawayBranchId = null })).StatusCode);
+        var unknownBranch = await Submit(takeawayRequest with { TakeawayBranchId = Guid.NewGuid() });
+        Assert.Equal(HttpStatusCode.BadRequest, unknownBranch.StatusCode);
+        Assert.Equal("invalid_takeaway_branch", (await unknownBranch.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        branch.IsActive = false;
+        await db.SaveChangesAsync();
+        Assert.Equal(HttpStatusCode.BadRequest, (await Submit(takeawayRequest)).StatusCode);
+        var noActiveBranches = await client.GetFromJsonAsync<JsonElement>("/api/v1/takeaway-branches");
+        Assert.Empty(noActiveBranches.GetProperty("items").EnumerateArray());
+        branch.IsActive = true;
+        await db.SaveChangesAsync();
+        var branches = await client.GetFromJsonAsync<JsonElement>("/api/v1/takeaway-branches");
+        Assert.Equal(branch.Id, branches.GetProperty("items").EnumerateArray().Single().GetProperty("id").GetGuid());
+        Assert.Equal(HttpStatusCode.BadRequest, (await Submit(takeawayRequest with { ServiceDates = [body.StartDate] })).StatusCode);
+        takeawayRequest = takeawayRequest with { ServiceDates = SubscriptionMenuRules.ServiceDates(body.StartDate,
+            OrderSchedulingRules.CalculateEndDate(body.StartDate, body.DeliveryDays, price.DurationDays), body.DeliveryDays.ToHashSet()).ToArray() };
         var takeaway = await Submit(takeawayRequest, takeawayKey);
         Assert.Equal(HttpStatusCode.Created, takeaway.StatusCode);
         var takeawayJson = await takeaway.Content.ReadFromJsonAsync<JsonElement>();
         var takeawayId = takeawayJson.GetProperty("id").GetGuid();
         Assert.Equal("TAKEAWAY", takeawayJson.GetProperty("fulfillmentMethod").GetString());
+        Assert.Equal(branch.Id, takeawayJson.GetProperty("takeawayBranch").GetProperty("id").GetGuid());
+        Assert.Equal(branch.Name, takeawayJson.GetProperty("takeawayBranch").GetProperty("name").GetString());
+        var savedDates = takeawayJson.GetProperty("delivery").GetProperty("serviceDates").EnumerateArray().Select(x => DateOnly.Parse(x.GetString()!)).ToArray();
+        Assert.Equal(price.DurationDays, savedDates.Length);
+        Assert.DoesNotContain(savedDates, d => d.DayOfWeek == DayOfWeek.Friday);
+        Assert.Equal(savedDates, await db.Set<SubscriptionServiceDay>().Where(d => d.OrderId == takeawayId).OrderBy(d => d.ServiceDate).Select(d => d.ServiceDate).ToArrayAsync());
         Assert.False(takeawayJson.GetProperty("delivery").TryGetProperty("address", out var takeawayAddress) && takeawayAddress.ValueKind != JsonValueKind.Null);
         var snapshot = await db.Orders.AsNoTracking().SingleAsync(x => x.Id == takeawayId);
         Assert.Null(snapshot.CustomerAddressId);
         Assert.Null(snapshot.DeliveryTimeSlotId);
+        Assert.Equal(branch.Id, snapshot.TakeawayBranchId);
         Assert.Equal(OrderStatuses.Confirmed, snapshot.Status);
         var original = await client.GetFromJsonAsync<JsonElement>($"/api/v1/orders/{deliveryId}");
         Assert.Equal("HOME_DELIVERY", original.GetProperty("fulfillmentMethod").GetString());
@@ -131,6 +162,12 @@ public sealed partial class UpcomingMealServiceTests
         Assert.Equal(HttpStatusCode.BadRequest, (await Submit(body with { FulfillmentMethod = "INVALID" })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await Submit(body with { CustomerAddressId = null })).StatusCode);
 
+        branch.Name = "Renamed branch";
+        branch.Address = "Configured later";
+        await db.SaveChangesAsync();
+        var savedOrder = await client.GetFromJsonAsync<JsonElement>($"/api/v1/orders/{takeawayId}");
+        Assert.Equal("Diet Time – Izghawa Branch", savedOrder.GetProperty("takeawayBranch").GetProperty("name").GetString());
+
         var summaries = await client.GetFromJsonAsync<JsonElement>($"/api/v1/customer-profiles/{order.CustomerProfileId}/orders");
         Assert.Contains(summaries.GetProperty("items").EnumerateArray(), x => x.GetProperty("id").GetGuid() == takeawayId && x.GetProperty("fulfillmentMethod").GetString() == "TAKEAWAY");
         var dashboard = new OperationsDashboardService(db, clock, Options.Create(new OperationsDashboardOptions()));
@@ -140,5 +177,9 @@ public sealed partial class UpcomingMealServiceTests
         var preparation = await new AdminDeliveryCalendarService(db, Options.Create(new MenuRotationOptions()), clock)
             .GetPreparationSummaryAsync(new(2026, 10, 27), default);
         Assert.Equal(5, preparation.OrderCount); // Seed order and four successfully purchased orders.
+        Assert.Contains(preparation.Selections, x => x.FulfillmentMethod == "TAKEAWAY" && x.TakeawayBranchName == "Diet Time – Izghawa Branch");
+        var calendar = await new AdminDeliveryCalendarService(db, Options.Create(new MenuRotationOptions()), clock)
+            .GetMonthAsync(new(2026, 10, 27), new(2026, 10, 27), null, null, default);
+        Assert.Contains(calendar.Days.SelectMany(x => x.Orders), x => x.Id == takeawayId && x.TakeawayBranchName == "Diet Time – Izghawa Branch");
     }
 }

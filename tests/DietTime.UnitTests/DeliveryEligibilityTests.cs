@@ -20,8 +20,17 @@ public sealed class DeliveryEligibilityTests
     [Fact]
     public void Takeaway_requires_neither_address_nor_delivery_slot()
     {
-        var request = Request() with { FulfillmentMethod = FulfillmentMethods.Takeaway };
+        var request = Request() with { FulfillmentMethod = FulfillmentMethods.Takeaway, TakeawayBranchId = Guid.NewGuid() };
         Assert.True(new PlaceOrderRequestValidator().Validate(request).IsValid);
+    }
+
+    [Fact]
+    public void Takeaway_requires_a_branch_while_delivery_does_not()
+    {
+        var validator = new PlaceOrderRequestValidator();
+        Assert.Contains(validator.Validate(Request() with { FulfillmentMethod = FulfillmentMethods.Takeaway }).Errors,
+            x => x.PropertyName == "TakeawayBranchId");
+        Assert.DoesNotContain(validator.Validate(Request()).Errors, x => x.PropertyName == "TakeawayBranchId");
     }
 
     [Fact]

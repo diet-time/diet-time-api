@@ -193,6 +193,7 @@ public sealed class PlaceOrderRequestValidator : AbstractValidator<PlaceOrderReq
         RuleFor(x => x.MealPlanTemplateId).NotEmpty();
         RuleFor(x => x.MealPlanPriceId).NotEmpty();
         RuleFor(x => x.FulfillmentMethod).Must(FulfillmentMethods.IsValid);
+        RuleFor(x => x.TakeawayBranchId).NotEmpty().When(x => x.FulfillmentMethod == FulfillmentMethods.Takeaway);
         RuleFor(x => x.CustomerAddressId).NotEmpty().When(x => x.FulfillmentMethod == FulfillmentMethods.HomeDelivery);
         RuleFor(x => x.DeliveryTimeSlotId).NotEmpty().When(x => x.FulfillmentMethod == FulfillmentMethods.HomeDelivery);
         RuleFor(x => x.StartDate).NotEqual(default(DateOnly));

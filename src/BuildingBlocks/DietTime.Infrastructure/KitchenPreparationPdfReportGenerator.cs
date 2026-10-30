@@ -76,6 +76,9 @@ public sealed class KitchenPreparationPdfReportGenerator : IKitchenPreparationRe
         foreach (var exception in summary.OperationalExceptions) section.AddParagraph("REVIEW REQUIRED: " + exception);
         foreach (var selection in summary.Selections)
         {
+            section.AddParagraph(selection.FulfillmentMethod == "TAKEAWAY"
+                ? $"Takeaway: {selection.TakeawayBranchName ?? "Branch not recorded"} {selection.TakeawayBranchAddress}"
+                : "Home Delivery");
             section.AddParagraph($"Order {selection.OrderReference} / Customer {selection.CustomerReference} - {selection.FinalizationStatus} - {string.Join(", ", selection.SelectionSources)}");
             section.AddParagraph("Dietary requirements: " + string.Join(", ", selection.DietaryRestrictions));
             foreach (var dish in selection.Dishes) section.AddParagraph($"{dish.Quantity} x {dish.MealName} ({dish.Category})");
