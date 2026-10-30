@@ -14,7 +14,7 @@ public static class PurchasablePlanPrices
         IQueryable<MealPlanTemplate> plans,
         DateTimeOffset now)
     {
-        var today = DateOnly.FromDateTime(now.UtcDateTime);
+        var today = DietTime.Application.SubscriptionMenuRules.QatarToday(now);
         return prices.Where(price =>
             price.IsActive && price.Amount > 0 && price.DurationDays > 0 &&
             price.CurrencyCode.Trim().Length == 3 &&

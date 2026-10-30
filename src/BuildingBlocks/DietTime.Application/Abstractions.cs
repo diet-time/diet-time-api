@@ -84,6 +84,7 @@ public interface ICustomerProfileService
     Task<CustomerPersonalInfoResponse?> UpdatePersonalInfoAsync(
         Guid userId, UpdateCustomerPersonalInfoRequest request, CancellationToken cancellationToken);
     Task<CustomerProfileResponse> UpdatePreferredNameAsync(Guid userId, string preferredName, CancellationToken cancellationToken);
+    Task<bool> UpdatePreferredLanguageAsync(Guid userId, string language, CancellationToken cancellationToken);
 }
 
 public enum CustomerAddressWriteStatus { Success, CustomerNotFound, AddressNotFound, InvalidDeliveryTimeSlot }
@@ -132,7 +133,8 @@ public enum PlaceOrderStatus
 public sealed record PlaceOrderResult(
     PlaceOrderStatus Status,
     PlaceOrderResponse? Order = null,
-    string? Detail = null);
+    string? Detail = null,
+    string? ErrorCode = null);
 
 public interface IOrderService
 {

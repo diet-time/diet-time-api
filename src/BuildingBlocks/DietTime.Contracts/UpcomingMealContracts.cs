@@ -14,7 +14,13 @@ public sealed record UpcomingMealDayResponse(Guid SubscriptionId, Guid Subscript
 }
 public sealed record UpcomingMealItemResponse(Guid MealItemId, Guid SlotOptionId,
     string MealName, string? Description, string? ImageUrl, decimal? Calories,
-    string Category, Guid MealTypeId);
+    string Category, Guid MealTypeId)
+{
+    // Nutrition is for one configured serving, not an assumed 100 g basis.
+    public NutritionResponse? Nutrition { get; init; }
+    // Each existing meal selection represents one serving of its assigned dish.
+    public int Quantity { get; init; } = 1;
+}
 public sealed record AssignedMealResponse(Guid SelectionId, string SelectionSource,
     UpcomingMealItemResponse Meal)
 {

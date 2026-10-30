@@ -29,6 +29,15 @@ public sealed class OrderService(
         Guid userId,
         CancellationToken cancellationToken)
     {
+        Guid? packageOptionId = null;
+        string? durationCode = null;
+        int? durationDays = null;
+        PlaceOrderResult Fail(PlaceOrderStatus status, string detail, string? code = null)
+        {
+            logger.LogWarning("Order validation rejected. PlanId={PlanId} PackageOptionId={PackageOptionId} PriceId={PriceId} DurationCode={DurationCode} DurationDays={DurationDays} Code={Code} Condition={Condition}",
+                request.MealPlanTemplateId, packageOptionId, request.MealPlanPriceId, durationCode, durationDays, code ?? status.ToString(), detail);
+            return new(status, null, detail, code);
+        }
         var key = idempotencyKey.Trim();
         await using var transaction = await db.Database.BeginTransactionAsync(
             IsolationLevel.ReadCommitted, cancellationToken);
@@ -68,28 +77,43 @@ public sealed class OrderService(
             .Include(x => x.Days.Where(day => day.IsActive))
             .SingleOrDefaultAsync(x => x.Id == request.MealPlanTemplateId, cancellationToken);
         if (template is null)
-            return Fail(PlaceOrderStatus.TemplateNotFound, "Meal plan template was not found.");
+            return Fail(PlaceOrderStatus.TemplateNotFound, "Meal plan template was not found.", "plan_not_found");
         if (!template.IsActive || !template.IsPublished ||
             await db.MealPlanTemplates.AnyAsync(version => version.VersionGroupId == template.VersionGroupId &&
                 version.IsPublished && version.VersionNumber > template.VersionNumber, cancellationToken) ||
             (template.ValidFrom.HasValue && today < template.ValidFrom.Value) ||
             (template.ValidUntil.HasValue && today > template.ValidUntil.Value))
-            return Fail(PlaceOrderStatus.TemplateUnavailable, "Meal plan template is not currently available.");
+            return Fail(PlaceOrderStatus.TemplateUnavailable, "Meal plan template is not currently available.",
+                !template.IsActive ? "plan_inactive" : !template.IsPublished ? "plan_not_published" :
+                (template.ValidFrom.HasValue && today < template.ValidFrom.Value || template.ValidUntil.HasValue && today > template.ValidUntil.Value)
+                    ? "plan_not_effective" : "plan_version_changed");
 
         // Keep the checked price stable until the agreed snapshot is committed.
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT id FROM public.meal_plan_prices WHERE id = {request.MealPlanPriceId} FOR SHARE", cancellationToken);
         var price = await db.MealPlanPrices.AsNoTracking()
             .Include(x => x.Translations)
+            .Include(x => x.PackageOption)
             .SingleOrDefaultAsync(x => x.Id == request.MealPlanPriceId, cancellationToken);
-        if (price is null || price.MealPlanTemplateId != template.Id)
-            return Fail(PlaceOrderStatus.PriceNotFound, "Meal plan price was not found for the selected template.");
+        if (price is null)
+            return Fail(PlaceOrderStatus.PriceNotFound, "The selected pricing record was not found.", "pricing_not_available");
+        packageOptionId = price.PackageOptionId; durationCode = price.PackageCode; durationDays = price.DurationDays;
+        if (price.MealPlanTemplateId != template.Id)
+            return Fail(PlaceOrderStatus.InvalidMealConfiguration, "The selected pricing record does not belong to this meal plan.", "invalid_plan_configuration");
         if (!price.IsActive || price.EffectiveFrom > now ||
             (price.EffectiveUntil.HasValue && price.EffectiveUntil.Value <= now))
-            return Fail(PlaceOrderStatus.PriceUnavailable, "Meal plan price is not currently effective.");
+            return Fail(PlaceOrderStatus.PriceUnavailable, "Meal plan price is not currently effective.", "pricing_not_available");
 
         if (!await PurchasablePlanPrices.Query(db, now).AnyAsync(item => item.Id == price.Id, cancellationToken))
-            return Fail(PlaceOrderStatus.PriceUnavailable, "The selected plan, package or duration is no longer purchasable.");
+        {
+            if (price.PackageOption is null || !price.PackageOption.IsActive)
+                return Fail(PlaceOrderStatus.PriceUnavailable, "The selected meal package is unavailable.", "package_not_available");
+            if (price.PackageOption.MealCount != price.MealsPerDay || price.PackageOption.SnackCount != price.SnacksPerDay)
+                return Fail(PlaceOrderStatus.PriceUnavailable, "The pricing quantities do not match the selected meal package.", "invalid_plan_configuration");
+            if (!await db.MealPlanPricePackages.AnyAsync(p => p.Code == price.PackageCode && p.IsActive && p.DurationDays == price.DurationDays, cancellationToken))
+                return Fail(PlaceOrderStatus.PriceUnavailable, "The selected package duration is unavailable.", "package_not_available");
+            return Fail(PlaceOrderStatus.PriceUnavailable, "The selected pricing configuration is unavailable.", "invalid_plan_configuration");
+        }
 
         if (!FulfillmentMethods.IsValid(request.FulfillmentMethod))
             return Fail(PlaceOrderStatus.InvalidFulfillmentMethod, "Choose TAKEAWAY or HOME_DELIVERY.");
@@ -99,7 +123,7 @@ public sealed class OrderService(
         var duration = await db.MealPlanPricePackages.AsNoTracking().SingleAsync(
             x => x.Code == price.PackageCode, cancellationToken);
         if (!duration.IsActive || duration.DurationDays != price.DurationDays)
-            return Fail(PlaceOrderStatus.PriceUnavailable, "The selected package is no longer purchasable.");
+            return Fail(PlaceOrderStatus.PriceUnavailable, "The selected package is no longer purchasable.", "package_not_available");
         if (!FulfillmentMethods.IsAllowed(duration.IsDeliveryEnabled, request.FulfillmentMethod))
             return Fail(PlaceOrderStatus.DeliveryDisabled, "This package is available for takeaway only.");
         var isDelivery = request.FulfillmentMethod == FulfillmentMethods.HomeDelivery;
@@ -420,7 +444,6 @@ public sealed class OrderService(
             ?? fallback;
     }
 
-    private static PlaceOrderResult Fail(PlaceOrderStatus status, string detail) => new(status, null, detail);
     private sealed record MealTypeRow(Guid Id, string Code, string Name);
     private sealed record NameRow(string LanguageCode, string Name);
 }

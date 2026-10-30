@@ -175,6 +175,16 @@ public sealed class CustomerProfileController(
         return Ok(ApiResponse<CustomerProfileResponse>.Ok(profile));
     }
 
+    [HttpPatch("preferred-language")]
+    public async Task<IActionResult> UpdatePreferredLanguage(UpdateCustomerLanguageRequest request, CancellationToken ct)
+    {
+        if (!TryGetUserId(out var userId)) return Unauthorized();
+        var language = request.Language.Trim().ToLowerInvariant();
+        if (language is not ("en" or "ar")) return BadRequest(new ProblemDetails
+            { Title = "Unsupported language", Detail = "Choose English or Arabic.", Status = 400 });
+        return await profiles.UpdatePreferredLanguageAsync(userId, language, ct) ? NoContent() : ProfileNotFound();
+    }
+
     private bool TryGetUserId(out Guid userId)
     {
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier)

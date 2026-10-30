@@ -240,6 +240,7 @@ public sealed record CustomerAllergenRequest(
     bool MedicallyConfirmed,
     string? Notes);
 public sealed record UpdateCustomerPreferredNameRequest(string PreferredName);
+public sealed record UpdateCustomerLanguageRequest(string Language);
 public sealed record UpdateCustomerPersonalInfoRequest(
     string FullName,
     DateOnly? DateOfBirth,

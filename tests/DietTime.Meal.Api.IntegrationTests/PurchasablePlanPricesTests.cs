@@ -9,6 +9,19 @@ public sealed class PurchasablePlanPricesTests
     private static readonly DateTimeOffset Now = new(2026, 10, 25, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]
+    public void Availability_uses_the_same_Qatar_date_as_order_validation_at_midnight()
+    {
+        var plan = Plan();
+        var price = Price(plan);
+        var midnightInQatar = new DateTimeOffset(2026, 10, 25, 21, 30, 0, TimeSpan.Zero);
+        plan.ValidFrom = new DateOnly(2026, 10, 26);
+        Assert.Single(PurchasablePlanPrices.Available(new[] { price }.AsQueryable(), new[] { Duration() }.AsQueryable(), new[] { plan }.AsQueryable(), midnightInQatar));
+        plan.ValidFrom = null;
+        plan.ValidUntil = new DateOnly(2026, 10, 25);
+        Assert.Empty(PurchasablePlanPrices.Available(new[] { price }.AsQueryable(), new[] { Duration() }.AsQueryable(), new[] { plan }.AsQueryable(), midnightInQatar));
+    }
+
+    [Fact]
     public void Thirteen_explicit_combinations_keep_their_configured_prices_and_ids()
     {
         var plan = Plan();

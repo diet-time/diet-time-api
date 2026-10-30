@@ -244,6 +244,112 @@ standalone SQL files (`20261026_package_discounted_price.sql`,
 were excluded from the 58-test regression run. No production database was changed
 and live WhatsApp delivery was not tested.
 
+## Checkout availability diagnostics
+
+The checkout previously labelled almost every HTTP 409 from `POST /api/v1/orders`
+as an unavailable plan, including database and concurrency failures. Summary preparation
+also skipped revalidation whenever a price ID was already present. Price metadata did
+not retain the API's separate plan/package identities, and an older asynchronous
+configuration response could replace a newer selection. The shared price predicate
+used UTC's date while order validation used Qatar's date, causing disagreement around
+midnight for date-limited plans. These confirmed code defects are fixed.
+
+Read-only inspection of the Flutter-configured staging API on 2026-10-30 found one
+available plan, five meal configurations and 15 distinct prices. The reported option
+was returned as active/available, with these separate identifiers:
+
+| Record | Identifier/value |
+| --- | --- |
+| Complete Balance template (`PLN_003`) | `81012dd5-6453-4dc9-87ae-d2c243e5bdcf` |
+| 3 Meals + 1 Snack package option | `d8967227-085d-43b7-839c-c70591d05a82` |
+| Six-day price | `2ff05101-2f41-41cf-a3dc-9589c75501ae` |
+| Duration code / amount / delivery | `SIX_DAYS` / QAR 699 / disabled |
+
+Both code-based and ID-based purchase-options requests resolved to that same plan.
+This establishes current catalogue availability; it does not identify the original
+failed POST's condition. No authenticated failed request body or direct database
+connection was available, and no live orders were created. Capture that POST's status,
+`code`, `detail` and requested plan/price IDs to confirm the original server rejection.
+
+Flutter now refreshes the exact selected plan/package/price, retains explicit API
+identities and ignores stale responses after switching plans or packages. Unavailable
+configurations disable submission with Retry and context-aware package/plan review.
+Valid refreshes retain customer, address, branch and schedule selections. Unknown
+database/network failures no longer imply an inactive plan. Recovery messages are
+available in English and Arabic; loading labels fit narrow screens.
+
+The existing order endpoint returns specific codes including `plan_not_found`,
+`plan_inactive`, `plan_not_published`, `plan_not_effective`, `plan_version_changed`,
+`package_not_available`, `pricing_not_available` and `invalid_plan_configuration`.
+Database failures retain their HTTP status with `database_conflict` or
+`concurrency_conflict`. Structured validation logs include plan ID, resolved package
+ID, price ID, duration and the failed condition; development database logs also identify
+the PostgreSQL constraint. Flutter debug logs include selected IDs, response status
+and error code without tokens, customer addresses or credentials.
+
+Changes are in `OrderService.cs`, `OrdersController.cs`, `ApiMiddleware.cs`,
+`PurchasablePlanPrices.cs`, the order result in `Abstractions.cs`, Flutter's checkout
+controller/state/summary, package model, order request logging, button loading layout
+and localization resources. Tests cover relationship failures, midnight availability,
+switching/returning, stale responses, independent IDs, recovery and legitimate inactive
+configuration rejection. No migration, price update or order approval policy change is
+required. Rebuild/deploy the API and Flutter app to use the changes.
+
+Validation: 340 Flutter tests, 210 .NET unit tests and 80 selected API/availability
+tests passed, with clean Dart analysis. The PostgreSQL matrix submitted 12 valid fixture
+combinations across two plans, two packages, three durations and both takeaway branches;
+existing delivery eligibility and approval regressions also passed. The three older
+tests referencing previously removed SQL files remain excluded.
+
+## Customer nutrition, menu navigation and language
+
+The dashboard's Explore Menu shortcut pushes the existing `/menu` route with a
+dashboard origin. The same menu screen keeps its plan, date, week and ordering
+behavior. Back to Dashboard appears only for an authenticated dashboard-origin
+visit with an existing return stack; it pops that stack. Guest and other entry
+points keep their original back behavior and Start Plan action.
+
+Existing tomorrow-menu and daily-menu responses now include optional `nutrition`
+using the existing `NutritionResponse`, and `quantity` on each dish. The existing
+selection schema assigns one serving per dish; nutrition values are already stored
+per configured serving in the meal editor. No 100 g scaling is assumed. Calories,
+macros, serving size and available additional nutrients come from existing tables.
+Available, selected and assigned dishes reuse the existing meal detail viewer for
+ingredients and allergens, including when selection is locked. Daily totals use
+only the current order/day's selected servings and update with unsaved draft changes.
+Missing values remain unknown rather than zero; incomplete nutrient totals are
+labelled unavailable. Genuine recorded zero values are retained.
+
+The dashboard English/Arabic control uses the existing language controller, shared
+preferences, ARB resources and generated Flutter localizations. Static labels across
+customer screens, status messages, navigation and dates follow the selected locale;
+Arabic uses the existing RTL support. Local preference survives app restarts and
+logout. Authenticated changes also best-effort synchronize the existing profile field
+through `PATCH /api/v1/customer/profile/preferred-language` with `{ "language": "ar" }`
+(or `en`). This endpoint updates only the authenticated customer's existing profile
+language and audit fields, without replacing questionnaire answers. Backend meal
+translations are reused with English fallback. Stored order snapshots and customer
+or staff-entered content are not automatically translated.
+
+API files: `UpcomingMealContracts.cs`, `UpcomingMealService.cs`, `ApiContracts.cs`,
+`Abstractions.cs`, `CustomerProfileController.cs` and `CustomerProfileService.cs`.
+Flutter changes cover the existing router/menu/detail viewer, daily and tomorrow meal
+cards, dashboard shortcut, language controller/control, nutrition models/widgets and
+customer presentation labels through `customer_copy.dart` and the existing ARB files.
+No database migration or new menu endpoint is required. Order approval, payment,
+booking, cutoff and meal-selection policies are unchanged.
+
+Validation: all 330 Flutter tests passed, followed by a nine-test check of the final
+dashboard language and address-label changes; Dart analysis reports no issues.
+All 210 .NET unit tests and 60 selected PostgreSQL-backed API regression tests passed.
+The two new API tests also passed after adding per-field English description fallback.
+Coverage includes guest/authenticated/dashboard-origin navigation, unchanged Start Plan
+behavior, back-stack return, Arabic RTL and saved locale restoration, real serving
+quantities, incomplete totals, draft total updates, locked meal details, confirmed
+nutrition and profile ownership. The same three older tests referencing previously
+removed SQL files remain excluded, as noted in the staff workflow validation above.
+Tests use a disposable local database; no production data was changed.
+
 ## Calendar behavior
 
 Meal-plan template days use stable uppercase weekday codes in `day_of_week` and are ordered by `display_order`. Menu lookup always selects the weekday matching the actual delivery date; numbered rolling-day progression is not supported.

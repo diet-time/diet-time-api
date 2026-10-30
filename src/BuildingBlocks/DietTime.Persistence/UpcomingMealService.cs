@@ -195,12 +195,20 @@ public sealed partial class UpcomingMealService(
             meals.TryGetValue(id, out var meal);
             var text = meal?.Translations.FirstOrDefault(t => t.LanguageCode == language)
                 ?? meal?.Translations.FirstOrDefault(t => t.LanguageCode == "en") ?? meal?.Translations.FirstOrDefault();
+            var english = meal?.Translations.FirstOrDefault(t => t.LanguageCode == "en");
             var image = media.FirstOrDefault(m => m.EntityId == id);
             var imageUrl = image?.ThumbnailUrl ?? image?.PublicUrl;
             if (string.IsNullOrWhiteSpace(imageUrl) && image is not null)
                 imageUrl = storage.GetPublicUrl(image.ThumbnailObjectKey ?? image.ObjectKey);
-            return new(id, optionId, text?.Name ?? meal?.Sku ?? "Meal no longer available",
-                text?.ShortDescription, imageUrl, meal?.Nutrition?.CaloriesKcal, category, typeId);
+            return new(id, optionId, !string.IsNullOrWhiteSpace(text?.Name) ? text.Name : english?.Name ?? meal?.Sku ?? "Meal no longer available",
+                !string.IsNullOrWhiteSpace(text?.ShortDescription) ? text.ShortDescription : english?.ShortDescription,
+                imageUrl, meal?.Nutrition?.CaloriesKcal, category, typeId)
+            {
+                Nutrition = meal?.Nutrition is { } n ? new(n.ServingQuantity, n.ServingUnit,
+                    n.CaloriesKcal, n.ProteinGrams, n.CarbohydratesGrams, n.FatGrams,
+                    n.SaturatedFatGrams, n.TransFatGrams, n.FiberGrams, n.SugarGrams,
+                    n.SodiumMg, n.CholesterolMg) : null
+            };
         }
         var reason = LockReason(day, order);
         if (!SubscriptionMenuRules.IsSelectionOpen(day.ServiceDate, clock.GetUtcNow()) || (!includeEligible && reason is not null)) alternatives = [];

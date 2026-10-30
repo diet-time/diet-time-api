@@ -58,11 +58,11 @@ public sealed class OrdersController(IOrderService orders, StaffOrderService wor
             PlaceOrderStatus.CustomerNotFound or PlaceOrderStatus.TemplateNotFound or
                 PlaceOrderStatus.PriceNotFound or PlaceOrderStatus.AddressNotFound or
                 PlaceOrderStatus.DeliveryTimeSlotNotFound => ProblemResponse(404,
-                    result.Status.ToString().ToSnakeCase(), result.Detail!),
+                    result.ErrorCode ?? result.Status.ToString().ToSnakeCase(), result.Detail!),
             PlaceOrderStatus.TemplateUnavailable or PlaceOrderStatus.PriceUnavailable or
                 PlaceOrderStatus.IdempotencyConflict or PlaceOrderStatus.PriceChanged =>
-                ProblemResponse(409, result.Status.ToString().ToSnakeCase(), result.Detail!),
-            _ => ProblemResponse(400, result.Status.ToString().ToSnakeCase(), result.Detail!)
+                ProblemResponse(409, result.ErrorCode ?? result.Status.ToString().ToSnakeCase(), result.Detail!),
+            _ => ProblemResponse(400, result.ErrorCode ?? result.Status.ToString().ToSnakeCase(), result.Detail!)
         };
     }
 

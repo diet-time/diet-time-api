@@ -146,6 +146,21 @@ public sealed class CustomerProfileService(
         return await LoadPersonalInfoAsync(userId, ct);
     }
 
+    public async Task<bool> UpdatePreferredLanguageAsync(Guid userId, string language, CancellationToken ct)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await AcquireProfileWriteLockAsync(userId, ct);
+        var profile = await LoadProfileForUpdateAsync(userId, includeDetails: false, ct);
+        if (profile is null || !profile.IsActive) return false;
+        profile.PreferredLanguage = language;
+        profile.UpdatedAt = clock.GetUtcNow();
+        profile.UpdatedBy = userId;
+        profile.RowVersion++;
+        await SaveChangesWithConcurrencyDiagnosticsAsync(userId, ct);
+        await transaction.CommitAsync(ct);
+        return true;
+    }
+
     public async Task<CustomerProfileResponse> UpdatePreferredNameAsync(
         Guid userId,
         string preferredName,
