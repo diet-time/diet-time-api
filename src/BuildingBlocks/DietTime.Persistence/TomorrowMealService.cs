@@ -99,8 +99,7 @@ public sealed partial class UpcomingMealService
         if (meals is null || snacks is null || meals.Count != day.MealCount || snacks.Count != day.SnackCount ||
             meals.Concat(snacks).Distinct().Count() != meals.Count + snacks.Count || meals.Concat(snacks).Contains(Guid.Empty))
             throw new UpcomingMealException(422, "invalid_selection", "Choose the exact number of different meals and snacks in your package.");
-        var profile = await ProfileAsync(order.CustomerProfileId, ct);
-        var eligible = await EligibleAsync(day, order, profile, ct);
+        var eligible = await EligibleAsync(day, order, ct);
         var chosen = new List<MealPlanSlotOption>();
         foreach (var (ids, category) in new[] { (meals, "meal"), (snacks, "snack") })
         foreach (var id in ids)
@@ -108,7 +107,7 @@ public sealed partial class UpcomingMealService
             var option = eligible.Where(o => o.MealItemId == id && Category(o) == category)
                 .OrderByDescending(o => o.IsDefault).ThenBy(o => o.DisplayOrder).ThenBy(o => o.Id).FirstOrDefault();
             if (option is null)
-                throw new UpcomingMealException(422, "meal_unavailable", "A selected dish is no longer available or suitable for your dietary needs. Refresh and choose again.");
+                throw new UpcomingMealException(422, "meal_unavailable", "A selected dish is no longer available. Refresh and choose again.");
             chosen.Add(option);
         }
         // Recheck immediately before writing, including time spent retrieving eligibility.
@@ -175,7 +174,7 @@ public sealed partial class UpcomingMealService
         {
             var profile = await ProfileAsync(order.CustomerProfileId, ct);
             valid &= profile.IsActive;
-            var eligible = profile.IsActive ? await EligibleAsync(day, order, profile, ct) : [];
+            var eligible = profile.IsActive ? await EligibleAsync(day, order, ct) : [];
             var savedIds = day.Selections.Where(s => s.Status != "CANCELLED").Select(s => s.MenuItemId).ToHashSet();
             var used = new HashSet<Guid>();
             foreach (var (category, count) in new[] { ("meal", day.MealCount!.Value), ("snack", day.SnackCount!.Value) })
@@ -297,7 +296,7 @@ public sealed partial class UpcomingMealService
                 d.Slots.Any(s => s.IsActive && s.MaximumSelection > 0 && s.MealType.IsActive &&
                     s.Options.Any(o => o.IsAvailable && o.AdditionalPrice == 0 && o.MealItem.IsAvailable && o.MealItem.Status == "ACTIVE")), ct);
             emptyStatus = configured ? "NEEDS_REVIEW" : "MENU_NOT_CONFIGURED";
-            reason = configured ? "There are not enough suitable dishes for your purchased package. Our team needs to review your menu and dietary requirements."
+            reason = configured ? "There are not enough available dishes for your purchased package. Our team needs to review the configured menu."
                 : "The menu for your scheduled delivery has not been configured yet. Your order is saved; our team needs to publish its dishes.";
             canConfirm = false;
         }

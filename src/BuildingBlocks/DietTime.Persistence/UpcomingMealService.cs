@@ -62,7 +62,7 @@ public sealed partial class UpcomingMealService(
                 SelectionCutoffAt = SubscriptionMenuRules.TomorrowCutoff(date),
                 CreatedAt = now, UpdatedAt = now, CreatedBy = order.CreatedBy, UpdatedBy = order.CreatedBy
             };
-            var candidates = await EligibleAsync(day, order, profile, ct);
+            var candidates = await EligibleAsync(day, order, ct);
             var chosenIds = new HashSet<Guid>();
             foreach (var (category, count) in new[] { ("meal", mealCount), ("snack", snackCount) })
             {
@@ -140,7 +140,7 @@ public sealed partial class UpcomingMealService(
             p.Id == o.CustomerProfileId && p.UserId == userId && p.IsActive), ct);
 
     private Task<CustomerProfile> ProfileAsync(Guid profileId, CancellationToken ct) =>
-        db.CustomerProfiles.AsNoTracking().Include(p => p.Allergens).Include(p => p.Preferences)
+        db.CustomerProfiles.AsNoTracking().Include(p => p.Preferences)
             .SingleAsync(p => p.Id == profileId, ct);
 
     private async Task<int> MenuWeekAsync(SubscriptionServiceDay day, CancellationToken ct)
@@ -152,7 +152,7 @@ public sealed partial class UpcomingMealService(
         return SubscriptionMenuRules.MenuWeek(day.ServiceSequence.Value, cycle);
     }
 
-    private async Task<List<MealPlanSlotOption>> EligibleAsync(SubscriptionServiceDay day, Order order, CustomerProfile profile, CancellationToken ct)
+    private async Task<List<MealPlanSlotOption>> EligibleAsync(SubscriptionServiceDay day, Order order, CancellationToken ct)
     {
         if (day.ServiceDate.DayOfWeek == DayOfWeek.Friday || day.MealPlanTemplateId is null ||
             !await db.MealPlanTemplates.AnyAsync(t => t.Id == day.MealPlanTemplateId && t.IsPublished, ct)) return [];
@@ -173,15 +173,14 @@ public sealed partial class UpcomingMealService(
                 (o.MealItem.AvailableFrom == null || o.MealItem.AvailableFrom <= atDelivery) &&
                 (o.MealItem.AvailableUntil == null || o.MealItem.AvailableUntil > atDelivery))
             .ToListAsync(ct);
-        return options.Where(o => MealPreferenceRules.IsEligible(o.MealItem, profile.Preferences)).ToList();
+        return options;
     }
 
     private async Task<DailyMealMenuResponse> MapAsync(SubscriptionServiceDay day, Order order, string language, CancellationToken ct, bool includeEligible = false)
     {
-        var profile = await ProfileAsync(order.CustomerProfileId, ct);
-        var alternatives = await EligibleAsync(day, order, profile, ct);
+        var alternatives = await EligibleAsync(day, order, ct);
         if (logger?.IsEnabled(LogLevel.Information) == true)
-            await LogMenuEligibilityAsync(day, order, profile, alternatives, ct);
+            await LogMenuEligibilityAsync(day, order, alternatives, ct);
         var saved = day.Selections.Where(s => s.Status != "CANCELLED").OrderBy(s => s.Category).ThenBy(s => s.SelectionNumber).ToArray();
         var ids = saved.Select(s => s.MenuItemId).Concat(alternatives.Select(o => o.MealItemId)).Distinct().ToArray();
         // Saved dishes remain visible even if operations later disables an option.
@@ -218,7 +217,7 @@ public sealed partial class UpcomingMealService(
         };
     }
 
-    private async Task LogMenuEligibilityAsync(SubscriptionServiceDay day, Order order, CustomerProfile profile,
+    private async Task LogMenuEligibilityAsync(SubscriptionServiceDay day, Order order,
         List<MealPlanSlotOption> eligible, CancellationToken ct)
     {
         if (logger is null) return;
@@ -268,8 +267,7 @@ public sealed partial class UpcomingMealService(
             if (!option.MealAvailable) reasons.Add("meal_unavailable");
             if (option.MealFrom > atDelivery) reasons.Add("meal_not_started");
             if (option.MealUntil <= atDelivery) reasons.Add("meal_expired");
-            // A dish passing all database predicates was removed by preference eligibility.
-            if (reasons.Count == 0) reasons.Add("dietary_preference_excluded");
+            if (reasons.Count == 0) reasons.Add("eligibility_mismatch");
             logger.LogInformation("Tomorrow menu option excluded. OrderId={OrderId} ServiceDayId={ServiceDayId} MenuWeek={MenuWeek} Weekday={Weekday} SlotId={SlotId} SlotOptionId={SlotOptionId} MealItemId={MealItemId} MealTypeCode={MealTypeCode} Reasons={Reasons}",
                 order.Id, day.Id, week, weekday, option.SlotId, option.Id, option.MealItemId,
                 option.MealTypeCode, string.Join(",", reasons));
@@ -310,20 +308,6 @@ public sealed partial class UpcomingMealService(
 
 public static class MealPreferenceRules
 {
-    public static bool IsEligible(MealItem meal, IEnumerable<CustomerProfilePreference> preferences) =>
-        preferences.All(p => p.PreferenceCode.Trim().ToUpperInvariant() switch
-        {
-            "VEGAN" => meal.IsVegan,
-            "VEGETARIAN" => meal.IsVegetarian || meal.IsVegan,
-            "GLUTEN_FREE" => meal.IsGlutenFree,
-            "DAIRY_FREE" => meal.IsDairyFree,
-            "NUT_FREE" => meal.IsNutFree,
-            "NO_SPICY" => !meal.IsSpicy,
-            "NONE" or "HIGH_PROTEIN" or "LOW_CARB" or "CHICKEN" or "BEEF" or "SEAFOOD" or
-                "ARABIC_CUISINE" or "BREAKFAST_LOVER" or "HEALTHY_SNACKS" => true,
-            _ => false // Unknown requirements need review; never infer dietary suitability.
-        });
-
     public static decimal Score(MealItem meal, IEnumerable<CustomerProfilePreference> preferences)
     {
         decimal score = 0;

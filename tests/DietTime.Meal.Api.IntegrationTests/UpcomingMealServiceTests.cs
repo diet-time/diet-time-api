@@ -238,7 +238,7 @@ public sealed partial class UpcomingMealServiceTests : IAsyncLifetime
     }
 
     [UpcomingPostgresFact]
-    public async Task Allergens_restrictions_inactive_slots_and_wrong_menu_days_are_excluded()
+    public async Task Dietary_preferences_do_not_exclude_dishes_but_inactive_slots_and_wrong_menu_days_do()
     {
         var menu = await PrepareAsync();
         var allergen = new Allergen { Id = Guid.NewGuid(), Code = "NUTS", IsActive = true };
@@ -250,7 +250,9 @@ public sealed partial class UpcomingMealServiceTests : IAsyncLifetime
         db.Add(new CustomerProfilePreference { Id = Guid.NewGuid(), CustomerProfileId = order.CustomerProfileId, PreferenceCode = "VEGAN", PreferenceType = "DIET_STYLE" });
         await db.SaveChangesAsync();
         var refreshed = (await Service().GetTomorrowAsync(order.Id, userId, "en", default))!;
-        Assert.DoesNotContain(refreshed.AvailableMeals, m => new[] { bad.Id, inactive.Id, restricted.Id }.Contains(m.MealItemId));
+        Assert.Contains(refreshed.AvailableMeals, m => m.MealItemId == bad.Id);
+        Assert.Contains(refreshed.AvailableMeals, m => m.MealItemId == restricted.Id);
+        Assert.DoesNotContain(refreshed.AvailableMeals, m => m.MealItemId == inactive.Id);
         await Assert.ThrowsAsync<UpcomingMealException>(() => Service().ConfirmAsync(order.Id, menu.SubscriptionServiceDayId!.Value, userId, "en", Request(menu), default));
         var ids = refreshed.AvailableMeals.Concat(refreshed.AvailableSnacks).Select(m => m.SlotOptionId).ToArray();
         var mappings = await db.MealPlanSlotOptions.Where(o => ids.Contains(o.Id)).Select(o => new { o.Slot.Day.MenuWeekday, o.Slot.Day.WeekNumber }).ToListAsync();
