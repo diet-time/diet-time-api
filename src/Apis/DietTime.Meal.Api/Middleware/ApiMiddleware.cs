@@ -72,8 +72,9 @@ public sealed class ExceptionMiddleware(RequestDelegate next, ILogger<ExceptionM
             {
                 details.Extensions["code"] = ex is DbUpdateConcurrencyException ? "concurrency_conflict" : "database_conflict";
                 details.Detail = "The order or record could not be saved. Please refresh and try again, or contact Diet Time with the correlation reference.";
-                if (environment.IsDevelopment() && ex.GetBaseException() is Npgsql.PostgresException postgres)
-                    logger.LogWarning("Database validation failed. SqlState={SqlState} Table={Table} Constraint={Constraint}", postgres.SqlState, postgres.TableName, postgres.ConstraintName);
+                if (ex.GetBaseException() is Npgsql.PostgresException postgres)
+                    logger.LogWarning("Database validation failed. SqlState={SqlState} Schema={Schema} Table={Table} Column={Column} Constraint={Constraint}",
+                        postgres.SqlState, postgres.SchemaName, postgres.TableName, postgres.ColumnName, postgres.ConstraintName);
             }
             if (ex is ValidationException validation) details.Extensions["errors"] = validation.Errors.Select(e => new { field = e.PropertyName, message = e.ErrorMessage });
             context.Response.StatusCode = status; context.Response.ContentType = "application/problem+json"; await context.Response.WriteAsJsonAsync(details);

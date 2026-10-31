@@ -266,10 +266,28 @@ was returned as active/available, with these separate identifiers:
 | Duration code / amount / delivery | `SIX_DAYS` / QAR 699 / disabled |
 
 Both code-based and ID-based purchase-options requests resolved to that same plan.
-This establishes current catalogue availability; it does not identify the original
-failed POST's condition. No authenticated failed request body or direct database
-connection was available, and no live orders were created. Capture that POST's status,
-`code`, `detail` and requested plan/price IDs to confirm the original server rejection.
+The subsequent PostgreSQL log supplied on 2026-10-31 identified the save failure:
+SQLSTATE `23514`, table `order_status_history`, constraint
+`ck_order_status_history_status`. The legacy history constraint accepts only
+`PENDING`, `CONFIRMED`, `ACTIVE`, `PAUSED`, `COMPLETED` and `CANCELLED`.
+Order placement now inserts `PENDING_APPROVAL`, so the entire order transaction rolls
+back even when the selected plan and price are valid. The earlier approval migration
+extended the order constraint but omitted the history constraint.
+
+The history constraint fix was applied directly to the database. The standalone script
+and redundant EF migration were removed; no additional migration is required for this
+fix. The corrected check permits the approval workflow and legacy statuses while
+preserving all order/history rows. `NOT VALID` avoids a historical-table scan while
+enforcing the constraint on all new writes. Keep PostgreSQL error-detail redaction enabled.
+Database metadata logs now include SQLSTATE, schema, table, column and
+constraint in Production as well as Development, without logging row values.
+
+The history-constraint regression recreates the legacy check, reproduces SQLSTATE
+`23514` and verifies that the failed purchase rolls back without notification events.
+After applying the schema correction twice, submission, hold/resume, rejection and approval
+succeed and historical records remain unchanged. All six focused migration/approval
+tests passed. The test retains the correction as an isolated database fixture and does
+not depend on migration files. The agent has not modified the live database.
 
 Flutter now refreshes the exact selected plan/package/price, retains explicit API
 identities and ignores stale responses after switching plans or packages. Unavailable
@@ -283,7 +301,7 @@ The existing order endpoint returns specific codes including `plan_not_found`,
 `package_not_available`, `pricing_not_available` and `invalid_plan_configuration`.
 Database failures retain their HTTP status with `database_conflict` or
 `concurrency_conflict`. Structured validation logs include plan ID, resolved package
-ID, price ID, duration and the failed condition; development database logs also identify
+ID, price ID, duration and the failed condition; database logs also identify
 the PostgreSQL constraint. Flutter debug logs include selected IDs, response status
 and error code without tokens, customer addresses or credentials.
 
@@ -292,8 +310,9 @@ Changes are in `OrderService.cs`, `OrdersController.cs`, `ApiMiddleware.cs`,
 controller/state/summary, package model, order request logging, button loading layout
 and localization resources. Tests cover relationship failures, midnight availability,
 switching/returning, stale responses, independent IDs, recovery and legitimate inactive
-configuration rejection. No migration, price update or order approval policy change is
-required. Rebuild/deploy the API and Flutter app to use the changes.
+configuration rejection. The history-constraint correction above resolves the reported
+`23514` failure; no price update or order approval policy change is
+required. Rebuild/deploy the API and Flutter app to use the checkout changes.
 
 Validation: 340 Flutter tests, 210 .NET unit tests and 80 selected API/availability
 tests passed, with clean Dart analysis. The PostgreSQL matrix submitted 12 valid fixture
