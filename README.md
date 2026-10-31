@@ -109,6 +109,14 @@ GET  /api/v1/delivery-time-slots
 
 Admin endpoints from the brief are under `/api/v1/admin` and require `Admin`, `Dietitian`, or `ContentManager`. Meal images are uploaded as multipart form data to `POST /api/v1/admin/meals/{mealId}/media/upload`; send `mediaType=IMAGE` for the original or `mediaType=THUMBNAIL` for its thumbnail. An original image must exist before its thumbnail is uploaded. The persisted `public_url` and `thumbnail_url` point to the public API media route (`GET /api/v1/media/{objectKey}`), while storage credentials and object URLs remain server-side. Set `Api__PublicBaseUrl` to the externally reachable API origin in deployed environments.
 
+Meal types support `GET /api/v1/admin/meal-types`, `POST /api/v1/admin/meal-types`
+and `PUT /api/v1/admin/meal-types/{id}` using the existing meal-type tables.
+Create accepts `code`, `nameEn`, optional `nameAr`, `displayOrder` (default `0`)
+and `isActive` (default `true`). Codes are normalized to uppercase; names allow
+up to 100 characters. Creation returns `201` with the ID, or `409` for an existing
+code. Deploy both the API and admin SPA for the Add Meal Type form fix; no schema
+change is required.
+
 Swagger is available outside Production at `/swagger`; liveness/database health is `/health`.
 
 ## Twilio WhatsApp messages

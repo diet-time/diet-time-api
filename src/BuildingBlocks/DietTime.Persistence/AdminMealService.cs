@@ -470,6 +470,42 @@ public sealed class AdminMealService(
         return new(items, new(page, pageSize, totalCount, (int)Math.Ceiling(totalCount / (double)pageSize)));
     }
 
+    public async Task<Guid?> CreateMealTypeAsync(UpsertMealTypeRequest request, Guid? userId, CancellationToken ct)
+    {
+        var code = request.Code.Trim().ToUpperInvariant();
+        if (await db.MealTypes.AnyAsync(x => x.Code == code, ct)) return null;
+        var now = clock.GetUtcNow();
+        var mealType = new MealType
+        {
+            Id = Guid.NewGuid(), Code = code, DisplayOrder = request.DisplayOrder,
+            IsActive = request.IsActive, CreatedAt = now, UpdatedAt = now,
+            CreatedBy = userId, UpdatedBy = userId
+        };
+        mealType.Translations.Add(new MealTypeTranslation
+        {
+            Id = Guid.NewGuid(), LanguageCode = "en", Name = request.NameEn.Trim(),
+            CreatedAt = now, UpdatedAt = now
+        });
+        if (!string.IsNullOrWhiteSpace(request.NameAr))
+            mealType.Translations.Add(new MealTypeTranslation
+            {
+                Id = Guid.NewGuid(), LanguageCode = "ar", Name = request.NameAr.Trim(),
+                CreatedAt = now, UpdatedAt = now
+            });
+        db.MealTypes.Add(mealType);
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException
+            { SqlState: Npgsql.PostgresErrorCodes.UniqueViolation, TableName: "meal_types" })
+        {
+            foreach (var translation in mealType.Translations) db.Entry(translation).State = EntityState.Detached;
+            db.Entry(mealType).State = EntityState.Detached;
+            return null;
+        }
+        cache.Remove("meal-types:en");
+        cache.Remove("meal-types:ar");
+        return mealType.Id;
+    }
+
     public async Task<AdminWriteResult> UpdateMealTypeAsync(Guid mealTypeId, UpsertMealTypeRequest request, Guid? userId, CancellationToken ct)
     {
         var mealType = await db.MealTypes.Include(x => x.Translations).SingleOrDefaultAsync(x => x.Id == mealTypeId, ct);

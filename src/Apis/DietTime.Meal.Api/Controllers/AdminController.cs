@@ -85,6 +85,14 @@ public sealed class AdminController(IAdminMealService admin, IStorageUrlService 
         var result = await admin.GetMealTypesAsync(search, sort, page, pageSize, ct);
         return Ok(ApiResponse<IReadOnlyList<AdminMealTypeResponse>>.Ok(result.Items, result.Meta));
     }
+    [HttpPost("meal-types")]
+    public async Task<ActionResult<ApiResponse<object>>> CreateMealType(UpsertMealTypeRequest request, CancellationToken ct)
+    {
+        var id = await admin.CreateMealTypeAsync(request, UserId, ct);
+        return id is null
+            ? Conflict(new ApiResponse<object> { Errors = [new("duplicate_code", "A meal type with this code already exists.", "code")] })
+            : StatusCode(StatusCodes.Status201Created, ApiResponse<object>.Ok(new { id }));
+    }
     [HttpPut("meal-types/{mealTypeId:guid}")] public async Task<IActionResult> UpdateMealType(Guid mealTypeId, UpsertMealTypeRequest request, CancellationToken ct)
     {
         return await admin.UpdateMealTypeAsync(mealTypeId, request, UserId, ct) switch

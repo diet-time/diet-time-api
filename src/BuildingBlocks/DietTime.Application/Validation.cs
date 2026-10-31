@@ -246,6 +246,17 @@ public sealed class UpsertMealCategoryRequestValidator : AbstractValidator<Upser
     }
 }
 
+public sealed class UpsertMealTypeRequestValidator : AbstractValidator<UpsertMealTypeRequest>
+{
+    public UpsertMealTypeRequestValidator()
+    {
+        RuleFor(x => x.Code).NotEmpty().MaximumLength(50).Matches("^[a-zA-Z0-9_-]+$");
+        RuleFor(x => x.NameEn).NotEmpty().MaximumLength(100);
+        RuleFor(x => x.NameAr).MaximumLength(100);
+        RuleFor(x => x.DisplayOrder).GreaterThanOrEqualTo(0);
+    }
+}
+
 public sealed class UpsertMealRequestValidator : AbstractValidator<UpsertMealRequest>
 {
     public UpsertMealRequestValidator()
