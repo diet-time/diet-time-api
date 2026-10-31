@@ -554,8 +554,16 @@ New order submissions with incomplete questionnaires return HTTP 400 with code
 `questionnaire_incomplete`. Existing order reads and idempotent replays continue to work.
 Ordinary login sends customers with current orders to the dashboard and other customers to
 plan browsing. Explicit checkout intent continues the selected order, allowing additional
-orders without repeating completed questionnaires. Profile still provides questionnaire
-editing; **Not Now** returns to browsing without marking an incomplete questionnaire complete.
+orders without repeating completed questionnaires. Profile exposes questionnaire editing
+as **Adjust My Plan**. **Not now** in that Profile flow returns to Profile without
+creating a deferred draft or marking an incomplete questionnaire complete. Initial
+onboarding retains its separate browsing/checkout navigation behavior.
+
+The customer app hides order IDs/references on dashboard cards, meal cards, the
+calendar, order details, confirmation and support messages. IDs remain in models,
+API requests and internal staff workflows. The dashboard has one New Plan quick
+action; My Plan opens the single plan's details (including pending plans), or the
+existing order list when several plans are present.
 
 Regression coverage is in `QuestionnaireCompletionTests.cs`,
 `QuestionnaireFlowIntegrationTests.cs`, and Flutter's `questionnaire_checkout_flow_test.dart`
