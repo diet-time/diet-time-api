@@ -195,12 +195,18 @@ refresh permissions. The dashboard's
 **Review pending orders** shortcut opens the same screen, and its review count now
 defaults to `PENDING_APPROVAL` even with the older empty status configuration.
 
-The React dashboard and Delivery Calendar also display a prominent **Pending
-confirmation orders** section above operational data. It shows the live pending
-count, previews up to five purchased orders, and opens each order's existing review
-dialog. The queue refreshes every 30 seconds, on window focus and after staff
-decisions. It is independent of the calendar month and service-date filters, and
-shows loading, failure or missing-access messages rather than hiding the section.
+The React dashboard and Delivery Calendar display a compact orange **Pending
+confirmation orders** banner only when the live pending count is greater than zero.
+It contains the count and links to Orders, with details and approval actions inside
+the Orders screen. The count refreshes every 30 seconds, on window focus and after
+staff decisions, independently of calendar filters. No banner appears while loading,
+when there are no pending orders, or without Orders access; load failures have a
+separate retryable error message.
+
+To record a received payment, open **Daily Orders → Review → Record Payment Status**,
+select **PAID**, enter the receipt/payment reference, and **Confirm**. This records
+the verified payment without collecting funds or approving a pending order. These
+actions currently require an Admin account with Orders write access.
 
 Admin-only endpoints under `/api/admin/orders`:
 
