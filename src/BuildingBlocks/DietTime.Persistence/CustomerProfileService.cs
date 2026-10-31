@@ -51,6 +51,10 @@ public sealed class CustomerProfileService(
         var now = clock.GetUtcNow();
         var today = DateOnly.FromDateTime(now.UtcDateTime);
         var profile = await LoadProfileForUpdateAsync(userId, includeDetails: true, ct);
+        // The existing per-user transaction lock also serializes first-profile creation.
+        // A retried creation must reuse the winner without resetting its answers or tour setting.
+        if (profile is not null && request.CreateOnly)
+            return new(ToResponse(profile, today), []);
 
         if (profile is null)
         {

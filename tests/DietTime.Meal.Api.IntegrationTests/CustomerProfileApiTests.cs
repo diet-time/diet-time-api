@@ -47,6 +47,57 @@ public sealed class CustomerProfileApiTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Missing_profile_returns_a_stable_onboarding_code_then_create_only_is_idempotent()
+    {
+        if (!enabled) return;
+        Authenticate(userId);
+        var missing = await client!.GetAsync("/api/v1/customer/profile");
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+        using var missingJson = JsonDocument.Parse(await missing.Content.ReadAsStringAsync());
+        Assert.Equal("profile_not_found", missingJson.RootElement.GetProperty("errors")[0].GetProperty("code").GetString());
+        var first = await client.PutAsJsonAsync("/api/v1/customer/profile", new
+        {
+            createOnly = true, genderCode = "FEMALE", dateOfBirth = "1995-03-17",
+            heightCm = 165, weightKg = 70, preferredLanguage = "en", onboardingStatus = "IN_PROGRESS"
+        });
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        var retry = await client.PutAsJsonAsync("/api/v1/customer/profile", new
+        {
+            createOnly = true, genderCode = "MALE", heightCm = 180, preferredLanguage = "ar",
+            onboardingStatus = "IN_PROGRESS", preferences = Array.Empty<object>(), allergens = Array.Empty<object>()
+        });
+        Assert.Equal(HttpStatusCode.OK, retry.StatusCode);
+        using var json = JsonDocument.Parse(await retry.Content.ReadAsStringAsync());
+        var data = json.RootElement.GetProperty("data");
+        Assert.Equal("FEMALE", data.GetProperty("genderCode").GetString());
+        Assert.Equal(165, data.GetProperty("heightCm").GetDecimal());
+        Assert.Equal("en", data.GetProperty("preferredLanguage").GetString());
+        Assert.True(data.GetProperty("isAppTourEnabled").GetBoolean());
+        using var scope = factory!.Services.CreateScope();
+        var verify = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
+        Assert.Single(await verify.CustomerProfiles.Where(p => p.UserId == userId).ToListAsync());
+        Assert.Equal(1, data.GetProperty("rowVersion").GetInt64());
+    }
+
+    [Fact]
+    public async Task Concurrent_create_only_requests_preserve_the_first_saved_profile()
+    {
+        if (!enabled) return;
+        Authenticate(userId);
+        var payload = new { createOnly = true, genderCode = "FEMALE", preferredLanguage = "en", onboardingStatus = "IN_PROGRESS" };
+        var responses = await Task.WhenAll(
+            client!.PutAsJsonAsync("/api/v1/customer/profile", payload),
+            client!.PutAsJsonAsync("/api/v1/customer/profile", payload));
+        Assert.All(responses, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
+        using var first = JsonDocument.Parse(await responses[0].Content.ReadAsStringAsync());
+        using var second = JsonDocument.Parse(await responses[1].Content.ReadAsStringAsync());
+        Assert.Equal(first.RootElement.GetProperty("data").GetProperty("id").GetGuid(), second.RootElement.GetProperty("data").GetProperty("id").GetGuid());
+        using var scope = factory!.Services.CreateScope();
+        var verify = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
+        var profile = await verify.CustomerProfiles.SingleAsync(p => p.UserId == userId);
+        Assert.Equal(1, profile.RowVersion);
+    }
+    [Fact]
     public async Task Creates_partial_profile_then_completes_it_with_bmi_and_nutrition()
     {
         if (!enabled) return;

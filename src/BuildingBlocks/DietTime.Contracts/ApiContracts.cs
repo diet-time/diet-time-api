@@ -210,6 +210,7 @@ public sealed record MealSelectionValidationResponse(bool IsValid, decimal Total
 
 public sealed class UpsertCustomerProfileRequest
 {
+    public bool CreateOnly { get; init; }
     private List<CustomerPreferenceRequest> preferences = [];
     private List<CustomerAllergenRequest> allergens = [];
 

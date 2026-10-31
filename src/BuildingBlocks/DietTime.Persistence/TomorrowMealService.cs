@@ -286,8 +286,15 @@ public sealed partial class UpcomingMealService
         // Incomplete provisional defaults must not stop a customer completing a valid set.
         var menu = await MapAsync(day, order, language, ct, includeEligible: canConfirm);
         var items = canConfirm ? menu.AvailableAlternatives : [];
-        var availableMeals = items.Where(i => i.Category == "meal").DistinctBy(i => i.MealItemId).ToArray();
-        var availableSnacks = items.Where(i => i.Category == "snack").DistinctBy(i => i.MealItemId).ToArray();
+        // Keep dish identity unique for package counts, while retaining every eligible meal type.
+        UpcomingMealItemResponse[] GroupDishes(string category) => items.Where(i => i.Category == category)
+            .GroupBy(i => i.MealItemId).Select(g => g.First() with
+            {
+                MealTypes = g.SelectMany(i => i.MealTypes).DistinctBy(t => t.Id)
+                    .OrderBy(t => t.DisplayOrder).ToArray()
+            }).ToArray();
+        var availableMeals = GroupDishes("meal");
+        var availableSnacks = GroupDishes("snack");
         var reason = day.ReviewReason;
         string? emptyStatus = null;
         if (canConfirm && (availableMeals.Length < day.MealCount || availableSnacks.Length < day.SnackCount))

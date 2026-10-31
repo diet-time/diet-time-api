@@ -190,6 +190,9 @@ public sealed partial class UpcomingMealService(
         var media = await db.MealMedia.AsNoTracking().Where(m => ids.Contains(m.EntityId) &&
             m.Status == "ACTIVE" && m.MediaType == MealMediaTypes.MealItem)
             .OrderByDescending(m => m.IsPrimary).ThenBy(m => m.DisplayOrder).ToListAsync(ct);
+        var typeIds = saved.Select(s => s.MealTypeId).Concat(alternatives.Select(o => o.Slot.MealTypeId)).Distinct().ToArray();
+        var types = await db.MealTypes.AsNoTracking().Include(t => t.Translations)
+            .Where(t => typeIds.Contains(t.Id)).ToDictionaryAsync(t => t.Id, ct);
         UpcomingMealItemResponse Item(Guid id, Guid optionId, string category, Guid typeId)
         {
             meals.TryGetValue(id, out var meal);
@@ -204,6 +207,11 @@ public sealed partial class UpcomingMealService(
                 !string.IsNullOrWhiteSpace(text?.ShortDescription) ? text.ShortDescription : english?.ShortDescription,
                 imageUrl, meal?.Nutrition?.CaloriesKcal, category, typeId)
             {
+                MealTypes = types.TryGetValue(typeId, out var type)
+                    ? [new(type.Id, type.Code,
+                        type.Translations.FirstOrDefault(t => t.LanguageCode == language)?.Name
+                            ?? type.Translations.FirstOrDefault(t => t.LanguageCode == "en")?.Name ?? type.Code,
+                        type.DisplayOrder)] : [],
                 Nutrition = meal?.Nutrition is { } n ? new(n.ServingQuantity, n.ServingUnit,
                     n.CaloriesKcal, n.ProteinGrams, n.CarbohydratesGrams, n.FatGrams,
                     n.SaturatedFatGrams, n.TransFatGrams, n.FiberGrams, n.SugarGrams,

@@ -20,6 +20,7 @@ public sealed record UpcomingMealItemResponse(Guid MealItemId, Guid SlotOptionId
     public NutritionResponse? Nutrition { get; init; }
     // Each existing meal selection represents one serving of its assigned dish.
     public int Quantity { get; init; } = 1;
+    public IReadOnlyList<MealTypeResponse> MealTypes { get; init; } = [];
 }
 public sealed record AssignedMealResponse(Guid SelectionId, string SelectionSource,
     UpcomingMealItemResponse Meal)

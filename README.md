@@ -564,8 +564,8 @@ duplicate profiles. No database migration or additional questionnaire tables are
 
 New order submissions with incomplete questionnaires return HTTP 400 with code
 `questionnaire_incomplete`. Existing order reads and idempotent replays continue to work.
-Ordinary login sends customers with current orders to the dashboard and other customers to
-plan browsing. Explicit checkout intent continues the selected order, allowing additional
+Ordinary and restored login open the dashboard, including customers with no current
+meal plans. Subscription browsing stays available from the dashboard. Explicit checkout intent continues the selected order, allowing additional
 orders without repeating completed questionnaires. Profile exposes questionnaire editing
 as **Adjust My Plan**. **Not now** in that Profile flow returns to Profile without
 creating a deferred draft or marking an incomplete questionnaire complete. Initial
