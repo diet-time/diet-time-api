@@ -180,12 +180,18 @@ explicit date revision and concurrency conflicts. Flutter shows Order Submitted,
 Pending Confirmation, hold/rejection reasons and separate payment status, and refreshes
 orders when returning to the app and periodically while viewing them.
 
-For staff approval, sign in with an **Admin** account and open **Orders → Review →
-Approve → Confirm**. The sidebar and approval controls use the existing screen
-permissions. If Orders is missing, check that the existing `/orders` menu is active
-and the account has Admin access, then sign out and back in to refresh permissions.
-Deploy the current admin SPA if the menu is still absent despite an active `/orders`
-permission. The dashboard's
+For staff approval, sign in with an **Admin** account and open **Daily Orders →
+Review / Approve → Approve → Confirm**. The separate `/orders/daily` screen lists
+orders by **meal service date**, defaults to today in Qatar, and includes all order
+statuses. **All dates** removes the date filter, and **All pending approvals** shows
+the pending backlog across every date. Date filtering uses the purchased service
+period and weekdays, so pending orders appear before fulfillment records exist.
+The sidebar and approval controls use the existing `/orders` screen permission.
+For older databases without an Orders menu definition, the API supplies that
+permission to existing Admin accounts without writing configuration or requiring
+SQL. Explicitly configured inactive Orders entries remain inactive; non-Admin
+permissions are unchanged. Deploy the API and SPA, then sign out and back in to
+refresh permissions. The dashboard's
 **Review pending orders** shortcut opens the same screen, and its review count now
 defaults to `PENDING_APPROVAL` even with the older empty status configuration.
 
@@ -198,7 +204,8 @@ shows loading, failure or missing-access messages rather than hiding the section
 
 Admin-only endpoints under `/api/admin/orders`:
 
-- `GET /` lists orders with optional `status`, `pageNumber` and `pageSize`.
+- `GET /` lists orders with optional `status`, `serviceDate` (`yyyy-MM-dd`),
+  `pageNumber` and `pageSize`. Service-date filtering happens before pagination.
 - `GET /{id}` returns the purchased order snapshot and audit history.
 - `POST /{id}/approve`, `/reject`, `/hold`, `/resume`, `/cancel`, `/activate`, `/complete`
   accept `{ "expectedRowVersion": 1, "reason": "..." }`.

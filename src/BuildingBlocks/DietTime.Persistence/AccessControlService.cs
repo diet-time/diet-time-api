@@ -183,7 +183,21 @@ public sealed class AccessControlService(
         var roleNames = await userManager.GetRolesAsync(user);
         var screens = await db.Menus.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.DisplayOrder).ToListAsync(cancellationToken);
         if (roleNames.Contains("Admin", StringComparer.OrdinalIgnoreCase))
-            return screens.Select(x => ToScreen(x, true, true)).ToList();
+        {
+            var result = screens.Select(x => ToScreen(x, true, true)).ToList();
+            // The review API already authorizes Admins. Older catalogues may predate its menu.
+            // Respect an explicitly configured (including inactive) Orders screen.
+            if (!await db.Menus.AnyAsync(x => x.RouteUrl == "/orders" ||
+                    (x.MainMenuCode == "OPERATIONS" && x.SubMenuCode == "ORDERS"), cancellationToken))
+                result.Add(ToScreen(new Menu
+                {
+                    Id = Guid.Parse("10000000-0000-0000-0000-000000000031"),
+                    MainMenuCode = "OPERATIONS", MainMenuName = "Operations",
+                    SubMenuCode = "ORDERS", SubMenuName = "Orders", RouteUrl = "/orders",
+                    Icon = "receipt_long", DisplayOrder = 45, IsActive = true
+                }, true, true));
+            return result.OrderBy(x => x.DisplayOrder).ToList();
+        }
 
         var roleIds = await db.ApplicationRoles.Where(x => x.IsActive && roleNames.Contains(x.RoleName)).Select(x => x.Id).ToListAsync(cancellationToken);
         var permissions = await db.RoleMenuMappings.AsNoTracking().Where(x => roleIds.Contains(x.RoleId)).ToListAsync(cancellationToken);

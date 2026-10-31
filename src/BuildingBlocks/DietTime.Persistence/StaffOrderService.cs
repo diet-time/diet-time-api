@@ -15,10 +15,17 @@ public sealed class OrderReviewException(int status, string code, string detail)
 public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, IOptions<OrderOptions> options,
     IUpcomingMealService meals, IOrderNotificationQueue notifications)
 {
-    public async Task<StaffOrderListResponse> ListAsync(string? status, int page, int size, CancellationToken ct)
+    public async Task<StaffOrderListResponse> ListAsync(string? status, int page, int size, CancellationToken ct, DateOnly? serviceDate = null)
     {
         var query = db.Orders.AsNoTracking();
         if (!string.IsNullOrWhiteSpace(status)) query = query.Where(x => x.Status == status);
+        if (serviceDate is { } day)
+        {
+            var weekday = day.DayOfWeek == DayOfWeek.Sunday ? 7 : (int)day.DayOfWeek;
+            // Purchased weekdays exist before approval; fulfillment records do not.
+            query = query.Where(x => x.StartDate <= day && x.EndDate >= day &&
+                x.DeliveryDays.Any(d => d.DayOfWeek == weekday));
+        }
         var total = await query.CountAsync(ct);
         var orders = await query.OrderByDescending(x => x.PlacedAt).ThenBy(x => x.Id)
             .Skip((page-1)*size).Take(size).Include(x => x.Meals).Include(x => x.DeliveryDays)

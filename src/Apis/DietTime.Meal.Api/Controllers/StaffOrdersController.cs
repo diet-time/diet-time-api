@@ -12,10 +12,18 @@ namespace DietTime.Meal.Api.Controllers;
 public sealed class StaffOrdersController(StaffOrderService orders) : ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> List(string? status = null, int pageNumber = 1, int pageSize = 20, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> List(string? status = null, int pageNumber = 1, int pageSize = 20, CancellationToken cancellationToken = default, string? serviceDate = null)
     {
         if (pageNumber < 1 || pageSize is < 1 or > 100 || status?.Length > 30) return BadRequest();
-        return Ok(await orders.ListAsync(status?.Trim().ToUpperInvariant(), pageNumber, pageSize, cancellationToken));
+        DateOnly? day = null;
+        if (serviceDate is not null)
+        {
+            if (!DateOnly.TryParseExact(serviceDate, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var parsed))
+                return BadRequest(new ProblemDetails { Detail = "Service date must use yyyy-MM-dd." });
+            day = parsed;
+        }
+        return Ok(await orders.ListAsync(status?.Trim().ToUpperInvariant(), pageNumber, pageSize, cancellationToken, day));
     }
 
     [HttpGet("{orderId:guid}")]
