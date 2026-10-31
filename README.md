@@ -234,8 +234,8 @@ row version and reason. Cancellation is allowed during review or before confirme
 service/preparation starts; later cancellation requires contacting Diet Time.
 
 Staff decisions are limited to pending review → confirmed/rejected. React shows only
-Approve and Reject as status actions, with financial recording in a separate Payment
-management section. Removed admin routes (`hold`, `resume`, `cancel`, `activate`,
+Approve and Reject as status actions, with a separate Record Payment Status button
+in the fixed order-dialog footer alongside Close. Removed admin routes (`hold`, `resume`, `cancel`, `activate`,
 `complete`) are unavailable, and the service rejects unsupported direct calls.
 Customer cancellation retains its existing ownership, date and preparation safeguards.
 The existing background worker automatically activates confirmed, payment-eligible
