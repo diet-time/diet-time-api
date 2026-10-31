@@ -33,16 +33,6 @@ public sealed class StaffOrdersController(StaffOrderService orders) : Controller
     public Task<IActionResult> Approve(Guid orderId, OrderReviewRequest r, CancellationToken ct) => Change(orderId, "approve", r, ct);
     [HttpPost("{orderId:guid}/reject")]
     public Task<IActionResult> Reject(Guid orderId, OrderReviewRequest r, CancellationToken ct) => Change(orderId, "reject", r, ct);
-    [HttpPost("{orderId:guid}/hold")]
-    public Task<IActionResult> Hold(Guid orderId, OrderReviewRequest r, CancellationToken ct) => Change(orderId, "hold", r, ct);
-    [HttpPost("{orderId:guid}/resume")]
-    public Task<IActionResult> Resume(Guid orderId, OrderReviewRequest r, CancellationToken ct) => Change(orderId, "resume", r, ct);
-    [HttpPost("{orderId:guid}/cancel")]
-    public Task<IActionResult> Cancel(Guid orderId, OrderReviewRequest r, CancellationToken ct) => Change(orderId, "cancel", r, ct);
-    [HttpPost("{orderId:guid}/activate")]
-    public Task<IActionResult> Activate(Guid orderId, OrderReviewRequest r, CancellationToken ct) => Change(orderId, "activate", r, ct);
-    [HttpPost("{orderId:guid}/complete")]
-    public Task<IActionResult> Complete(Guid orderId, OrderReviewRequest r, CancellationToken ct) => Change(orderId, "complete", r, ct);
     [HttpPost("{orderId:guid}/payment")]
     public Task<IActionResult> Payment(Guid orderId, RecordOrderPaymentRequest r, CancellationToken ct) => Change(orderId, "payment", new(r.ExpectedRowVersion, r.Reason), ct, r);
     [HttpPost("{orderId:guid}/revise-dates")]

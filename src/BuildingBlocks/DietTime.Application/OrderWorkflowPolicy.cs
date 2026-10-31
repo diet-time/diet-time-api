@@ -17,12 +17,16 @@ public static class OrderWorkflowPolicy
         (!order.RequiresPrepayment || order.PaymentStatus == PaymentStatuses.Paid) &&
         order.PaymentStatus is not ("FAILED" or "REFUND_PENDING" or "REFUNDED" or "PARTIALLY_REFUNDED");
 
+    // Activation is automatic; staff approval never changes the purchased schedule.
+    public static bool CanAutomaticallyActivate(Order order, DateOnly today) =>
+        order.Status == OrderStatuses.Confirmed && CanFulfill(order) &&
+        order.StartDate <= today && order.EndDate >= today;
+
     public static bool CanTransition(string from, string to) => (from, to) switch
     {
-        ("PENDING_APPROVAL" or "PENDING", "CONFIRMED" or "REJECTED" or "ON_HOLD" or "CANCELLED") => true,
-        ("ON_HOLD", "PENDING_APPROVAL" or "CANCELLED") => true,
-        ("CONFIRMED", "ACTIVE" or "CANCELLED") => true,
-        ("ACTIVE", "COMPLETED") => true,
+        ("PENDING_APPROVAL" or "PENDING", "CONFIRMED" or "REJECTED" or "CANCELLED") => true,
+        ("ON_HOLD", "CANCELLED") => true,
+        ("CONFIRMED", "CANCELLED") => true,
         _ => false
     };
 

@@ -55,6 +55,9 @@ public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, 
     public async Task<StaffOrderResponse> ChangeAsync(Guid id, string action, long version, string? reason, Guid actor,
         CancellationToken ct, RecordOrderPaymentRequest? payment = null, ReviseOrderDatesRequest? dates = null, Guid? customerUserId = null)
     {
+        // Customer cancellation remains available through its existing owned-order endpoint.
+        if (customerUserId.HasValue ? action != "cancel" : action is not ("approve" or "reject" or "payment" or "revise-dates"))
+            throw Error(409, "unsupported_order_action", "This manual order action is no longer supported.");
         if (version < 1 || reason?.Length > 500) throw Error(400, "invalid_review", "A current row version and a reason of at most 500 characters are required.");
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM public.orders WHERE id = {id} FOR UPDATE", ct);
@@ -63,7 +66,7 @@ public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, 
             throw Error(404, "order_not_found", "Order was not found.");
         if (order.RowVersion != version) throw Error(409, "order_changed", "This order changed. Refresh it before taking another action.");
         reason = reason?.Trim();
-        if (action is "reject" or "hold" or "cancel" or "payment" or "revise-dates" && string.IsNullOrWhiteSpace(reason))
+        if (action is "reject" or "cancel" or "payment" or "revise-dates" && string.IsNullOrWhiteSpace(reason))
             throw Error(400, "reason_required", "Enter a reason for this action.");
         var now = clock.GetUtcNow();
         var today = SubscriptionMenuRules.QatarToday(now);
@@ -104,7 +107,7 @@ public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, 
         }
         else
         {
-            var next = action switch { "approve" => "CONFIRMED", "reject" => "REJECTED", "hold" => "ON_HOLD", "resume" => "PENDING_APPROVAL", "cancel" => "CANCELLED", "activate" => "ACTIVE", "complete" => "COMPLETED", _ => "" };
+            var next = action switch { "approve" => "CONFIRMED", "reject" => "REJECTED", "cancel" => "CANCELLED", _ => "" };
             if (!OrderWorkflowPolicy.CanTransition(previous, next)) throw Error(409, "invalid_transition", $"Cannot {action} an order with status {previous}.");
             if (action == "approve")
             {
@@ -114,14 +117,6 @@ public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, 
                 eventCode = "ORDER_APPROVED";
             }
             if (action == "reject") { order.RejectedAt = now; order.RejectedBy = actor; order.RejectionReason = reason; eventCode = "ORDER_REJECTED"; }
-            if (action == "hold") { order.HoldReason = reason; eventCode = "ORDER_ON_HOLD"; }
-            if (action == "resume") order.HoldReason = null;
-            if (action == "activate" && (!OrderWorkflowPolicy.CanFulfill(order) || order.StartDate > today || order.EndDate < today))
-                throw Error(409, "activation_not_allowed", "Staff approval, payment eligibility and a started service period are required.");
-            if (action == "complete" && (await db.Set<SubscriptionServiceDay>().CountAsync(d => d.OrderId == id, ct) !=
-                SubscriptionMenuRules.ServiceDates(order.StartDate, order.EndDate, order.DeliveryDays.Select(d => d.DayOfWeek).ToHashSet()).Count() ||
-                await db.Set<SubscriptionServiceDay>().AnyAsync(d => d.OrderId == id && d.Status != "DELIVERED", ct)))
-                throw Error(409, "fulfillment_incomplete", "Every service day must be delivered before completion.");
             if (action == "cancel" && (previous == "CONFIRMED" && order.StartDate <= today || await db.Set<SubscriptionServiceDay>().AnyAsync(d => d.OrderId == id &&
                 (d.SelectionLocked || d.Status == "DELIVERED" || d.Status == "PREPARING" || d.Status == "OUT_FOR_DELIVERY"), ct)))
                 throw Error(409, "cancellation_review_required", "Cancellation is unavailable after the service period or preparation starts. Contact Diet Time.");
@@ -138,6 +133,41 @@ public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, 
         await tx.CommitAsync(ct);
         if (eventCode != null) notifications.TryEnqueue(id);
         return (await GetAsync(id, ct))!;
+    }
+
+    // Reuse the existing service-period/payment rules. Only confirmed orders with an
+    // initialized schedule qualify; historical terminal/legacy statuses are untouched.
+    public async Task ActivateDueAsync(CancellationToken ct)
+    {
+        var today = SubscriptionMenuRules.QatarToday(clock.GetUtcNow());
+        var ids = await db.Orders.AsNoTracking().Where(OrderWorkflowPolicy.FulfillmentFilter)
+            .Where(o => o.Status == OrderStatuses.Confirmed && o.StartDate <= today && o.EndDate >= today &&
+                db.Set<SubscriptionServiceDay>().Any(d => d.OrderId == o.Id))
+            .OrderBy(o => o.StartDate).ThenBy(o => o.Id).Select(o => o.Id).Take(100).ToArrayAsync(ct);
+        foreach (var id in ids)
+        {
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+            await db.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM public.orders WHERE id = {id} FOR UPDATE", ct);
+            // A competing approval/payment worker may have updated the order while we waited.
+            var order = await db.Orders.SingleAsync(o => o.Id == id, ct);
+            await db.Entry(order).ReloadAsync(ct);
+            var now = clock.GetUtcNow();
+            if (OrderWorkflowPolicy.CanAutomaticallyActivate(order, SubscriptionMenuRules.QatarToday(now)))
+            {
+                order.Status = OrderStatuses.Active;
+                order.RowVersion++;
+                order.UpdatedAt = now;
+                order.UpdatedBy = null;
+                db.OrderStatusHistory.Add(new OrderStatusHistory {
+                    Id = Guid.NewGuid(), OrderId = id, PreviousStatus = OrderStatuses.Confirmed,
+                    Status = OrderStatuses.Active, PreviousPaymentStatus = order.PaymentStatus,
+                    PaymentStatus = order.PaymentStatus, ChangedAt = now,
+                    Notes = "Automatically activated at the start of the service period."
+                });
+                await db.SaveChangesAsync(ct);
+            }
+            await tx.CommitAsync(ct);
+        }
     }
 
     private async Task ValidateScheduleAsync(Order o, DateOnly today, CancellationToken ct)

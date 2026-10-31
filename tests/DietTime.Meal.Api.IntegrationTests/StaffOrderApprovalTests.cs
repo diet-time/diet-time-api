@@ -58,16 +58,14 @@ public sealed partial class UpcomingMealServiceTests
         var preparation=await new AdminDeliveryCalendarService(db,Options.Create(new MenuRotationOptions()),clock).GetPreparationSummaryAsync(new(2026,10,27),default);
         Assert.Equal(1,preparation.OrderCount); // Only the historical approved seed order.
         var tomorrow=await client.GetFromJsonAsync<JsonElement>($"/api/v1/orders/{id}/tomorrow-menu");Assert.False(tomorrow.GetProperty("data").GetProperty("canConfirm").GetBoolean());
-        Assert.Equal(HttpStatusCode.BadRequest,(await Review(client,id,"hold",1,"")).StatusCode);
-        Assert.Equal(HttpStatusCode.OK,(await Review(client,id,"hold",1,"Please confirm the pickup time")).StatusCode);
-        Assert.Equal(HttpStatusCode.Conflict,(await Review(client,id,"approve",2)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK,(await Review(client,id,"resume",2)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK,(await Review(client,id,"approve",3)).StatusCode);
+        foreach (var removed in new[] { "hold", "resume", "cancel", "activate", "complete" })
+            Assert.Equal(HttpStatusCode.NotFound, (await Review(client,id,removed,1,"No longer supported")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK,(await Review(client,id,"approve",1)).StatusCode);
         var saved=await db.Orders.AsNoTracking().SingleAsync(o=>o.Id==id);
         Assert.Equal("CONFIRMED",saved.Status);Assert.Equal("PENDING",saved.PaymentStatus);Assert.Equal(userId,saved.ApprovedBy);Assert.NotNull(saved.ApprovedAt);
         Assert.Equal(12,await db.Set<SubscriptionServiceDay>().CountAsync(d=>d.OrderId==id));
-        Assert.Equal(HttpStatusCode.Conflict,(await Review(client,id,"approve",3)).StatusCode);
-        Assert.Equal(HttpStatusCode.Conflict,(await Review(client,id,"approve",4)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict,(await Review(client,id,"approve",1)).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict,(await Review(client,id,"approve",2)).StatusCode);
         Assert.Single(await db.OrderStatusHistory.Where(h=>h.OrderId==id&&h.PreviousStatus=="PENDING_APPROVAL"&&h.Status=="CONFIRMED").ToArrayAsync());
         Assert.Single(await db.OrderNotifications.Where(n=>n.OrderId==id&&n.EventCode=="ORDER_APPROVED").ToArrayAsync());
         Assert.Equal("CONFIRMED",(await db.Orders.AsNoTracking().SingleAsync(o=>o.Id==order.Id)).Status);
@@ -101,16 +99,61 @@ public sealed partial class UpcomingMealServiceTests
         var detail=await client.GetFromJsonAsync<JsonElement>($"/api/v1/orders/{id}");Assert.True(detail.GetProperty("review").GetProperty("awaitingPayment").GetBoolean());
         var paid=await client.PostAsJsonAsync($"/api/admin/orders/{id}/payment",new RecordOrderPaymentRequest(2,"PAID","Cash receipt 123"));Assert.Equal(HttpStatusCode.OK,paid.StatusCode);
         Assert.Equal(12,await db.Set<SubscriptionServiceDay>().CountAsync(d=>d.OrderId==id));
-        Assert.Equal(HttpStatusCode.Conflict,(await Review(client,id,"activate",3)).StatusCode);
+        await ActivateDue(factory); // Future service periods remain confirmed.
+        Assert.Equal("CONFIRMED",(await db.Orders.AsNoTracking().SingleAsync(o=>o.Id==id)).Status);
         clock.Now=new(2026,10,27,10,0,0,TimeSpan.Zero);
-        Assert.Equal(HttpStatusCode.OK,(await Review(client,id,"activate",3)).StatusCode);
+        await ActivateDue(factory);
+        Assert.Equal("ACTIVE",(await db.Orders.AsNoTracking().SingleAsync(o=>o.Id==id)).Status);
         Assert.Equal(HttpStatusCode.OK,(await client.PostAsJsonAsync($"/api/admin/orders/{id}/payment",new RecordOrderPaymentRequest(4,"FAILED","Payment reversed by staff"))).StatusCode);
         var saved=await db.Orders.AsNoTracking().SingleAsync(o=>o.Id==id);Assert.Equal("ACTIVE",saved.Status);Assert.False(OrderWorkflowPolicy.CanFulfill(saved));
         var summary=await new AdminDeliveryCalendarService(db,Options.Create(new MenuRotationOptions()),clock).GetPreparationSummaryAsync(new(2026,10,27),default);Assert.DoesNotContain(summary.Selections,s=>s.OrderReference==saved.OrderNumber);
-        Assert.Equal(HttpStatusCode.Conflict,(await Review(client,id,"complete",5)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,(await Review(client,id,"complete",5)).StatusCode);
         Assert.Equal(HttpStatusCode.OK,(await client.PostAsJsonAsync($"/api/admin/orders/{id}/payment",new RecordOrderPaymentRequest(5,"PAID","Replacement payment verified"))).StatusCode);
         await db.Set<SubscriptionServiceDay>().Where(d=>d.OrderId==id).ExecuteUpdateAsync(s=>s.SetProperty(d=>d.Status,"DELIVERED"));
-        Assert.Equal(HttpStatusCode.OK,(await Review(client,id,"complete",6)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound,(await Review(client,id,"complete",6)).StatusCode);
+        await ActivateDue(factory);
+        Assert.Equal("ACTIVE",(await db.Orders.AsNoTracking().SingleAsync(o=>o.Id==id)).Status);
+    }
+
+    private static async Task ActivateDue(ApiFactory factory)
+    {
+        await using var scope = factory.Services.CreateAsyncScope();
+        await scope.ServiceProvider.GetRequiredService<StaffOrderService>().ActivateDueAsync(default);
+    }
+
+    [UpcomingPostgresFact]
+    public async Task Automatic_activation_is_idempotent_audited_and_preserves_schedule_and_legacy_orders()
+    {
+        var setup=await ApprovalClient();await using var factory=setup.Factory;using var client=setup.Client;
+        var id=(await SubmitApprovalOrder(client,setup.Request)).GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.OK,(await Review(client,id,"approve",1)).StatusCode);
+        var before=await db.Orders.AsNoTracking().SingleAsync(o=>o.Id==id);
+        var days=await db.Set<SubscriptionServiceDay>().Where(d=>d.OrderId==id).OrderBy(d=>d.ServiceDate).Select(d=>d.ServiceDate).ToArrayAsync();
+        var legacy=new List<(Guid Id,string Status)>();
+        foreach(var status in new[]{"PENDING_APPROVAL","ON_HOLD","COMPLETED","CANCELLED","REJECTED","PENDING_ACTIVATION","PAUSED"})
+        {
+            var other=(await SubmitApprovalOrder(client,setup.Request)).GetProperty("id").GetGuid();
+            await db.Orders.Where(o=>o.Id==other).ExecuteUpdateAsync(s=>s.SetProperty(o=>o.Status,status));
+            legacy.Add((other,status));
+        }
+        // Qatar midnight is the start boundary, regardless of the server timezone.
+        clock.Now=new(2026,10,26,21,0,0,TimeSpan.Zero);
+        await Task.WhenAll(ActivateDue(factory),ActivateDue(factory));
+        await ActivateDue(factory);
+        var saved=await db.Orders.AsNoTracking().SingleAsync(o=>o.Id==id);
+        Assert.Equal("ACTIVE",saved.Status);Assert.Equal(before.RowVersion+1,saved.RowVersion);
+        Assert.Equal(before.PaymentStatus,saved.PaymentStatus);Assert.Equal(before.StartDate,saved.StartDate);Assert.Equal(before.EndDate,saved.EndDate);
+        Assert.Equal(days,await db.Set<SubscriptionServiceDay>().Where(d=>d.OrderId==id).OrderBy(d=>d.ServiceDate).Select(d=>d.ServiceDate).ToArrayAsync());
+        var history=Assert.Single(await db.OrderStatusHistory.Where(h=>h.OrderId==id&&h.Status=="ACTIVE").ToArrayAsync());
+        Assert.Equal("CONFIRMED",history.PreviousStatus);Assert.Null(history.ChangedBy);Assert.Contains("Automatically",history.Notes);
+        foreach(var other in legacy)Assert.Equal(other.Status,(await db.Orders.AsNoTracking().SingleAsync(o=>o.Id==other.Id)).Status);
+        await using var scope=factory.Services.CreateAsyncScope();
+        var service=scope.ServiceProvider.GetRequiredService<StaffOrderService>();
+        foreach(var action in new[]{"activate","complete","hold","resume","cancel","CONFIRMED"})
+        {
+            var error=await Assert.ThrowsAsync<OrderReviewException>(()=>service.ChangeAsync(id,action,saved.RowVersion,"Bypass attempt",userId,default));
+            Assert.Equal("unsupported_order_action",error.Code);
+        }
     }
 
     [UpcomingPostgresFact]

@@ -221,7 +221,7 @@ Admin-only endpoints under `/api/admin/orders`:
 - `GET /` lists orders with optional `status`, `serviceDate` (`yyyy-MM-dd`),
   `pageNumber` and `pageSize`. Service-date filtering happens before pagination.
 - `GET /{id}` returns the purchased order snapshot and audit history.
-- `POST /{id}/approve`, `/reject`, `/hold`, `/resume`, `/cancel`, `/activate`, `/complete`
+- `POST /{id}/approve`, `/reject`
   accept `{ "expectedRowVersion": 1, "reason": "..." }`.
 - `POST /{id}/payment` also accepts `paymentStatus`; a verification reference/reason
   is mandatory. This records manual payment/refund status without moving funds.
@@ -233,11 +233,23 @@ Customer `POST /api/v1/orders/{id}/cancel` checks ownership and accepts the curr
 row version and reason. Cancellation is allowed during review or before confirmed
 service/preparation starts; later cancellation requires contacting Diet Time.
 
-Transitions are centralized: pending review → confirmed/rejected/on hold/cancelled;
-on hold → pending review/cancelled; confirmed → active/cancelled; active → completed
-only after every purchased service day is delivered. Reasons are required for rejection,
-hold, cancellation, manual payments and revised dates. Row locks and version checks
-return HTTP 409 for conflicting or repeated actions without duplicating service records.
+Staff decisions are limited to pending review → confirmed/rejected. React shows only
+Approve and Reject as status actions, with financial recording in a separate Payment
+management section. Removed admin routes (`hold`, `resume`, `cancel`, `activate`,
+`complete`) are unavailable, and the service rejects unsupported direct calls.
+Customer cancellation retains its existing ownership, date and preparation safeguards.
+The existing background worker automatically activates confirmed, payment-eligible
+orders whose purchased service period has started and has not ended, with an initialized
+service schedule. It checks Qatar dates on startup and every 15 seconds; activation
+is row-locked, versioned and audited once, including across concurrent workers.
+Approval and activation never rewrite service dates. Completed, cancelled, rejected,
+held and other legacy statuses remain unchanged. No schema migration is needed.
+Explicit date revision remains an operational API for resolving agreed schedule
+conflicts; it is separate from approval and is not offered as a workflow button.
+Reasons remain required for rejection, cancellation, manual payments and revised dates.
+Row locks and version checks return HTTP 409 for conflicting or repeated actions
+without duplicating service records. Flutter keeps pending cards amber and confirmed/
+active cards dark green, uses Pending Approval, and explains rejected orders.
 Payment status is independent: approval never marks an order paid. Paid rejected or
 cancelled orders become `REFUND_PENDING`; refunds require the existing manual process.
 
@@ -321,7 +333,7 @@ constraint in Production as well as Development, without logging row values.
 
 The history-constraint regression recreates the legacy check, reproduces SQLSTATE
 `23514` and verifies that the failed purchase rolls back without notification events.
-After applying the schema correction twice, submission, hold/resume, rejection and approval
+After applying the schema correction twice, submission, rejection and approval
 succeed and historical records remain unchanged. All six focused migration/approval
 tests passed. The test retains the correction as an isolated database fixture and does
 not depend on migration files. The agent has not modified the live database.

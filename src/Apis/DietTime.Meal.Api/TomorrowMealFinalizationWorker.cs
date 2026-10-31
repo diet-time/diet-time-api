@@ -1,4 +1,5 @@
 using DietTime.Application;
+using DietTime.Persistence;
 
 namespace DietTime.Meal.Api;
 
@@ -14,6 +15,7 @@ public sealed class TomorrowMealFinalizationWorker(IServiceScopeFactory scopes,
             try
             {
                 await using var scope = scopes.CreateAsyncScope();
+                await scope.ServiceProvider.GetRequiredService<StaffOrderService>().ActivateDueAsync(stoppingToken);
                 await scope.ServiceProvider.GetRequiredService<IUpcomingMealService>().FinalizeDueAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
