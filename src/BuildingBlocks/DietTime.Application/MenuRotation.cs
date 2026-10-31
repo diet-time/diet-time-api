@@ -15,6 +15,17 @@ public sealed class MenuRotationOptions
 
 public static class MenuRotationResolver
 {
+    // Browsing follows consecutive calendar weeks from the existing template
+    // validity anchor. Delivery/service-day eligibility is resolved separately.
+    public static int? ResolveCalendarWeek(DateOnly date, int cycleWeeks, DateOnly? validFrom, DateOnly anchorDate)
+    {
+        if (cycleWeeks is < 1 or > 4)
+            throw new ArgumentOutOfRangeException(nameof(cycleWeeks), "Menu cycles must contain between one and four weeks.");
+        var start = validFrom ?? anchorDate;
+        if (date < start) return null;
+        return ((date.DayNumber - start.DayNumber) / 7) % cycleWeeks + 1;
+    }
+
     private static readonly MenuWeekday[] DeliveryWeekdays =
     [
         MenuWeekday.Saturday,

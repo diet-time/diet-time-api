@@ -245,6 +245,7 @@ public sealed class MealQueryService(
             {
                 p.CycleWeeks,
                 p.ValidFrom,
+                p.ValidUntil,
                 Days = p.Days.Where(d => d.IsActive).Select(d => new { d.Id, d.WeekNumber, d.MenuWeekday }).ToList()
             })
             .SingleOrDefaultAsync(ct);
@@ -254,11 +255,10 @@ public sealed class MealQueryService(
         for (var i = 0; i < numberOfDays; i++)
         {
             var date = startDate.AddDays(i); var weekday = MenuWeekdayExtensions.FromDate(date);
-            var week = MenuRotationResolver.ResolveWeek(date, plan.CycleWeeks, plan.ValidFrom, rotationOptions.Value.AnchorDate);
-            if (week is null) continue;
-            var day = plan.Days.FirstOrDefault(d => d.WeekNumber == week && d.MenuWeekday == weekday);
-            if (day is null) continue;
-            result.Add(new CalendarDayResponse(day.Id, date, weekday, culture.DateTimeFormat.GetAbbreviatedDayName(date.DayOfWeek), culture.DateTimeFormat.GetDayName(date.DayOfWeek), true));
+            var week = plan.ValidUntil is not null && date > plan.ValidUntil ? null
+                : MenuRotationResolver.ResolveCalendarWeek(date, plan.CycleWeeks, plan.ValidFrom, rotationOptions.Value.AnchorDate);
+            var day = week is null ? null : plan.Days.FirstOrDefault(d => d.WeekNumber == week && d.MenuWeekday == weekday);
+            result.Add(new CalendarDayResponse(day?.Id, date, weekday, culture.DateTimeFormat.GetAbbreviatedDayName(date.DayOfWeek), culture.DateTimeFormat.GetDayName(date.DayOfWeek), true));
         }
         return result;
     }
@@ -287,7 +287,7 @@ public sealed class MealQueryService(
                 .SingleOrDefaultAsync(ct);
             if (plan is null) return null;
             var weekday = MenuWeekdayExtensions.FromDate(request.Date.Value);
-            var week = MenuRotationResolver.ResolveWeek(request.Date.Value, plan.CycleWeeks, plan.ValidFrom, rotationOptions.Value.AnchorDate);
+            var week = MenuRotationResolver.ResolveCalendarWeek(request.Date.Value, plan.CycleWeeks, plan.ValidFrom, rotationOptions.Value.AnchorDate);
             dayId = week is null
                 ? null
                 : plan.Days.FirstOrDefault(d => d.WeekNumber == week && d.MenuWeekday == weekday)?.Id;
@@ -300,7 +300,7 @@ public sealed class MealQueryService(
         if (request.CategoryId.HasValue) q = q.Where(o => o.MealItem.CategoryId == request.CategoryId);
         if (!string.IsNullOrWhiteSpace(request.Search)) { var term = request.Search.Trim(); q = q.Where(o => o.MealItem.Translations.Any(t => t.LanguageCode == language && EF.Functions.ILike(t.Name, $"%{term}%"))); }
         var count = await q.CountAsync(ct); var pages = (int)Math.Ceiling(count / (double)request.PageSize);
-        var rows = await q.OrderBy(o => o.Slot.DisplayOrder).ThenBy(o => o.DisplayOrder).Skip((request.Page - 1) * request.PageSize).Take(request.PageSize)
+        var rows = await q.OrderBy(o => o.Slot.MealType.DisplayOrder).ThenBy(o => o.Slot.MealType.Code).ThenBy(o => o.Slot.DisplayOrder).ThenBy(o => o.DisplayOrder).ThenBy(o => o.Id).Skip((request.Page - 1) * request.PageSize).Take(request.PageSize)
             .Select(o => new CardRow(o.Id, o.MealPlanTemplateSlotId, o.MealItemId, o.Slot.MealType.Id, o.Slot.MealType.Code, o.Slot.MealType.DisplayOrder,
                 o.Slot.MealType.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault() ?? o.Slot.MealType.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? o.Slot.MealType.Code,
                 o.MealItem.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault() ?? o.MealItem.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? o.MealItem.Sku,
@@ -347,7 +347,7 @@ public sealed class MealQueryService(
         var cacheKey = $"meal-types:{language}";
         if (cache.TryGetValue(cacheKey, out IReadOnlyList<MealTypeResponse>? cached) && cached is not null)
             return cached;
-        var rows = await db.MealTypes.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.DisplayOrder).Select(x => new MealTypeResponse(x.Id, x.Code, x.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault() ?? x.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? x.Code, x.DisplayOrder)).ToListAsync(ct);
+        var rows = await db.MealTypes.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.DisplayOrder).ThenBy(x => x.Code).Select(x => new MealTypeResponse(x.Id, x.Code, x.Translations.Where(t => t.LanguageCode == language).Select(t => t.Name).FirstOrDefault() ?? x.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? x.Code, x.DisplayOrder)).ToListAsync(ct);
         rows.Insert(0, new(null, "ALL", language == "ar" ? "الكل" : "All", 0));
         cache.Set(cacheKey, rows, TimeSpan.FromMinutes(15));
         return rows;

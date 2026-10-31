@@ -600,6 +600,32 @@ Deploy the API, React SPA and Flutter updates with the audit tables available. E
 Admin accounts receive an Audit History navigation fallback when an older menu
 catalogue has no audit entry; explicitly inactive entries remain inactive.
 
+### Menu browsing calendar and rotation
+
+Menu browsing uses consecutive seven-day weeks from the selected template's
+`ValidFrom`, falling back to `MenuRotation:AnchorDate` only when `ValidFrom` is
+unset. The menu week is `1 + (whole weeks since that date % CycleWeeks)`; it
+repeats after the existing configured cycle length, without resetting monthly or
+using the customer's subscription start. The November 2026 examples in
+`MenuBrowsingCalendarTests.cs` and `MenuBrowsingMappingTests.cs` explicitly seed a
+November 1 start; they do not assert that this is the deployed business anchor.
+
+The existing guest home/menu and public plan calendar/menu endpoints share this
+browsing mapping. All dates in the browsing window are selectable, including
+unconfigured days. `isAvailable` on browsing calendar entries means selectable,
+not delivery eligibility. Missing week/day configurations, or dates outside the
+template validity window, return empty menus without substituting another day.
+Unconfigured public calendar dates have no `templateDayId`.
+
+Meal-type tabs and API slots follow `meal_types.display_order`, with the stable
+meal-type code breaking ties, then slot/option display order. Translated names
+and meal-type IDs do not determine the order. Flutter retains a selected type
+while it remains present; otherwise it selects the first configured type. The
+existing All filter remains available. Database weekday values remain named
+strings such as `SUNDAY` and `SATURDAY`, with explicit .NET date conversion.
+Subscription service-day rotation and Friday delivery restrictions are unchanged.
+No database schema change is needed; deploy the API and Flutter changes together.
+
 ### Customer app tour
 
 The manual customer app tour SQL script has been removed. The API requires
@@ -617,7 +643,12 @@ update metadata. Missing values are rejected.
 Flutter starts the spotlight walkthrough once the authenticated dashboard is ready.
 It highlights existing widgets and navigates through existing routes/tabs. The
 welcome step offers optional detailed guidance; features unavailable to that
-customer are skipped. The tour blocks interactions with underlying controls and
+customer are skipped. Individual dashboard steps highlight Menu, language,
+View Details, Choose Plan/Order Another Plan, the available tomorrow-meal button,
+and each bottom navigation button. Tooltips include feature icons, progress and
+explicit hints when Next opens another screen. Customers without plan cards or
+active plans skip the related order/meal steps before the walkthrough starts.
+The tour blocks interactions with underlying controls and
 never places orders, edits questionnaire answers or confirms meal selections.
 Checkout is explained from the existing plan list without creating a purchase draft.
 Tour text supports English and Arabic with the current application locale and RTL.
