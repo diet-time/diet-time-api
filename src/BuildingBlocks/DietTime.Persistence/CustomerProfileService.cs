@@ -75,6 +75,7 @@ public sealed class CustomerProfileService(
             profile.RowVersion++;
         }
 
+        var wasCompleted = CustomerQuestionnaireRules.IsComplete(profile, today);
         profile.GenderCode = NormalizeCode(request.GenderCode) ?? profile.GenderCode;
         profile.DateOfBirth = request.DateOfBirth ?? profile.DateOfBirth;
         profile.HeightCm = request.HeightCm ?? profile.HeightCm;
@@ -88,6 +89,8 @@ public sealed class CustomerProfileService(
         profile.OnboardingStatus = request.OnboardingStatus.Trim().ToUpperInvariant();
         profile.AllergensConfirmed = request.AllergensConfirmed ?? profile.AllergensConfirmed;
         profile.PreferencesConfirmed = request.PreferencesConfirmed ?? profile.PreferencesConfirmed;
+        if (!wasCompleted && profile.OnboardingStatus == "COMPLETED" && (!profile.AllergensConfirmed || !profile.PreferencesConfirmed))
+            profile.OnboardingStatus = "IN_PROGRESS";
         if (CustomerQuestionnaireRules.IsComplete(profile, today))
             profile.OnboardingCompletedAt ??= now;
         else if (profile.OnboardingStatus == "COMPLETED")

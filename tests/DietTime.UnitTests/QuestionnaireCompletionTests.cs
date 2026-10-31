@@ -11,7 +11,7 @@ public sealed class QuestionnaireCompletionTests
     {
         var profile = new CustomerProfile { OnboardingStatus = "COMPLETED" };
         Assert.False(CustomerQuestionnaireRules.IsComplete(profile, Today));
-        Assert.Equal("BASIC_DETAILS", CustomerQuestionnaireRules.NextStep(profile, Today));
+        Assert.Equal("GOAL", CustomerQuestionnaireRules.NextStep(profile, Today));
     }
 
     [Fact]

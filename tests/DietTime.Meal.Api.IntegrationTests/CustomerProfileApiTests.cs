@@ -445,6 +445,26 @@ public sealed class CustomerProfileApiTests : IAsyncLifetime
         Assert.False(await verificationDb.CustomerProfiles.AnyAsync(x => x.UserId == userId));
     }
 
+    [Fact]
+    public async Task Completion_requires_explicit_preference_and_allergen_confirmation()
+    {
+        if (!enabled) return;
+        Authenticate(userId);
+        var request = JsonSerializer.SerializeToNode(CompleteRequest())!.AsObject();
+        request["preferencesConfirmed"] = false;
+        request["allergensConfirmed"] = false;
+        var response = await client!.PutAsJsonAsync("/api/v1/customer/profile", request);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = json.RootElement.GetProperty("data");
+        Assert.Equal("IN_PROGRESS", data.GetProperty("onboardingStatus").GetString());
+        Assert.Equal("PREFERENCES", data.GetProperty("nextStepCode").GetString());
+        using var scope = factory!.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
+        var saved = await db.CustomerProfiles.SingleAsync(x => x.UserId == userId);
+        Assert.NotEqual("COMPLETED", saved.OnboardingStatus);
+        Assert.Null(saved.OnboardingCompletedAt);
+    }
     private object CompleteRequest(object[]? preferences = null, object[]? allergens = null) => new
     {
         genderCode = "MALE",
@@ -456,6 +476,7 @@ public sealed class CustomerProfileApiTests : IAsyncLifetime
         activityLevelCode = "LIGHT_ACTIVITY",
         preferredLanguage = "en",
         onboardingStatus = "COMPLETED",
+        preferencesConfirmed = true, allergensConfirmed = true,
         preferences = preferences ??
         [
             new { preferenceCode = "HIGH_PROTEIN", preferenceType = "DIET_STYLE", preferencePriority = 5 }

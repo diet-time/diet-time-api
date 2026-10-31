@@ -115,7 +115,9 @@ public sealed class UpdateCustomerPreferredNameRequestValidator
 {
     public UpdateCustomerPreferredNameRequestValidator()
     {
-        RuleFor(x => x.PreferredName).NotEmpty().MinimumLength(2).MaximumLength(150);
+        RuleFor(x => x.PreferredName).NotEmpty().MinimumLength(2).MaximumLength(150)
+            .Must(name => name is not null && name.Trim().Length >= 2 && name.Any(char.IsLetter))
+            .WithMessage("Enter a name, not a phone number.");
     }
 }
 
