@@ -14,7 +14,7 @@ public sealed class OperationsDashboardOptions
     public int PlansEndingSoonDays { get; set; } = 3;
     public int TodayDeliveriesLimit { get; set; } = 10;
     public string[] ActiveOrderStatuses { get; set; } = [OrderStatuses.Confirmed];
-    public string[] ReviewOrderStatuses { get; set; } = [];
+    public string[] ReviewOrderStatuses { get; set; } = [OrderStatuses.PendingApproval];
 }
 
 public sealed class OperationsDashboardService(
@@ -34,7 +34,7 @@ public sealed class OperationsDashboardService(
         DateOnly date, CancellationToken cancellationToken)
     {
         var activeStatuses = NormalizeStatuses(options.ActiveOrderStatuses, [OrderStatuses.Confirmed]);
-        var reviewStatuses = NormalizeStatuses(options.ReviewOrderStatuses, []);
+        var reviewStatuses = NormalizeStatuses(options.ReviewOrderStatuses, [OrderStatuses.PendingApproval]);
         var endOfWindow = date.AddDays(6);
 
         // One compact read model supplies workload, next-delivery, and attention metrics.

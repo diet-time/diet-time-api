@@ -180,6 +180,22 @@ explicit date revision and concurrency conflicts. Flutter shows Order Submitted,
 Pending Confirmation, hold/rejection reasons and separate payment status, and refreshes
 orders when returning to the app and periodically while viewing them.
 
+For staff approval, sign in with an **Admin** account and open **Orders → Review →
+Approve → Confirm**. The sidebar and approval controls use the existing screen
+permissions. If Orders is missing, check that the existing `/orders` menu is active
+and the account has Admin access, then sign out and back in to refresh permissions.
+Deploy the current admin SPA if the menu is still absent despite an active `/orders`
+permission. The dashboard's
+**Review pending orders** shortcut opens the same screen, and its review count now
+defaults to `PENDING_APPROVAL` even with the older empty status configuration.
+
+The React dashboard and Delivery Calendar also display a prominent **Pending
+confirmation orders** section above operational data. It shows the live pending
+count, previews up to five purchased orders, and opens each order's existing review
+dialog. The queue refreshes every 30 seconds, on window focus and after staff
+decisions. It is independent of the calendar month and service-date filters, and
+shows loading, failure or missing-access messages rather than hiding the section.
+
 Admin-only endpoints under `/api/admin/orders`:
 
 - `GET /` lists orders with optional `status`, `pageNumber` and `pageSize`.
