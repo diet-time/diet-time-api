@@ -552,3 +552,76 @@ editing; **Not Now** returns to browsing without marking an incomplete questionn
 Regression coverage is in `QuestionnaireCompletionTests.cs`,
 `QuestionnaireFlowIntegrationTests.cs`, and Flutter's `questionnaire_checkout_flow_test.dart`
 and updated journey tests.
+
+## API audit trail
+
+The audit SQL setup has already been applied and its manual script removed.
+The API requires `audit_events` and `audit_event_targets` in the target database;
+existing meal-item audit logs and order-status history are preserved. There is
+no backfill of actions that occurred before deployment.
+
+Every completed request under `/api` is recorded, including reads, automatic
+refreshes, mutations and rejected/failed requests. CORS preflight, `/health` and
+non-API assets are excluded. Screen navigation and unsaved edits are not tracked.
+Records include the authenticated user ID/name, server UTC timestamp, application,
+controller/action, HTTP result, safe affected-record identifiers and request trace.
+Successful login/refresh responses identify the authenticated user; unauthenticated
+attempts remain anonymous. User/resource deletion does not cascade into audit history.
+
+The updated Flutter and React clients send `X-Client-App` labels. These labels are
+informational, not authorization credentials; actor identity comes from validated
+authentication. Older clients still produce audit records labelled `API`.
+Passwords, OTPs, access/refresh/reset tokens, request/response bodies, query values,
+questionnaire answers and before/after field contents are not copied into audit tables.
+This is an API activity history, not an audit of direct database changes or workers.
+
+Admins can use **Audit History** to filter by user name/ID, application, area,
+action, result and date. UTC timestamps and inclusive date filters are displayed
+and interpreted in Qatar local time. The read-only endpoint is
+`GET /api/v1/admin/audit` (also `/api/admin/audit`), with `page`, `pageSize`,
+`entityType`, `action`, `user`, `userId`, `source`, `outcome`, `from`, and `until`.
+There are no audit update/delete endpoints or automatic history deletion.
+
+Audit persistence uses an independent scope with a three-second timeout. If storage
+fails, `AUDIT_WRITE_FAILED` is logged with safe metadata and the business response is
+preserved. Monitor these errors: failed audit inserts remain in application logs,
+not in the audit tables, and are not automatically replayed. Audit HTTP outcomes
+describe request results, not a field-by-field database transaction history.
+
+Deploy the API, React SPA and Flutter updates with the audit tables available. Existing
+Admin accounts receive an Audit History navigation fallback when an older menu
+catalogue has no audit entry; explicitly inactive entries remain inactive.
+
+### Customer app tour
+
+The manual customer app tour SQL script has been removed. The API requires
+`customer_profiles.is_app_tour_enabled` with a database default of `FALSE`,
+retaining existing customers' opt-out. New
+profiles explicitly start enabled in both existing profile-creation paths. Login,
+profile reads and questionnaire updates do not reset this preference.
+
+The authenticated profile GET includes `isAppTourEnabled`.
+`PATCH /api/v1/customer/profile/app-tour` accepts `{ "isAppTourEnabled": false }`
+and returns the saved value, timestamp and row version. Identity comes from the
+access token; this operation updates only that customer's preference and standard
+update metadata. Missing values are rejected.
+
+Flutter starts the spotlight walkthrough once the authenticated dashboard is ready.
+It highlights existing widgets and navigates through existing routes/tabs. The
+welcome step offers optional detailed guidance; features unavailable to that
+customer are skipped. The tour blocks interactions with underlying controls and
+never places orders, edits questionnaire answers or confirms meal selections.
+Checkout is explained from the existing plan list without creating a purchase draft.
+Tour text supports English and Arabic with the current application locale and RTL.
+
+Profile's **Enable App Tour** switch saves the customer preference; return to Home
+after enabling it to replay. Skip and Finish immediately dismiss the overlay and
+return to the same dashboard, then save `false`. On a failed save, the previous
+saved switch value remains visible and a retry action is shown. There is no shared
+device completion flag. Account changes cancel the tour and discard old in-flight
+save results. Existing customers remain opted out until they enable the switch.
+
+Regression coverage: `test/app_tour_test.dart` in the Flutter repository and
+`CustomerAppTourTests.cs` in the API integration tests. The latter uses
+`UPCOMING_MEALS_TEST_CONNECTION` against an isolated PostgreSQL database and
+verifies ownership, profile creation and preference updates.

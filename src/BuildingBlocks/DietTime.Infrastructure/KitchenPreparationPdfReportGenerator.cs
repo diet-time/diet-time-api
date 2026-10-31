@@ -78,9 +78,11 @@ public sealed class KitchenPreparationPdfReportGenerator : IKitchenPreparationRe
         {
             section.AddParagraph(selection.FulfillmentMethod == "TAKEAWAY"
                 ? $"Takeaway: {selection.TakeawayBranchName ?? "Branch not recorded"} {selection.TakeawayBranchAddress}"
-                : "Home Delivery");
-            section.AddParagraph($"Order {selection.OrderReference} / Customer {selection.CustomerReference} - {selection.FinalizationStatus} - {string.Join(", ", selection.SelectionSources)}");
-            section.AddParagraph("Dietary requirements: " + string.Join(", ", selection.DietaryRestrictions));
+                : "Home Delivery: " + (selection.DeliveryAddress ?? "Address not recorded"));
+            section.AddParagraph($"Order {selection.OrderReference} / Customer: {selection.CustomerName ?? "Name not recorded"} - {selection.FinalizationStatus} - {string.Join(", ", selection.SelectionSources)}");
+            var dietaryLabels = selection.DietaryRestrictionLabels.Count > 0 ? selection.DietaryRestrictionLabels
+                : selection.DietaryRestrictions.Select(PreparationDisplayText.Label).ToArray();
+            section.AddParagraph("Dietary requirements: " + (dietaryLabels.Count > 0 ? string.Join(", ", dietaryLabels) : "None recorded"));
             foreach (var dish in selection.Dishes) section.AddParagraph($"{dish.Quantity} x {dish.MealName} ({dish.Category})");
         }
 

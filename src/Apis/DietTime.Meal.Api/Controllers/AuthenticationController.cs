@@ -5,6 +5,7 @@ using DietTime.Application;
 using DietTime.Contracts;
 using DietTime.Domain;
 using DietTime.Persistence;
+using DietTime.Meal.Api.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -23,7 +24,8 @@ public class AuthenticationController(
     UserManager<ApplicationUser> userManager,
     IUserProfileService userProfileService,
     DietTimeDbContext context,
-    IWebHostEnvironment environment) : ControllerBase
+    IWebHostEnvironment environment,
+    AuditRequestCapture? audit = null) : ControllerBase
 {
     private const string RefreshCookieName = "diet_time_refresh";
 
@@ -260,6 +262,10 @@ public class AuthenticationController(
             if (!success)
                 return BadRequest(new ProblemDetails { Title = "Operation Failed", Detail = "Failed to set new password" });
 
+            // The account was resolved from a validated reset credential, not a client-supplied user ID.
+            audit?.Targets.Add(("userId", userAttribute.UserId.ToString()));
+            if (audit is not null && User.Identity?.IsAuthenticated != true)
+                audit.AuthenticatedUserId = userAttribute.UserId;
             return Ok(new SetPasswordResponse(
                 "Password has been successfully reset. You can now login with your new password.",
                 true));

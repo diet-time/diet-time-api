@@ -85,6 +85,7 @@ public interface ICustomerProfileService
         Guid userId, UpdateCustomerPersonalInfoRequest request, CancellationToken cancellationToken);
     Task<CustomerProfileResponse> UpdatePreferredNameAsync(Guid userId, string preferredName, CancellationToken cancellationToken);
     Task<bool> UpdatePreferredLanguageAsync(Guid userId, string language, CancellationToken cancellationToken);
+    Task<CustomerAppTourResponse?> UpdateAppTourAsync(Guid userId, bool enabled, CancellationToken cancellationToken);
 }
 
 public enum CustomerAddressWriteStatus { Success, CustomerNotFound, AddressNotFound, InvalidDeliveryTimeSlot }

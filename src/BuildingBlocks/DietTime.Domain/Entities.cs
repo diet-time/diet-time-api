@@ -137,6 +137,7 @@ public sealed class MealPlanPriceTranslation : Translation
 
 public sealed class CustomerProfile : Entity
 {
+    public bool IsAppTourEnabled { get; set; }
     public Guid? UserId { get; set; }
     public string? PreferredName { get; set; }
     public string? GenderCode { get; set; }

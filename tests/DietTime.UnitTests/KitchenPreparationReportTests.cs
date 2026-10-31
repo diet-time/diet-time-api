@@ -12,6 +12,40 @@ namespace DietTime.UnitTests;
 
 public sealed class KitchenPreparationReportTests
 {
+    [Theory]
+    [InlineData("HIGH_PROTEIN", "High Protein")]
+    [InlineData("SEAFOOD", "Seafood")]
+    [InlineData("ALLERGEN: EGGS", "Allergen: Eggs")]
+    [InlineData("LOW_CARB", "Low Carb")]
+    [InlineData("Allergen: Hen eggs", "Allergen: Hen eggs")]
+    public void Dietary_codes_have_readable_fallback_labels(string code, string expected) =>
+        Assert.Equal(expected, DietTime.Application.PreparationDisplayText.Label(code));
+
+    [Fact]
+    public async Task Pdf_includes_customer_names_home_addresses_and_friendly_dietary_labels()
+    {
+        var customerId = Guid.NewGuid();
+        var summary = new DeliveryPreparationSummaryResponse(new(2026, 8, 16), "Preliminary", 2, 1, 0, [], [])
+        {
+            IsPreliminary = true,
+            Selections = [
+                new KitchenSelectionResponse(Guid.NewGuid(), "ORD-1", customerId, "UNFINALIZED", [], [], ["HIGH_PROTEIN", "ALLERGEN: EGGS"], null)
+                { CustomerName = "Biju Manayagath", DeliveryAddress = "Building 10, Street 20, Zone 30, Doha",
+                    DietaryRestrictionLabels = ["High Protein", "Allergen: Hen eggs"] },
+                new KitchenSelectionResponse(Guid.NewGuid(), "ORD-2", customerId, "UNFINALIZED", [], [], [], null,
+                    "TAKEAWAY", "Azizia branch") { CustomerName = "Biju Manayagath", DeliveryAddress = "Must not display for takeaway" }
+            ]
+        };
+        var text = ExtractText(await Generator().GenerateAsync(summary, default));
+        Assert.Contains("Biju Manayagath", text);
+        Assert.Contains("Building 10, Street 20, Zone 30, Doha", text);
+        Assert.Contains("High Protein, Allergen: Hen eggs", text);
+        Assert.Contains("Azizia branch", text);
+        Assert.DoesNotContain(customerId.ToString(), text);
+        Assert.DoesNotContain("Must not display for takeaway", text);
+        Assert.DoesNotContain("HIGH_PROTEIN", text);
+    }
+
     [Fact]
     public async Task Report_contains_summary_menu_totals_plans_and_plural_labels()
     {

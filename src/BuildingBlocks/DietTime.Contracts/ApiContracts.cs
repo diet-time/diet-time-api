@@ -315,7 +315,11 @@ public sealed record CustomerProfileResponse(
     bool IsQuestionnaireComplete = false, string NextStepCode = "BASIC_DETAILS")
 {
     public bool ShouldShowOnboarding => !IsQuestionnaireComplete;
+    public bool IsAppTourEnabled { get; init; }
 }
+
+public sealed record UpdateCustomerAppTourRequest(bool? IsAppTourEnabled);
+public sealed record CustomerAppTourResponse(bool IsAppTourEnabled, DateTimeOffset UpdatedAt, long RowVersion);
 
 public sealed record UpsertCustomerAddressRequest(
     string? AddressName,

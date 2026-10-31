@@ -15,6 +15,16 @@ namespace DietTime.Meal.Api.Controllers;
 public sealed class CustomerProfileController(
     ICustomerProfileService profiles) : ControllerBase
 {
+    [HttpPatch("app-tour")]
+    public async Task<IActionResult> UpdateAppTour(UpdateCustomerAppTourRequest request, CancellationToken ct)
+    {
+        if (!TryGetUserId(out var userId)) return Unauthorized();
+        if (!request.IsAppTourEnabled.HasValue)
+            return BadRequest(new ApiResponse<object> { Errors = [new("app_tour_preference_required", "isAppTourEnabled is required.")] });
+        var preference = await profiles.UpdateAppTourAsync(userId, request.IsAppTourEnabled.Value, ct);
+        return preference is null ? ProfileNotFound() : Ok(ApiResponse<CustomerAppTourResponse>.Ok(preference));
+    }
+
     /// <summary>Gets the authenticated customer's profile.</summary>
     /// <remarks>
     /// Returns only the profile belonging to the user identified by the access token.

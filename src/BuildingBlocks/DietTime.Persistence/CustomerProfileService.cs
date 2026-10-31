@@ -58,6 +58,7 @@ public sealed class CustomerProfileService(
             {
                 Id = Guid.NewGuid(),
                 UserId = userId,
+                IsAppTourEnabled = true,
                 CreatedAt = now,
                 CreatedBy = userId,
                 IsActive = true,
@@ -161,6 +162,21 @@ public sealed class CustomerProfileService(
         return true;
     }
 
+    public async Task<CustomerAppTourResponse?> UpdateAppTourAsync(Guid userId, bool enabled, CancellationToken ct)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await AcquireProfileWriteLockAsync(userId, ct);
+        var profile = await LoadProfileForUpdateAsync(userId, includeDetails: false, ct);
+        if (profile is null || !profile.IsActive) return null;
+        profile.IsAppTourEnabled = enabled;
+        profile.UpdatedAt = clock.GetUtcNow();
+        profile.UpdatedBy = userId;
+        profile.RowVersion++;
+        await SaveChangesWithConcurrencyDiagnosticsAsync(userId, ct);
+        await transaction.CommitAsync(ct);
+        return new(profile.IsAppTourEnabled, profile.UpdatedAt, profile.RowVersion);
+    }
+
     public async Task<CustomerProfileResponse> UpdatePreferredNameAsync(
         Guid userId,
         string preferredName,
@@ -177,6 +193,7 @@ public sealed class CustomerProfileService(
             {
                 Id = Guid.NewGuid(),
                 UserId = userId,
+                IsAppTourEnabled = true,
                 CreatedAt = now,
                 CreatedBy = userId,
                 IsActive = true,
@@ -618,7 +635,8 @@ public sealed class CustomerProfileService(
             profile.CreatedAt,
             profile.UpdatedAt,
             profile.RowVersion, profile.AllergensConfirmed, profile.PreferencesConfirmed,
-            CustomerQuestionnaireRules.IsComplete(profile, today), CustomerQuestionnaireRules.NextStep(profile, today));
+            CustomerQuestionnaireRules.IsComplete(profile, today), CustomerQuestionnaireRules.NextStep(profile, today))
+            { IsAppTourEnabled = profile.IsAppTourEnabled };
     }
 
     private static string ResolveAllergenName(Allergen allergen, string language) =>

@@ -75,7 +75,8 @@ public sealed class AdminDeliveryCalendarService(
                 order.PlanName,
                 order.Meals.Sum(meal => meal.Quantity),
                 order.DeliveryTimeSlotName,
-                order.Status, order.FulfillmentMethod, order.TakeawayBranchName, order.TakeawayBranchAddress)).ToArray();
+                order.Status, order.FulfillmentMethod, order.TakeawayBranchName, order.TakeawayBranchAddress)
+                { DeliveryAddress = SavedDeliveryAddress(order) }).ToArray();
             var mealTypeTotals = scheduledOrders.SelectMany(order => order.Meals)
                 .GroupBy(meal => meal.MealTypeName)
                 .Select(group => new AdminDeliveryMealTypeTotalResponse(group.Key, group.Sum(meal => meal.Quantity)))
@@ -140,10 +141,16 @@ public sealed class AdminDeliveryCalendarService(
             from day in db.Set<SubscriptionServiceDay>().AsNoTracking()
             join order in db.Orders.AsNoTracking() on day.OrderId equals (Guid?)order.Id
             where day.ServiceDate == date && scheduledIds.Contains(order.Id)
-            select new { Day = day, order.OrderNumber, order.CustomerProfileId, order.FulfillmentMethod, order.TakeawayBranchName, order.TakeawayBranchAddress }).ToListAsync(cancellationToken);
-        var profileIds = details.Select(d => d.CustomerProfileId).Distinct().ToArray();
+            select new { Day = day, Order = order }).ToListAsync(cancellationToken);
+        var profileIds = details.Select(d => d.Order.CustomerProfileId).Distinct().ToArray();
         var profiles = await db.CustomerProfiles.AsNoTracking().Include(p => p.Preferences).Include(p => p.Allergens)
-            .ThenInclude(a => a.Allergen).Where(p => profileIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, cancellationToken);
+            .ThenInclude(a => a.Allergen).ThenInclude(a => a.Translations)
+            .Where(p => profileIds.Contains(p.Id)).AsSplitQuery().ToDictionaryAsync(p => p.Id, cancellationToken);
+        var userIds = profiles.Values.Where(p => p.UserId.HasValue).Select(p => p.UserId!.Value).Distinct().ToArray();
+        var userNames = await db.UserProfiles.AsNoTracking().Where(p => userIds.Contains(p.UserId))
+            .Select(p => new { p.UserId, p.FirstName, p.LastName, LegacyName = p.Customer != null ? p.Customer.CustomerName : null })
+            .ToDictionaryAsync(p => p.UserId,
+                p => string.IsNullOrWhiteSpace($"{p.FirstName} {p.LastName}".Trim()) ? p.LegacyName : $"{p.FirstName} {p.LastName}".Trim(), cancellationToken);
         var selections = await (from selection in db.Set<CustomerMealSelection>().AsNoTracking()
             join day in db.Set<SubscriptionServiceDay>() on selection.SubscriptionServiceDayId equals day.Id
             join meal in db.MealItems on selection.MenuItemId equals meal.Id
@@ -163,16 +170,46 @@ public sealed class AdminDeliveryCalendarService(
             IsPreliminary = preliminary,
             OperationalExceptions = exceptions,
             Selections = details.Select(d => {
-                profiles.TryGetValue(d.CustomerProfileId, out var profile);
+                profiles.TryGetValue(d.Order.CustomerProfileId, out var profile);
                 var rows = selections.Where(s => s.Id == d.Day.Id).ToArray();
-                return new KitchenSelectionResponse(d.Day.Id, d.OrderNumber, d.CustomerProfileId,
+                var name = profile?.UserId is { } userId ? userNames.GetValueOrDefault(userId) : null;
+                if (string.IsNullOrWhiteSpace(name)) name = profile?.PreferredName?.Trim();
+                return new KitchenSelectionResponse(d.Day.Id, d.Order.OrderNumber, d.Order.CustomerProfileId,
                     d.Day.CustomerConfirmedAt != null ? "CUSTOMER_CONFIRMED" : d.Day.AutoFinalizedAt != null ? "AUTO_FINALIZED" : "UNFINALIZED",
                     rows.Select(r => r.SelectionSource).Distinct().ToArray(),
                     rows.GroupBy(r => new { r.Name, r.Category }).Select(g => new KitchenDishResponse(g.Key.Name, g.Key.Category ?? "meal", g.Count())).ToArray(),
                     profile?.Preferences.Select(p => p.PreferenceCode).Concat(profile.Allergens.Select(a => "ALLERGEN: " + a.Allergen.Code)).ToArray() ?? [], d.Day.ReviewReason,
-                    d.FulfillmentMethod, d.TakeawayBranchName, d.TakeawayBranchAddress);
+                    d.Order.FulfillmentMethod, d.Order.TakeawayBranchName, d.Order.TakeawayBranchAddress)
+                {
+                    CustomerName = string.IsNullOrWhiteSpace(name) ? "Name not recorded" : name,
+                    DeliveryAddress = SavedDeliveryAddress(d.Order),
+                    DietaryRestrictionLabels = profile?.Preferences.Where(p => p.PreferenceCode != "NONE")
+                        .Select(p => PreparationDisplayText.Label(p.PreferenceCode))
+                        .Concat(profile.Allergens.Select(a => "Allergen: " +
+                            (a.Allergen.Translations.FirstOrDefault(t => t.LanguageCode == "en" && !string.IsNullOrWhiteSpace(t.Name))?.Name
+                             ?? PreparationDisplayText.Label(a.Allergen.Code))))
+                        .Distinct().ToArray() ?? []
+                };
             }).ToArray()
         };
+    }
+
+    private static string? SavedDeliveryAddress(Order order)
+    {
+        if (order.FulfillmentMethod == FulfillmentMethods.Takeaway) return null;
+        var address = !string.IsNullOrWhiteSpace(order.DeliveryFormattedAddress)
+            ? order.DeliveryFormattedAddress.Trim()
+            : string.Join(", ", new[] {
+                order.DeliveryAddressName,
+                string.IsNullOrWhiteSpace(order.DeliveryBuildingNo) ? null : "Building " + order.DeliveryBuildingNo,
+                string.IsNullOrWhiteSpace(order.DeliveryStreetNo) ? null : "Street " + order.DeliveryStreetNo,
+                string.IsNullOrWhiteSpace(order.DeliveryUnitNumber) ? null : "Unit " + order.DeliveryUnitNumber,
+                string.IsNullOrWhiteSpace(order.DeliveryZoneNo) ? null : "Zone " + order.DeliveryZoneNo,
+                order.DeliveryArea
+            }.Where(value => !string.IsNullOrWhiteSpace(value)));
+        if (!string.IsNullOrWhiteSpace(order.DeliveryDirections))
+            address = string.Join(" · ", new[] { address, order.DeliveryDirections }.Where(value => !string.IsNullOrWhiteSpace(value)));
+        return string.IsNullOrWhiteSpace(address) ? null : address;
     }
 
     private static string ResolveCustomerName(
