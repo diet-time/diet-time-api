@@ -26,6 +26,9 @@ public sealed partial class UpcomingMealServiceTests
         order.DeliveryDirections = "Reception desk";
         await db.SaveChangesAsync();
         var menu = await PrepareAsync();
+        // Production uses customer_profiles/user_profiles, without the legacy customers table.
+        // EnsureCreated includes it locally, so remove it from this isolated test database.
+        await db.Database.ExecuteSqlRawAsync("DROP TABLE public.customers CASCADE");
         var service = new AdminDeliveryCalendarService(db, Options.Create(new MenuRotationOptions()), clock);
         var response = await service.GetPreparationSummaryAsync(menu.DeliveryDate, default);
         var selection = Assert.Single(response.Selections);
@@ -42,6 +45,12 @@ public sealed partial class UpcomingMealServiceTests
         using var client = setup.Client;
         var json = await client.GetFromJsonAsync<System.Text.Json.JsonElement>($"/api/v1/admin/delivery-calendar/{menu.DeliveryDate:yyyy-MM-dd}/preparation-summary");
         Assert.Equal("Biju Manayagath", json.GetProperty("data").GetProperty("selections")[0].GetProperty("customerName").GetString());
+
+        var userProfile = await db.UserProfiles.SingleAsync(p => p.UserId == userId);
+        userProfile.FirstName = " ";
+        userProfile.LastName = "";
+        await db.SaveChangesAsync();
+        Assert.Equal("Preferred customer", Assert.Single((await service.GetPreparationSummaryAsync(menu.DeliveryDate, default)).Selections).CustomerName);
 
         db.UserProfiles.Remove(await db.UserProfiles.SingleAsync(p => p.UserId == userId));
         order.FulfillmentMethod = FulfillmentMethods.Takeaway;

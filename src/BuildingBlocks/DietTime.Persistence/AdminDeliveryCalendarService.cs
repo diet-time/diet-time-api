@@ -148,9 +148,9 @@ public sealed class AdminDeliveryCalendarService(
             .Where(p => profileIds.Contains(p.Id)).AsSplitQuery().ToDictionaryAsync(p => p.Id, cancellationToken);
         var userIds = profiles.Values.Where(p => p.UserId.HasValue).Select(p => p.UserId!.Value).Distinct().ToArray();
         var userNames = await db.UserProfiles.AsNoTracking().Where(p => userIds.Contains(p.UserId))
-            .Select(p => new { p.UserId, p.FirstName, p.LastName, LegacyName = p.Customer != null ? p.Customer.CustomerName : null })
+            .Select(p => new { p.UserId, p.FirstName, p.LastName })
             .ToDictionaryAsync(p => p.UserId,
-                p => string.IsNullOrWhiteSpace($"{p.FirstName} {p.LastName}".Trim()) ? p.LegacyName : $"{p.FirstName} {p.LastName}".Trim(), cancellationToken);
+                p => $"{p.FirstName} {p.LastName}".Trim(), cancellationToken);
         var selections = await (from selection in db.Set<CustomerMealSelection>().AsNoTracking()
             join day in db.Set<SubscriptionServiceDay>() on selection.SubscriptionServiceDayId equals day.Id
             join meal in db.MealItems on selection.MenuItemId equals meal.Id
