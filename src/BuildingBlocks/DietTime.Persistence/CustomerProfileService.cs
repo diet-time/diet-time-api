@@ -462,7 +462,7 @@ public sealed class CustomerProfileService(
 
         foreach (var item in requestedByCode.Values)
         {
-            profile.Preferences.Add(new CustomerProfilePreference
+            var preference = new CustomerProfilePreference
             {
                 Id = Guid.NewGuid(),
                 PreferenceCode = item.PreferenceCode.Trim(),
@@ -470,7 +470,11 @@ public sealed class CustomerProfileService(
                 PreferencePriority = item.PreferencePriority,
                 CreatedAt = now,
                 UpdatedAt = now
-            });
+            };
+            profile.Preferences.Add(preference);
+            // A supplied Guid on a tracked parent's new child would otherwise be
+            // inferred as an existing row and issue an UPDATE with zero matches.
+            db.CustomerProfilePreferences.Add(preference);
         }
     }
 
