@@ -106,7 +106,7 @@ public sealed class CustomerMealPlanPurchaseService(
                     ?? price.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault(),
                 price.Translations.Where(t => t.LanguageCode == language).Select(t => t.Description).FirstOrDefault()
                     ?? price.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Description).FirstOrDefault(),
-                price.PackageOption!.Id, price.PackageOption.Name, price.PackageOption.DisplayOrder, price.DiscountedPrice, duration.IsDeliveryEnabled))
+                price.PackageOption!.Id, price.PackageOption.Name, price.PackageOption.DisplayOrder, price.DiscountedPrice, true))
             .ToListAsync(ct);
 
         var typeRows = await db.MealPlanTemplateSlots.AsNoTracking()
@@ -261,7 +261,7 @@ public sealed class CustomerMealPlanPurchaseService(
                 package.DurationDays,
                 price.CurrencyCode.Trim(),
                 price.DiscountedPrice ?? price.Amount,
-                DailyPrice(price.DiscountedPrice ?? price.Amount, package.DurationDays), price.DiscountedPrice, price.Amount, package.IsDeliveryEnabled));
+                DailyPrice(price.DiscountedPrice ?? price.Amount, package.DurationDays), price.DiscountedPrice, price.Amount, true));
     }
 
     private string? ResolveImage(

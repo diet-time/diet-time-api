@@ -189,7 +189,7 @@ public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, 
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT code FROM public.meal_plan_price_packages WHERE code = {price.PackageCode} FOR SHARE", ct);
         if (o.FulfillmentMethod == FulfillmentMethods.HomeDelivery)
         {
-            if (!await db.MealPlanPricePackages.AnyAsync(p => p.Code == price.PackageCode && p.IsDeliveryEnabled && p.IsActive, ct) ||
+            if (!await db.MealPlanPricePackages.AnyAsync(p => p.Code == price.PackageCode && p.IsActive, ct) ||
                 !await db.CustomerAddresses.AnyAsync(a => a.Id == o.CustomerAddressId && a.CustomerProfileId == o.CustomerProfileId && a.IsActive, ct) ||
                 !await db.DeliveryTimeSlots.AnyAsync(s => s.Id == o.DeliveryTimeSlotId && s.IsActive, ct))
                 throw Error(409, "delivery_unavailable", "The package, delivery address or time slot is no longer available.");

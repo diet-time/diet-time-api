@@ -64,18 +64,13 @@ public sealed partial class UpcomingMealService(
                 CreatedAt = now, UpdatedAt = now, CreatedBy = order.CreatedBy, UpdatedBy = order.CreatedBy
             };
             var candidates = await EligibleAsync(day, order, ct);
-            var chosenIds = new HashSet<Guid>();
-            foreach (var (category, count) in new[] { ("meal", mealCount), ("snack", snackCount) })
+            var assignment = AutomaticMealAssignmentRules.Select(candidates, mealCount, snackCount,
+                option => PreferenceScore(option.MealItem, profile.Preferences));
+            foreach (var (category, options) in new[] { ("meal", assignment.Meals), ("snack", assignment.Snacks) })
             {
-                var choices = candidates.Where(c => Category(c) == category)
-                    .OrderByDescending(c => PreferenceScore(c.MealItem, profile.Preferences))
-                    .ThenByDescending(c => c.IsDefault).ThenBy(c => c.Slot.DisplayOrder)
-                    .ThenBy(c => c.DisplayOrder).ThenBy(c => c.Id);
                 var position = 0;
-                foreach (var option in choices)
+                foreach (var option in options)
                 {
-                    if (position == count) break;
-                    if (!chosenIds.Add(option.MealItemId)) continue;
                     day.Selections.Add(new CustomerMealSelection
                     {
                         Id = Guid.NewGuid(), SubscriptionServiceDayId = day.Id,
@@ -86,9 +81,8 @@ public sealed partial class UpcomingMealService(
                         CreatedBy = order.CreatedBy, UpdatedBy = order.CreatedBy
                     });
                 }
-                if (position != count)
-                    day.ReviewReason = "Not enough eligible meals are configured for this delivery day. Our team needs to review it.";
             }
+            day.ReviewReason = assignment.ReviewReason;
             day.SelectionStatus = day.ReviewReason is null ? "DEFAULTED" : day.Selections.Count == 0 ? "PENDING" : "PARTIAL";
             if (day.ReviewReason is not null)
                 logger?.LogWarning("Provisional assignment incomplete for order {OrderId}, date {ServiceDate}: {Reason}",

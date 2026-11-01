@@ -171,35 +171,29 @@ public sealed partial class UpcomingMealService
         var order = await db.Orders.AsNoTracking().SingleAsync(o => o.Id == orderId, ct);
         if (!OrderWorkflowPolicy.CanFulfill(order)) return;
         var chosen = new List<MealPlanSlotOption>();
+        string? assignmentReview = null;
+        var hasCustomerSelections = day.Selections.Any(s => s.Status != "CANCELLED" &&
+            !string.Equals(s.SelectionSource, "DEFAULT", StringComparison.OrdinalIgnoreCase));
         var valid = Active(order, day) && day.ServiceDate.DayOfWeek != DayOfWeek.Friday &&
-            day.MealCount is >= 1 and <= 5 && day.SnackCount is >= 0;
+            day.MealCount is >= 1 and <= 5 && day.SnackCount is >= 0 && !hasCustomerSelections;
+        if (hasCustomerSelections)
+            assignmentReview = "Automatic finalization needs review: existing customer-selected meals were preserved.";
         if (valid)
         {
             var profile = await ProfileAsync(order.CustomerProfileId, ct);
             valid &= profile.IsActive;
             var eligible = profile.IsActive ? await EligibleAsync(day, order, ct) : [];
             var savedIds = day.Selections.Where(s => s.Status != "CANCELLED").Select(s => s.MenuItemId).ToHashSet();
-            var used = new HashSet<Guid>();
-            foreach (var (category, count) in new[] { ("meal", day.MealCount!.Value), ("snack", day.SnackCount!.Value) })
-            {
-                var choices = eligible.Where(o => Category(o) == category)
-                    .OrderByDescending(o => savedIds.Contains(o.MealItemId))
-                    .ThenByDescending(o => PreferenceScore(o.MealItem, profile.Preferences))
-                    .ThenByDescending(o => o.IsDefault).ThenBy(o => o.Slot.DisplayOrder).ThenBy(o => o.DisplayOrder).ThenBy(o => o.Id);
-                var assigned = 0;
-                foreach (var option in choices)
-                {
-                    if (assigned == count) break;
-                    if (!used.Add(option.MealItemId)) continue;
-                    chosen.Add(option);
-                    assigned++;
-                }
-                valid &= assigned == count;
-            }
+            var assignment = AutomaticMealAssignmentRules.Select(eligible, day.MealCount!.Value, day.SnackCount!.Value,
+                option => PreferenceScore(option.MealItem, profile.Preferences), savedIds);
+            chosen.AddRange(assignment.Meals);
+            chosen.AddRange(assignment.Snacks);
+            assignmentReview = assignment.ReviewReason;
+            valid &= assignmentReview is null;
         }
         if (!valid)
         {
-            const string reason = "Automatic finalization needs review: subscription or eligible meal quantities are incomplete. Do not prepare provisional dishes.";
+            var reason = assignmentReview ?? "Automatic finalization needs review: subscription or eligible meal quantities are incomplete. Do not prepare provisional dishes.";
             if (day.ReviewReason != reason) { day.ReviewReason = reason; day.UpdatedAt = clock.GetUtcNow(); day.Revision++; }
             // Keep unlocked so operations can fix configuration and the next pass can retry.
             await db.SaveChangesAsync(ct);

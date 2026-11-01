@@ -8,13 +8,13 @@ public sealed class DeliveryEligibilityTests
 {
     [Theory]
     [InlineData(true, FulfillmentMethods.HomeDelivery, true)]
-    [InlineData(false, FulfillmentMethods.HomeDelivery, false)]
+    [InlineData(false, FulfillmentMethods.HomeDelivery, true)]
     [InlineData(true, FulfillmentMethods.Takeaway, true)]
     [InlineData(false, FulfillmentMethods.Takeaway, true)]
     [InlineData(true, "invalid", false)]
     [InlineData(false, "", false)]
     [InlineData(true, null, false)]
-    public void Validates_package_eligibility(bool enabled, string? method, bool allowed) =>
+    public void Both_methods_are_allowed_independently_of_legacy_package_flags(bool enabled, string? method, bool allowed) =>
         Assert.Equal(allowed, FulfillmentMethods.IsAllowed(enabled, method));
 
     [Fact]

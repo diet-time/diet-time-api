@@ -124,8 +124,6 @@ public sealed class OrderService(
             x => x.Code == price.PackageCode, cancellationToken);
         if (!duration.IsActive || duration.DurationDays != price.DurationDays)
             return Fail(PlaceOrderStatus.PriceUnavailable, "The selected package is no longer purchasable.", "package_not_available");
-        if (!FulfillmentMethods.IsAllowed(duration.IsDeliveryEnabled, request.FulfillmentMethod))
-            return Fail(PlaceOrderStatus.DeliveryDisabled, "This package is available for takeaway only.");
         var isDelivery = request.FulfillmentMethod == FulfillmentMethods.HomeDelivery;
         TakeawayBranch? branch = null;
         if (!isDelivery)

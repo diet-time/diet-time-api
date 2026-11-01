@@ -491,5 +491,5 @@ public static class FulfillmentMethods
     public const string Takeaway = "TAKEAWAY";
     public static bool IsValid(string? method) => method is HomeDelivery or Takeaway;
     public static bool IsAllowed(bool isDeliveryEnabled, string? method) =>
-        IsValid(method) && (method == Takeaway || isDeliveryEnabled);
+        IsValid(method); // Legacy package flags no longer restrict fulfillment.
 }

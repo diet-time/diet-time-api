@@ -484,6 +484,50 @@ public sealed partial class UpcomingMealServiceTests : IAsyncLifetime
         Assert.True(resultSets >= 8);
     }
 
+    [UpcomingPostgresFact]
+    public async Task Automatic_defaults_use_distinct_types_and_reruns_preserve_confirmed_choices()
+    {
+        var menu = await PrepareAsync();
+        var dayId = menu.SubscriptionServiceDayId!.Value;
+        var rows = await db.Set<CustomerMealSelection>().AsNoTracking()
+            .Where(s => s.SubscriptionServiceDayId == dayId && s.Status != "CANCELLED").ToListAsync();
+        Assert.Equal(3, rows.Where(s => s.Category == "meal").Select(s => s.MealTypeId).Distinct().Count());
+        Assert.Single(rows.Where(s => s.Category == "snack"));
+        await Service().ConfirmAsync(order.Id, dayId, userId, "en", Request(menu), default);
+        var before = await db.Set<CustomerMealSelection>().AsNoTracking()
+            .Where(s => s.SubscriptionServiceDayId == dayId).OrderBy(s => s.Id)
+            .Select(s => new { s.Id, s.MenuItemId, s.MealTypeId, s.SelectionSource }).ToListAsync();
+        var history = await db.Set<CustomerMealSelectionHistory>().CountAsync();
+        await Service().InitializeAsync(order, default);
+        clock.Now = menu.CutoffAt;
+        await Service().FinalizeDueAsync(default);
+        var after = await db.Set<CustomerMealSelection>().AsNoTracking()
+            .Where(s => s.SubscriptionServiceDayId == dayId).OrderBy(s => s.Id)
+            .Select(s => new { s.Id, s.MenuItemId, s.MealTypeId, s.SelectionSource }).ToListAsync();
+        Assert.Equal(before, after);
+        Assert.Equal(history, await db.Set<CustomerMealSelectionHistory>().CountAsync());
+    }
+
+    [UpcomingPostgresFact]
+    public async Task Missing_distinct_types_flag_review_without_duplicate_category_assignments()
+    {
+        var disabled = await db.MealTypes.Where(t => t.Code == "CONFIGURED_B" || t.Code == "CONFIGURED_C").ToListAsync();
+        foreach (var type in disabled) type.IsActive = false;
+        await db.SaveChangesAsync();
+        var menu = await PrepareAsync();
+        var day = await db.Set<SubscriptionServiceDay>().Include(d => d.Selections)
+            .SingleAsync(d => d.Id == menu.SubscriptionServiceDayId);
+        Assert.Contains("distinct eligible meal types", day.ReviewReason);
+        Assert.Single(day.Selections.Where(s => s.Category == "meal"));
+        var before = day.Selections.Select(s => s.Id).Order().ToArray();
+        await Service().InitializeAsync(order, default);
+        clock.Now = menu.CutoffAt;
+        await Service().FinalizeDueAsync(default);
+        var after = await db.Set<CustomerMealSelection>().AsNoTracking()
+            .Where(s => s.SubscriptionServiceDayId == day.Id).Select(s => s.Id).ToListAsync();
+        Assert.Equal(before, after.Order());
+        Assert.False(day.SelectionLocked);
+    }
     private async Task SeedAsync()
     {
         var now = clock.Now;
@@ -491,9 +535,11 @@ public sealed partial class UpcomingMealServiceTests : IAsyncLifetime
         db.Users.Add(new ApplicationUser { Id = userId, UserName = "upcoming-test", SecurityStamp = Guid.NewGuid().ToString() });
         var profile = new CustomerProfile { GenderCode = "FEMALE", DateOfBirth = new(1995, 1, 1), HeightCm = 165, WeightKg = 70, GoalCode = "LOSE_WEIGHT", DailyRoutineCode = "OFFICE_WORK", ActivityLevelCode = "MODERATE", OnboardingStatus = "COMPLETED", Id = Guid.NewGuid(), UserId = userId, IsActive = true, PreferredLanguage = "en", CreatedAt = now, UpdatedAt = now };
         db.Add(profile);
-        var mealType = new MealType { Id = Guid.NewGuid(), Code = "MEAL", IsActive = true };
+        var mealType = new MealType { Id = Guid.NewGuid(), Code = "MEAL", DisplayOrder = 10, IsActive = true };
+        var secondType = new MealType { Id = Guid.NewGuid(), Code = "CONFIGURED_B", DisplayOrder = 20, IsActive = true };
+        var thirdType = new MealType { Id = Guid.NewGuid(), Code = "CONFIGURED_C", DisplayOrder = 30, IsActive = true };
         var snackType = new MealType { Id = Guid.NewGuid(), Code = "SNACK", IsActive = true };
-        db.AddRange(mealType, snackType);
+        db.AddRange(mealType, secondType, thirdType, snackType);
         var category = new MealCategory { Id = Guid.NewGuid(), Code = "BALANCED", IsActive = true };
         db.Add(category);
         var meals = Enumerable.Range(0, 7).Select(i => new MealItem
@@ -508,7 +554,7 @@ public sealed partial class UpcomingMealServiceTests : IAsyncLifetime
         foreach (var weekday in Enum.GetValues<MenuWeekday>().Where(d => d != MenuWeekday.Friday))
         {
             var day = new MealPlanTemplateDay { Id = Guid.NewGuid(), WeekNumber = week, MenuWeekday = weekday, IsActive = true };
-            foreach (var (type, dishes) in new[] { (mealType, meals.Take(5)), (snackType, meals.Skip(5)) })
+            foreach (var (type, dishes) in new[] { (mealType, meals.Take(5)), (secondType, meals.Take(5)), (thirdType, meals.Take(5)), (snackType, meals.Skip(5)) })
             {
                 var slot = new MealPlanTemplateSlot { Id = Guid.NewGuid(), MealType = type, IsActive = true, MaximumSelection = 5 };
                 var position = 0;

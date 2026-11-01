@@ -64,11 +64,11 @@ public sealed partial class UpcomingMealServiceTests
         var customer = scope.ServiceProvider.GetRequiredService<ICustomerMealPlanPurchaseService>();
         var options = await customer.GetPurchaseOptionsAsync("BALANCE", userId, "en", default);
         Assert.NotNull(options);
-        Assert.All(options!.MealConfigurations.SelectMany(x => x.Packages), x => Assert.False(x.IsDeliveryEnabled));
+        Assert.All(options!.MealConfigurations.SelectMany(x => x.Packages), x => Assert.True(x.IsDeliveryEnabled));
     }
 
     [UpcomingPostgresFact]
-    public async Task Package_delivery_is_authoritative_and_fulfillment_is_snapshotted()
+    public async Task Both_fulfillment_methods_ignore_legacy_flags_and_preserve_prices_and_snapshots()
     {
         clock.Now = new(2026, 10, 26, 10, 0, 0, TimeSpan.Zero);
         var slot = new DeliveryTimeSlot { Id = Guid.NewGuid(), Code = "AM", Name = "Morning", NameAr = "Morning", StartTime = new(7, 0), EndTime = new(11, 0), IsActive = true };
@@ -118,9 +118,11 @@ public sealed partial class UpcomingMealServiceTests
 
         duration.IsDeliveryEnabled = false;
         await db.SaveChangesAsync();
-        var invalid = await Submit(body);
-        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
-        Assert.Equal("delivery_disabled", (await invalid.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        var legacyFlagDelivery = await Submit(body);
+        Assert.Equal(HttpStatusCode.Created, legacyFlagDelivery.StatusCode);
+        var legacyFlagJson = await legacyFlagDelivery.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(deliveryJson.GetProperty("pricing").GetProperty("totalAmount").GetDecimal(),
+            legacyFlagJson.GetProperty("pricing").GetProperty("totalAmount").GetDecimal());
 
         var takeawayKey = Guid.NewGuid().ToString();
         var branch = new TakeawayBranch { Id = Guid.NewGuid(), Name = "Diet Time – Izghawa Branch", IsActive = true };
@@ -147,6 +149,8 @@ public sealed partial class UpcomingMealServiceTests
         Assert.Equal(HttpStatusCode.Created, takeaway.StatusCode);
         var takeawayJson = await takeaway.Content.ReadFromJsonAsync<JsonElement>();
         var takeawayId = takeawayJson.GetProperty("id").GetGuid();
+        Assert.Equal(deliveryJson.GetProperty("pricing").GetProperty("totalAmount").GetDecimal(),
+            takeawayJson.GetProperty("pricing").GetProperty("totalAmount").GetDecimal());
         Assert.Equal("TAKEAWAY", takeawayJson.GetProperty("fulfillmentMethod").GetString());
         Assert.Equal(price.MealsPerDay, takeawayJson.GetProperty("mealCount").GetInt32());
         Assert.Equal(price.SnacksPerDay, takeawayJson.GetProperty("snackCount").GetInt32());
@@ -189,7 +193,7 @@ public sealed partial class UpcomingMealServiceTests
         Assert.Contains(dispatch.Items, x => x.OrderId == deliveryId);
         var preparation = await new AdminDeliveryCalendarService(db, Options.Create(new MenuRotationOptions()), clock)
             .GetPreparationSummaryAsync(new(2026, 10, 27), default);
-        Assert.Equal(5, preparation.OrderCount); // Seed order and four successfully purchased orders.
+        Assert.Equal(6, preparation.OrderCount); // Seed order and five successfully purchased orders.
         Assert.Contains(preparation.Selections, x => x.FulfillmentMethod == "TAKEAWAY" && x.TakeawayBranchName == "Diet Time – Izghawa Branch");
         var calendar = await new AdminDeliveryCalendarService(db, Options.Create(new MenuRotationOptions()), clock)
             .GetMonthAsync(new(2026, 10, 27), new(2026, 10, 27), null, null, default);

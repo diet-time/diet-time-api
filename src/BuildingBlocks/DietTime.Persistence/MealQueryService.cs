@@ -178,7 +178,7 @@ public sealed class MealQueryService(
                         .Where(translation => translation.LanguageCode == "en")
                         .Select(translation => translation.Description)
                         .FirstOrDefault(), price.DiscountedPrice, price.Amount,
-                db.MealPlanPricePackages.Where(p => p.Code == price.PackageCode).Select(p => p.IsDeliveryEnabled).FirstOrDefault()))
+                true))
             .ToListAsync(ct);
 
         var typeRows = await db.MealPlanTemplateSlots.AsNoTracking()
