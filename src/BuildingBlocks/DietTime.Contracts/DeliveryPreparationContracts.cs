@@ -9,6 +9,10 @@ public sealed record DeliveryPreparationSummaryResponse(
     IReadOnlyList<DeliveryPreparationMealTypeResponse> MealTypes,
     IReadOnlyList<DeliveryPreparationPlanResponse> PlanBreakdown)
 {
+    public int TotalScheduledCount { get; init; }
+    public int DeliveredCount { get; init; }
+    public int CollectedCount { get; init; }
+    public int RemainingCount { get; init; }
     public bool IsPreliminary { get; init; }
     public IReadOnlyList<string> OperationalExceptions { get; init; } = [];
     public IReadOnlyList<KitchenSelectionResponse> Selections { get; init; } = [];
@@ -37,6 +41,9 @@ public sealed record KitchenSelectionResponse(Guid ServiceDayId, string OrderRef
     string FulfillmentMethod = "HOME_DELIVERY", string? TakeawayBranchName = null, string? TakeawayBranchAddress = null)
 {
     public string? CustomerName { get; init; }
+    public string? FulfillmentStatus { get; init; }
+    public DateTimeOffset? FulfilledAt { get; init; }
+    public Guid? FulfilledBy { get; init; }
     public string? DeliveryAddress { get; init; }
     public IReadOnlyList<string> DietaryRestrictionLabels { get; init; } = [];
 }

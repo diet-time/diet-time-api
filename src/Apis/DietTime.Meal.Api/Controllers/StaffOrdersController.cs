@@ -29,12 +29,16 @@ public sealed class StaffOrdersController(StaffOrderService orders) : Controller
     [HttpGet("{orderId:guid}")]
     public async Task<IActionResult> Get(Guid orderId, CancellationToken ct) => await orders.GetAsync(orderId, ct) is { } order ? Ok(order) : NotFound();
 
+    [Authorize(Roles = "Admin")]
     [HttpPost("{orderId:guid}/approve")]
     public Task<IActionResult> Approve(Guid orderId, OrderReviewRequest r, CancellationToken ct) => Change(orderId, "approve", r, ct);
+    [Authorize(Roles = "Admin")]
     [HttpPost("{orderId:guid}/reject")]
     public Task<IActionResult> Reject(Guid orderId, OrderReviewRequest r, CancellationToken ct) => Change(orderId, "reject", r, ct);
+    [Authorize(Roles = "Admin")]
     [HttpPost("{orderId:guid}/payment")]
     public Task<IActionResult> Payment(Guid orderId, RecordOrderPaymentRequest r, CancellationToken ct) => Change(orderId, "payment", new(r.ExpectedRowVersion, r.Reason), ct, r);
+    [Authorize(Roles = "Admin")]
     [HttpPost("{orderId:guid}/revise-dates")]
     public Task<IActionResult> Dates(Guid orderId, ReviseOrderDatesRequest r, CancellationToken ct) => Change(orderId, "revise-dates", new(r.ExpectedRowVersion, r.Reason), ct, dates: r);
 

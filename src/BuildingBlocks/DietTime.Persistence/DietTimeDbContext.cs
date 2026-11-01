@@ -47,6 +47,16 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
     public DbSet<CustomerAddress> CustomerAddresses => Set<CustomerAddress>();
     public DbSet<DeliveryTimeSlot> DeliveryTimeSlots => Set<DeliveryTimeSlot>();
     public DbSet<Order> Orders => Set<Order>();
+    public DbSet<StaffNotification> StaffNotifications => Set<StaffNotification>();
+    public DbSet<StaffNotificationEvent> StaffNotificationEvents => Set<StaffNotificationEvent>();
+    public override int SaveChanges(bool acceptAllChangesOnSuccess) {
+        StaffNotificationCapture.Capture(this);
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default) {
+        StaffNotificationCapture.Capture(this);
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess,cancellationToken);
+    }
     public DbSet<OrderNotification> OrderNotifications => Set<OrderNotification>();
     public DbSet<TakeawayBranch> TakeawayBranches => Set<TakeawayBranch>();
     public DbSet<OrderMeal> OrderMeals => Set<OrderMeal>();
@@ -67,6 +77,28 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
         base.OnModelCreating(b);
         AuditEventConfiguration.Configure(b);
         UpcomingMealConfigurations.Configure(b);
+        b.Entity<StaffNotificationEvent>(e => {
+            e.ToTable("staff_notification_events","public");
+            e.Property(x=>x.DeduplicationKey).HasMaxLength(150);
+            e.Property(x=>x.EventType).HasMaxLength(40);
+            e.HasIndex(x=>x.DeduplicationKey).IsUnique();
+            e.HasIndex(x=>new { x.ServiceDayId,x.EventType }).HasFilter("service_day_id IS NOT NULL");
+            e.HasIndex(x=>new { x.CreatedAt, x.Id }).HasFilter("processed_at IS NULL");
+            e.HasOne<Order>().WithMany().HasForeignKey(x=>x.OrderId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<StaffNotification>(e => {
+            e.ToTable("staff_notifications","public");
+            e.Property(x=>x.DeduplicationKey).HasMaxLength(150);
+            e.Property(x=>x.EventType).HasMaxLength(40);
+            e.Property(x=>x.Title).HasMaxLength(200);
+            e.Property(x=>x.Message).HasMaxLength(1000);
+            e.Property(x=>x.OrderNumber).HasMaxLength(100);
+            e.HasIndex(x=>new { x.RecipientUserId,x.DeduplicationKey }).IsUnique();
+            e.HasIndex(x=>new { x.RecipientUserId,x.CreatedAt,x.Id });
+            e.HasIndex(x=>x.RecipientUserId).HasFilter("read_at IS NULL");
+            e.HasOne<ApplicationUser>().WithMany().HasForeignKey(x=>x.RecipientUserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Order>().WithMany().HasForeignKey(x=>x.OrderId).OnDelete(DeleteBehavior.Cascade);
+        });
         b.Entity<ApplicationUser>().HasIndex(x => x.PhoneNumber).IsUnique().HasFilter("phone_number IS NOT NULL").HasDatabaseName("PhoneNumberIndex");
         b.Entity<RefreshToken>(e => { e.ToTable("refresh_tokens"); e.Property(x => x.TokenHash).HasMaxLength(64); e.HasIndex(x => x.TokenHash).IsUnique(); e.HasIndex(x => x.UserId); e.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade); });
         ConfigureLookups(b); ConfigureMeals(b); ConfigurePlans(b); ConfigureUserManagement(b);

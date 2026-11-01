@@ -99,7 +99,7 @@ public sealed partial class UpcomingMealService(
         if (order is null) return null;
         var days = await db.Set<SubscriptionServiceDay>().AsNoTracking().Include(d => d.Selections)
             .Where(d => d.OrderId == orderId && d.Status != "CANCELLED" && d.Status != "SKIPPED" &&
-                (order.Status != "CANCELLED" || d.Status == "DELIVERED"))
+                (order.Status != "CANCELLED" || d.Status == "DELIVERED" || d.Status == "COLLECTED"))
             .OrderBy(d => d.ServiceDate).ThenBy(d => d.Id).ToListAsync(ct);
         return days.Select(d =>
         {
@@ -296,7 +296,7 @@ public sealed partial class UpcomingMealService(
     {
         if (!SubscriptionMenuRules.IsSelectionOpen(day.ServiceDate, clock.GetUtcNow()))
             return "Meal selection is available only for tomorrow before 9:00 PM Qatar time.";
-        if (day.Status == "DELIVERED") return "This delivery has been completed.";
+        if (day.Status is "DELIVERED" or "COLLECTED") return "This service day has been fulfilled.";
         if (!OrderWorkflowPolicy.CanFulfill(order)) return "This order is awaiting staff confirmation or payment and is unavailable for meal selection.";
         if (day.SelectionLocked || day.SelectionStatus == "LOCKED" || day.Status is not ("PLANNED" or "CONFIRMED"))
             return "Your meals are locked for kitchen preparation.";
@@ -308,7 +308,7 @@ public sealed partial class UpcomingMealService(
         return null;
     }
 
-    private static string Status(SubscriptionServiceDay day, string? reason) => day.Status == "DELIVERED" ? "delivered"
+    private static string Status(SubscriptionServiceDay day, string? reason) => day.Status == "DELIVERED" ? "delivered" : day.Status == "COLLECTED" ? "collected"
         : day.ReviewReason is not null ? "needs_review" : reason is not null ? "locked"
         : day.SelectionStatus == "COMPLETED" ? "customized" : "auto_selected";
     private static string Category(MealPlanSlotOption option) => MealTypeClassification.IsSnack(option.Slot.MealType.Code) ? "snack" : "meal";

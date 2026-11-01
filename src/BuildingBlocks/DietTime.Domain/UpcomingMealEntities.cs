@@ -10,6 +10,8 @@ public sealed class SubscriptionServiceDay : Entity
     public DateOnly ServiceDate { get; set; }
     public short DayOfWeek { get; set; }
     public string Status { get; set; } = "PLANNED";
+    public DateTimeOffset? FulfilledAt { get; set; }
+    public Guid? FulfilledBy { get; set; }
     public string SelectionStatus { get; set; } = "PENDING";
     public DateTimeOffset? CustomerConfirmedAt { get; set; }
     public DateTimeOffset? AutoFinalizedAt { get; set; }

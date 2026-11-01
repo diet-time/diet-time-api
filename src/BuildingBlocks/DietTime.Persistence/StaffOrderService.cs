@@ -18,7 +18,11 @@ public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, 
     public async Task<StaffOrderListResponse> ListAsync(string? status, int page, int size, CancellationToken ct, DateOnly? serviceDate = null)
     {
         var query = db.Orders.AsNoTracking();
-        if (!string.IsNullOrWhiteSpace(status)) query = query.Where(x => x.Status == status);
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            var approvalStatuses = OrderApprovalFilter.MatchingStatuses(status);
+            query = query.Where(x => approvalStatuses.Contains(x.Status));
+        }
         if (serviceDate is { } day)
         {
             var weekday = day.DayOfWeek == DayOfWeek.Sunday ? 7 : (int)day.DayOfWeek;
@@ -118,7 +122,7 @@ public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, 
             }
             if (action == "reject") { order.RejectedAt = now; order.RejectedBy = actor; order.RejectionReason = reason; eventCode = "ORDER_REJECTED"; }
             if (action == "cancel" && (previous == "CONFIRMED" && order.StartDate <= today || await db.Set<SubscriptionServiceDay>().AnyAsync(d => d.OrderId == id &&
-                (d.SelectionLocked || d.Status == "DELIVERED" || d.Status == "PREPARING" || d.Status == "OUT_FOR_DELIVERY"), ct)))
+                (d.SelectionLocked || d.Status == "DELIVERED" || d.Status == "COLLECTED" || d.Status == "PREPARING" || d.Status == "OUT_FOR_DELIVERY"), ct)))
                 throw Error(409, "cancellation_review_required", "Cancellation is unavailable after the service period or preparation starts. Contact Diet Time.");
             order.Status = next;
             if (next is "REJECTED" or "CANCELLED" && order.PaymentStatus is "PAID" or "PARTIALLY_REFUNDED") order.PaymentStatus = PaymentStatuses.RefundPending;

@@ -35,61 +35,57 @@ public sealed class AdminDeliveryCalendarService(
             .Include(order => order.Meals)
             .OrderBy(order => order.DeliveryStartTime)
             .ThenBy(order => order.OrderNumber)
+            .AsSplitQuery()
             .ToListAsync(cancellationToken);
 
-        var profileIds = orders.Select(order => order.CustomerProfileId).Distinct().ToArray();
-        var profiles = await db.CustomerProfiles.AsNoTracking()
-            .Where(profile => profileIds.Contains(profile.Id))
-            .Select(profile => new { profile.Id, profile.UserId, profile.PreferredName })
+        var orderIds = orders.Select(o => o.Id).ToArray();
+        var serviceDays = await db.Set<SubscriptionServiceDay>().AsNoTracking()
+            .Where(d => d.OrderId != null && orderIds.Contains(d.OrderId.Value) && d.ServiceDate >= startDate && d.ServiceDate <= endDate)
             .ToListAsync(cancellationToken);
-        var userIds = profiles.Where(profile => profile.UserId.HasValue)
-            .Select(profile => profile.UserId!.Value).Distinct().ToArray();
-        var userNames = await db.UserProfiles.AsNoTracking()
-            .Where(profile => userIds.Contains(profile.UserId))
-            .Select(profile => new { profile.UserId, profile.FirstName, profile.LastName })
-            .ToDictionaryAsync(
-                profile => profile.UserId,
-                profile => $"{profile.FirstName} {profile.LastName}".Trim(),
-                cancellationToken);
-        var userEmails = await db.Users.AsNoTracking()
-            .Where(user => userIds.Contains(user.Id))
-            .ToDictionaryAsync(user => user.Id, user => user.Email, cancellationToken);
-        var customerNames = profiles.ToDictionary(
-            profile => profile.Id,
-            profile => ResolveCustomerName(profile.UserId, profile.PreferredName, userNames, userEmails, profile.Id));
-
+        var orderLookup = orders.ToDictionary(o => o.Id);
+        var eligibleDays = serviceDays.Where(d => DailyFulfillmentTracking.IsEligible(d, orderLookup[d.OrderId!.Value]))
+            .DistinctBy(d => d.Id).ToLookup(d => d.ServiceDate);
+        var slotIds = orders.Select(o => o.DeliveryTimeSlotId).Distinct().ToArray();
+        var slots = await db.DeliveryTimeSlots.AsNoTracking().Where(s => slotIds.Contains(s.Id)).ToDictionaryAsync(s => s.Id, cancellationToken);
+        var profileIds = orders.Select(o => o.CustomerProfileId).Distinct().ToArray();
+        var profiles = await db.CustomerProfiles.AsNoTracking().Where(p => profileIds.Contains(p.Id))
+            .Select(p => new { p.Id, p.UserId, p.PreferredName }).ToListAsync(cancellationToken);
+        var userIds = profiles.Where(p => p.UserId.HasValue).Select(p => p.UserId!.Value)
+            .Concat(serviceDays.Where(d => d.FulfilledBy.HasValue).Select(d => d.FulfilledBy!.Value)).Distinct().ToArray();
+        var names = await db.UserProfiles.AsNoTracking().Where(p => userIds.Contains(p.UserId))
+            .Select(p => new { p.UserId, p.FirstName, p.LastName }).ToDictionaryAsync(p => p.UserId, p => (p.FirstName + " " + p.LastName).Trim(), cancellationToken);
+        var emails = await db.Users.AsNoTracking().Where(u => userIds.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.Email, cancellationToken);
+        var customerNames = profiles.ToDictionary(p => p.Id, p => ResolveCustomerName(p.UserId, p.PreferredName, names, emails, p.Id));
+        var now = clock.GetUtcNow();
         var days = new List<AdminDeliveryCalendarDayResponse>();
         for (var date = startDate; date <= endDate; date = date.AddDays(1))
         {
-            var scheduledOrders = orders.Where(order =>
-                    AdminDeliveryCalendarScheduling.IsScheduled(
-                        date, order.StartDate, order.EndDate,
-                        order.DeliveryDays.Select(day => day.DayOfWeek).ToArray()))
-                .ToArray();
-            var orderResponses = scheduledOrders.Select(order => new AdminDeliveryCalendarOrderResponse(
-                order.Id,
-                order.OrderNumber,
-                order.CustomerProfileId,
-                customerNames.GetValueOrDefault(order.CustomerProfileId, $"Customer {order.CustomerProfileId:N}"[..17]),
-                order.MealPlanTemplateId,
-                order.PlanName,
-                order.Meals.Sum(meal => meal.Quantity),
-                order.DeliveryTimeSlotName,
-                order.Status, order.FulfillmentMethod, order.TakeawayBranchName, order.TakeawayBranchAddress)
-                { DeliveryAddress = SavedDeliveryAddress(order) }).ToArray();
-            var mealTypeTotals = scheduledOrders.SelectMany(order => order.Meals)
-                .GroupBy(meal => meal.MealTypeName)
-                .Select(group => new AdminDeliveryMealTypeTotalResponse(group.Key, group.Sum(meal => meal.Quantity)))
-                .OrderBy(group => group.MealType)
-                .ToArray();
-
-            days.Add(new AdminDeliveryCalendarDayResponse(
-                date,
-                orderResponses.Length,
-                scheduledOrders.Select(order => order.CustomerProfileId).Distinct().Count(),
-                mealTypeTotals.Sum(total => total.Quantity),
-                orderResponses,
-                mealTypeTotals));
+            var scheduled = eligibleDays[date].ToArray();
+            var scheduledOrders = scheduled.Select(d => orderLookup[d.OrderId!.Value]).DistinctBy(o => o.Id).ToArray();
+            var orderResponses = scheduled.Select(day => {
+                var order = orderLookup[day.OrderId!.Value];
+                var deadline = DailyFulfillmentTracking.Deadline(day.ServiceDate, order, order.DeliveryTimeSlotId is { } slotId ? slots.GetValueOrDefault(slotId) : null);
+                return new AdminDeliveryCalendarOrderResponse(order.Id, order.OrderNumber, order.CustomerProfileId,
+                    customerNames.GetValueOrDefault(order.CustomerProfileId, "Name not recorded"), order.MealPlanTemplateId, order.PlanName,
+                    order.Meals.Sum(m => m.Quantity), order.DeliveryTimeSlotName, order.Status, order.FulfillmentMethod, order.TakeawayBranchName, order.TakeawayBranchAddress)
+                {
+                    ServiceDayId = day.Id, ServiceDate = day.ServiceDate,
+                    FulfillmentStatus = ServiceDayFulfillment.DisplayStatus(day.Status),
+                    FulfilledAt = day.FulfilledAt, FulfilledBy = day.FulfilledBy,
+                    StaffDisplayName = day.FulfilledBy is { } staff ? names.GetValueOrDefault(staff) : null,
+                    DeliveryAddress = SavedDeliveryAddress(order), FulfillmentDeadline = deadline,
+                    IsOverdue = DailyFulfillmentTracking.IsOverdue(day.ServiceDate, day.Status, deadline, now)
+                };
+            }).OrderBy(r => r.IsOverdue ? 0 : r.FulfillmentStatus == "SCHEDULED" ? 1 : 2).ToArray();
+            var progress = DailyFulfillmentTracking.Summarize(orderResponses.Select(r => new ServiceDayProgress(r.FulfillmentStatus!, r.IsOverdue)));
+            var mealTypeTotals = scheduledOrders.SelectMany(o => o.Meals).GroupBy(m => m.MealTypeName)
+                .Select(g => new AdminDeliveryMealTypeTotalResponse(g.Key, g.Sum(m => m.Quantity))).OrderBy(g => g.MealType).ToArray();
+            days.Add(new AdminDeliveryCalendarDayResponse(date, scheduledOrders.Length,
+                scheduledOrders.Select(o => o.CustomerProfileId).Distinct().Count(), mealTypeTotals.Sum(t => t.Quantity), orderResponses, mealTypeTotals)
+            {
+                TotalServiceDays = progress.TotalServiceDays, PendingCount = progress.PendingCount, OverdueCount = progress.OverdueCount,
+                DeliveredCount = progress.DeliveredCount, CollectedCount = progress.CollectedCount, FulfillmentProgress = progress.Status
+            });
         }
 
         return new AdminDeliveryCalendarResponse(startDate, endDate, days);
@@ -166,6 +162,10 @@ public sealed class AdminDeliveryCalendarService(
         var preliminary = now < SubscriptionMenuRules.TomorrowCutoff(date) || trackedDays.Any(d => !d.SelectionLocked) || exceptions.Length > 0;
         var summary = DeliveryPreparationAggregation.Build(date, scheduledOrders, persistedRows);
         return summary with {
+            TotalScheduledCount = details.Count(d => DailyFulfillmentTracking.IsTrackableStatus(d.Day.Status)),
+            DeliveredCount = details.Count(d => d.Day.Status == "DELIVERED"),
+            CollectedCount = details.Count(d => d.Day.Status == "COLLECTED"),
+            RemainingCount = details.Count(d => DailyFulfillmentTracking.IsTrackableStatus(d.Day.Status) && d.Day.Status is not ("DELIVERED" or "COLLECTED")),
             Status = exceptions.Length > 0 ? "NeedsReview" : preliminary ? "Preliminary" : "Finalized",
             IsPreliminary = preliminary,
             OperationalExceptions = exceptions,
@@ -181,6 +181,9 @@ public sealed class AdminDeliveryCalendarService(
                     profile?.Preferences.Select(p => p.PreferenceCode).Concat(profile.Allergens.Select(a => "ALLERGEN: " + a.Allergen.Code)).ToArray() ?? [], d.Day.ReviewReason,
                     d.Order.FulfillmentMethod, d.Order.TakeawayBranchName, d.Order.TakeawayBranchAddress)
                 {
+                    FulfillmentStatus = ServiceDayFulfillment.DisplayStatus(d.Day.Status),
+                    FulfilledAt = d.Day.FulfilledAt,
+                    FulfilledBy = d.Day.FulfilledBy,
                     CustomerName = string.IsNullOrWhiteSpace(name) ? "Name not recorded" : name,
                     DeliveryAddress = SavedDeliveryAddress(d.Order),
                     DietaryRestrictionLabels = profile?.Preferences.Where(p => p.PreferenceCode != "NONE")

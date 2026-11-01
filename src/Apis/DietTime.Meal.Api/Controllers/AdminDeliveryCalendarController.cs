@@ -9,7 +9,7 @@ namespace DietTime.Meal.Api.Controllers;
 
 [ApiController]
 [ApiVersion(1)]
-[Authorize(Roles = "Admin,Operations")]
+[Authorize(Roles = FulfillmentStaffRoles.Read)]
 [Route("api/v{version:apiVersion}/admin/orders/delivery-calendar")]
 public sealed class AdminDeliveryCalendarController(IAdminDeliveryCalendarService calendar) : ControllerBase
 {

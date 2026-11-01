@@ -684,3 +684,72 @@ Regression coverage: `test/app_tour_test.dart` in the Flutter repository and
 `CustomerAppTourTests.cs` in the API integration tests. The latter uses
 `UPCOMING_MEALS_TEST_CONNECTION` against an isolated PostgreSQL database and
 verifies ownership, profile creation and preference updates.
+
+## Staff notification inbox
+
+Persistent, recipient-scoped order notifications back the existing React Admin header bell. No separate notification page is added. The React Admin project README documents the header, dropdown and 45-second client polling.
+
+**Events and recipients**
+
+| Event | Admin | Existing navigation |
+| --- | --- | --- |
+| New order, Pending Confirmation | Yes | Order review/details |
+| Order approved | Yes | Order details |
+| Order rejected or cancelled | Yes | Order details |
+| Delivery overdue | Yes | Calendar date and service-day row |
+| Delivered | Yes | Calendar date and service-day row |
+| Collected | Yes | Calendar date and service-day row |
+
+The existing durable WhatsApp queue has no per-recipient inbox/read state. The implementation reuses the existing order-status history and service-day fulfillment audits as event sources, leaving that queue unchanged. A SaveChanges capture adds only the specified order/fulfillment events to a small durable outbox in the same database transaction as the source change. Unrelated updates, payment-only history and automatic activation do not emit inbox events. No placement, approval-validation, payment or delivery-transition rules are changed.
+
+An ASP.NET Core background worker runs at startup and every 30 seconds, independent of browsers. It projects outbox events to currently assigned staff recipients and detects overdue home-delivery days using the existing DailyFulfillmentTracking eligibility/deadline rules and Asia/Qatar timezone. Takeaway has no configured collection deadline and is not treated as overdue. Future or already fulfilled days do not produce overdue alerts.
+
+Outbox source keys and per-recipient delivery keys are unique. Projection uses transactional row locks with SKIP LOCKED; notification inserts use ON CONFLICT DO NOTHING. A crash or multiple API instances cannot create duplicate recipient notifications. Repeated mark-read requests preserve the original read time. Notifications are ordered by event creation time, then ID, newest first.
+
+**API**
+
+Both /api/admin and /api/v1/admin route prefixes are supported:
+
+- GET /api/admin/notifications?page=1&pageSize=20 — recipient-scoped items, page metadata, total count; maximum page size 50.
+- GET /api/admin/notifications/unread-count — `{ "data": { "unreadCount": 4 } }`.
+- PATCH /api/admin/notifications/{id}/read — 204; 404 for another recipient's or an inaccessible notification.
+- PATCH /api/admin/notifications/read-all — 204; affects only the authenticated recipient's permitted events.
+
+Only authenticated Admin users can call these endpoints. Identity comes from validated claims; no recipient ID is accepted from requests. Every inbox and read action is scoped to that authenticated recipient. Customer and other non-Admin accounts are rejected by API authorization. No additional role is defined.
+
+Order links reuse /orders?orderId={id} and the existing Admin-only order details screen. Approval, rejection, payment and date-change endpoints retain their existing Admin authorization. Personal notification read receipts are exempted from the client screen-write guard; order mutations remain guarded and API-authorized. No roles or screen permissions are created for this feature.
+
+Service-day links reuse /operations/delivery-calendar?date={yyyy-MM-dd}&serviceDayId={id}. Navigation hooks select the corresponding month/date, reopen the existing drawer and scroll to the row. Calendar layout, fulfillment actions and Preparation Summary are unchanged by this feature.
+
+**Database and deployment**
+
+The API requires the existing staff_notification_events outbox and staff_notifications inbox tables, their deduplication and recipient/unread indexes, and the fulfillment audit fields described in the EF mappings. No migration or standalone SQL script is included for these features; schema setup is managed separately. No live database changes were applied during this work.
+
+Newly occurring order/fulfillment events are captured after deployment; historical order events are not replayed at installation. Existing overdue service days are detected on the next worker pass. If no staff recipients are assigned when an event is dispatched, it is not later backfilled to newly assigned staff.
+
+**Feature files**
+
+- src/BuildingBlocks/DietTime.Domain/StaffNotification.cs
+- src/BuildingBlocks/DietTime.Application/StaffNotificationRules.cs
+- src/BuildingBlocks/DietTime.Contracts/StaffNotificationContracts.cs
+- src/BuildingBlocks/DietTime.Persistence/DietTimeDbContext.cs
+- src/BuildingBlocks/DietTime.Persistence/StaffNotificationCapture.cs
+- src/BuildingBlocks/DietTime.Persistence/StaffNotificationService.cs
+- src/Apis/DietTime.Meal.Api/Controllers/StaffNotificationsController.cs
+- src/Apis/DietTime.Meal.Api/Controllers/StaffOrdersController.cs — existing Admin access retained.
+- src/Apis/DietTime.Meal.Api/StaffNotificationWorker.cs
+- src/Apis/DietTime.Meal.Api/Program.cs
+- tests/DietTime.UnitTests/StaffNotificationRulesTests.cs
+- tests/DietTime.Meal.Api.IntegrationTests/StaffNotificationTests.cs
+- README.md
+
+No Flutter, login/OTP, questionnaire, order-placement, meal-assignment, payment-processing, delivery-confirmation logic or Preparation Summary files were changed for this notification feature. Earlier work in this conversation remains in the working tree.
+
+**Validation recorded for this implementation**
+
+- Backend unit run: 30 passed, including event selection/content/role routing and the existing Qatar deadline regressions.
+- API/capture run: 7 passed, including capture deduplication, unrelated-update exclusion, role policies, and actual anonymous/customer rejection for all four notification endpoints.
+- PostgreSQL scenarios: 2 skipped because UPCOMING_MEALS_TEST_CONNECTION is unset. These cover recipient isolation, read timestamp persistence, duplicate projection, overdue generation and fulfillment projection. These database behaviors remain unverified against a running PostgreSQL instance.
+- API build passed with existing unrelated compiler warnings.
+
+To run the database scenarios, set UPCOMING_MEALS_TEST_CONNECTION to an isolated PostgreSQL server where the test account may create/drop test databases, then run the integration test project with filter FullyQualifiedName~Staff_inbox. The fixture creates a unique disposable database; do not point it at a production application database.
