@@ -172,7 +172,9 @@ builder.Services.AddScoped<IOrderNotificationSender, OrderWhatsAppNotificationSe
 builder.Services.AddSingleton<OrderNotificationWorker>();
 builder.Services.AddSingleton<IOrderNotificationQueue>(services => services.GetRequiredService<OrderNotificationWorker>());
 builder.Services.AddHostedService(services => services.GetRequiredService<OrderNotificationWorker>());
-builder.Services.AddScoped<IUpcomingMealService, UpcomingMealService>();
+builder.Services.AddScoped<UpcomingMealService>();
+builder.Services.AddScoped<IUpcomingMealService>(sp => sp.GetRequiredService<UpcomingMealService>());
+builder.Services.AddScoped<IPackageManagementService>(sp => sp.GetRequiredService<UpcomingMealService>());
 builder.Services.AddHostedService<TomorrowMealFinalizationWorker>();
 builder.Services.AddScoped<IAdminDeliveryCalendarService, AdminDeliveryCalendarService>();
 builder.Services.AddSingleton<IKitchenPreparationReportGenerator, KitchenPreparationPdfReportGenerator>();

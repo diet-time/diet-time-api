@@ -68,6 +68,11 @@ public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, 
         var order = await db.Orders.Include(x => x.Meals).Include(x => x.DeliveryDays).SingleOrDefaultAsync(x => x.Id == id, ct);
         if (order is null || customerUserId.HasValue && !await db.CustomerProfiles.AnyAsync(p => p.Id == order.CustomerProfileId && p.UserId == customerUserId, ct))
             throw Error(404, "order_not_found", "Order was not found.");
+        if (customerUserId.HasValue) {
+            await db.Entry(order).ReloadAsync(ct);
+            if (action == "cancel" && PackagePauseRules.CancellationBlocked(order))
+                throw Error(409, PackagePauseRules.CancellationCode, PackagePauseRules.CancellationMessage);
+        }
         if (order.RowVersion != version) throw Error(409, "order_changed", "This order changed. Refresh it before taking another action.");
         reason = reason?.Trim();
         if (action is "reject" or "cancel" or "payment" or "revise-dates" && string.IsNullOrWhiteSpace(reason))

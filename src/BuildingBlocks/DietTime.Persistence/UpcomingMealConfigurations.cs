@@ -7,6 +7,13 @@ public static class UpcomingMealConfigurations
 {
     public static void Configure(ModelBuilder b)
     {
+        b.Entity<SubscriptionPause>(e => {
+            e.ToTable("subscription_pauses", "public");
+            e.HasOne(p => p.Order).WithMany().HasForeignKey(p => p.OrderId).OnDelete(DeleteBehavior.Restrict);
+            e.Property(p => p.ScheduleChangesJson).HasColumnType("jsonb");
+            e.HasIndex(p => new { p.OrderId, p.CreatedAt });
+            e.HasIndex(p => p.ResumeCommandId).IsUnique().HasFilter("resume_command_id IS NOT NULL");
+        });
         b.Entity<SubscriptionServiceDay>(e =>
         {
             e.ToTable("subscription_service_days", "public");

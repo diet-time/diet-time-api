@@ -13,8 +13,28 @@ namespace DietTime.Meal.Api.Controllers;
 [ApiVersion(1)]
 [Authorize]
 [Route("api/v{version:apiVersion}/orders")]
-public sealed class OrdersController(IOrderService orders, StaffOrderService workflow) : ControllerBase
+public sealed class OrdersController(IOrderService orders, StaffOrderService workflow, IPackageManagementService packages) : ControllerBase
 {
+    [HttpGet("{orderId:guid}/package-management")]
+    public Task<IActionResult> Package(Guid orderId, CancellationToken ct) => PackageAction(u => packages.GetPackageAsync(orderId, u, ct));
+    [HttpGet("{orderId:guid}/pauses")]
+    public Task<IActionResult> Pauses(Guid orderId, CancellationToken ct) => PackageAction(u => packages.GetPausesAsync(orderId, u, ct));
+    [HttpPost("{orderId:guid}/pause/preview")]
+    public Task<IActionResult> PreviewPause(Guid orderId, PausePreviewRequest request, CancellationToken ct) => PackageAction(u => packages.PreviewPauseAsync(orderId, u, request, ct));
+    [HttpPost("{orderId:guid}/pause")]
+    public Task<IActionResult> Pause(Guid orderId, PausePackageRequest request, CancellationToken ct) => PackageAction(u => packages.PauseAsync(orderId, u, request, ct));
+    [HttpPost("{orderId:guid}/resume")]
+    public Task<IActionResult> Resume(Guid orderId, ResumePackageRequest request, CancellationToken ct) => PackageAction(u => packages.ResumeAsync(orderId, u, request, ct));
+    private async Task<IActionResult> PackageAction<T>(Func<Guid, Task<T>> action)
+    {
+        if (!TryGetUserId(out var userId)) return Unauthorized();
+        try { return Ok(await action(userId)); }
+        catch (UpcomingMealException error) { return ProblemResponse(error.StatusCode, error.Code, error.Message); }
+        catch (ArgumentOutOfRangeException) { return ProblemResponse(400, "invalid_resume_date", "Choose a supported resume date."); }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException error) when (error.InnerException is Npgsql.PostgresException { SqlState: "23505" }) { return ProblemResponse(409, "idempotency_conflict", "This command conflicts with the current package schedule. Refresh before continuing."); }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException) { return ProblemResponse(409, "schedule_changed", "This package changed. Refresh before continuing."); }
+    }
+
     [HttpPost("{orderId:guid}/cancel")]
     public async Task<IActionResult> Cancel(Guid orderId, OrderReviewRequest request, CancellationToken ct)
     {

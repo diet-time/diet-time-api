@@ -205,8 +205,11 @@ public sealed partial class UpcomingMealServiceTests
         Assert.Equal(HttpStatusCode.OK,(await client.PostAsJsonAsync($"/api/admin/orders/{paidBeforeApproval}/payment",new RecordOrderPaymentRequest(1,"PAID","Cash payment before review"))).StatusCode);
         Assert.Equal(HttpStatusCode.OK,(await Review(client,paidBeforeApproval,"approve",2)).StatusCode);
         Assert.Equal("PAID",(await db.Orders.AsNoTracking().SingleAsync(o=>o.Id==paidBeforeApproval)).PaymentStatus);
-        Assert.Equal(HttpStatusCode.OK,(await client.PostAsJsonAsync($"/api/v1/orders/{paidBeforeApproval}/cancel",new OrderReviewRequest(3,"Cancelled before preparation"))).StatusCode);
-        Assert.Equal("REFUND_PENDING",(await db.Orders.AsNoTracking().SingleAsync(o=>o.Id==paidBeforeApproval)).PaymentStatus);
+        var blocked = await client.PostAsJsonAsync($"/api/v1/orders/{paidBeforeApproval}/cancel",new OrderReviewRequest(3,"Cancelled before preparation"));
+        Assert.Equal(HttpStatusCode.Conflict, blocked.StatusCode);
+        Assert.Equal(PackagePauseRules.CancellationCode, (await blocked.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("code").GetString());
+        Assert.Equal("PAID",(await db.Orders.AsNoTracking().SingleAsync(o=>o.Id==paidBeforeApproval)).PaymentStatus);
+        Assert.Equal("CONFIRMED",(await db.Orders.AsNoTracking().SingleAsync(o=>o.Id==paidBeforeApproval)).Status);
         var confirmed=(await SubmitApprovalOrder(client,setup.Request)).GetProperty("id").GetGuid();await Review(client,confirmed,"approve",1);
         clock.Now=new(2026,10,27,10,0,0,TimeSpan.Zero);
         Assert.Equal(HttpStatusCode.Conflict,(await client.PostAsJsonAsync($"/api/v1/orders/{confirmed}/cancel",new OrderReviewRequest(2,"Changed my plans"))).StatusCode);

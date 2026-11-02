@@ -101,6 +101,8 @@ public sealed class AdminDeliveryCalendarService(
         if (date.DayOfWeek == DayOfWeek.Friday) return DeliveryPreparationAggregation.Build(date, [], []);
         var apiWeekday = OperationsDashboardScheduling.ToApiWeekday(date.DayOfWeek);
         var scheduledOrders = await db.Orders.AsNoTracking()
+            .Where(order => !db.Set<SubscriptionPause>().Any(p => p.OrderId == order.Id) ||
+                db.Set<SubscriptionServiceDay>().Any(d => d.OrderId == order.Id && d.ServiceDate == date && d.Status != "SKIPPED" && d.Status != "CANCELLED"))
             .Where(OrderWorkflowPolicy.FulfillmentFilter)
             .Where(order => (order.Status == OrderStatuses.Confirmed || order.Status == "ACTIVE") &&
                 order.StartDate <= date && order.EndDate >= date &&

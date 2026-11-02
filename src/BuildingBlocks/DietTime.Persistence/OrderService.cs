@@ -350,7 +350,11 @@ public sealed class OrderService(
         var typeIds = order.Meals.Select(x => x.MealTypeId).Distinct().ToArray();
         var codes = await db.MealTypes.AsNoTracking().Where(x => typeIds.Contains(x.Id))
             .ToDictionaryAsync(x => x.Id, x => x.Code, cancellationToken);
-        return Map(order, codes);
+        var response = Map(order, codes);
+        if (!await db.Set<SubscriptionPause>().AnyAsync(p => p.OrderId == order.Id, cancellationToken)) return response;
+        var dates = await db.Set<SubscriptionServiceDay>().AsNoTracking().Where(d => d.OrderId == order.Id && d.Status != "SKIPPED" && d.Status != "CANCELLED")
+            .OrderBy(d => d.ServiceDate).Select(d => d.ServiceDate).ToArrayAsync(cancellationToken);
+        return dates.Length == 0 ? response : response with { Delivery = response.Delivery with { ServiceDates = dates } };
     }
 
     internal static PlaceOrderResponse Map(Order order, IReadOnlyDictionary<Guid, string> codes) => new(

@@ -33,6 +33,11 @@ public sealed partial class UpcomingMealService(
         if (existingDays.Any(d => d.OrderId != order.Id))
             throw new UpcomingMealException(409, "service_day_link_review",
                 "Existing subscription service days need an order-link review. They were not duplicated or changed.");
+        // Once managed, persisted service days are authoritative; never backfill pause gaps from the original range.
+        if (existingDays.Count > 0 && await db.Set<SubscriptionPause>().AnyAsync(p => p.OrderId == order.Id, ct)) {
+            if (transaction is not null) await transaction.CommitAsync(ct);
+            return;
+        }
         var existingDates = existingDays.Select(d => d.ServiceDate).ToHashSet();
         var template = await db.MealPlanTemplates.SingleAsync(t => t.Id == order.MealPlanTemplateId, ct);
         var profile = await ProfileAsync(order.CustomerProfileId, ct);
