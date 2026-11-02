@@ -9,7 +9,10 @@ public sealed record OperationsDashboardResponse(
     IReadOnlyList<DeliveryWorkloadDayDto> NextSevenDays,
     DashboardAttentionDto NeedsAttention,
     IReadOnlyList<DashboardDeliveryDto> TodayDeliveries,
-    UpcomingPlanActivityDto UpcomingPlanActivity);
+    UpcomingPlanActivityDto UpcomingPlanActivity)
+{
+    public DashboardInsightsDto? Insights { get; init; }
+}
 
 public sealed record OperationsDashboardTodayDto(
     int ScheduledDeliveries,

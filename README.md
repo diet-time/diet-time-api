@@ -757,3 +757,17 @@ No Flutter, login/OTP, questionnaire, order-placement, meal-assignment, payment-
 - API build passed with existing unrelated compiler warnings.
 
 To run the database scenarios, set UPCOMING_MEALS_TEST_CONNECTION to an isolated PostgreSQL server where the test account may create/drop test databases, then run the integration test project with filter FullyQualifiedName~Staff_inbox. The fixture creates a unique disposable database; do not point it at a production application database.
+
+## Business dashboard insights
+
+The existing authenticated Admin/Operations `GET /api/v1/admin/dashboard/operations?date=YYYY-MM-DD` endpoint now adds an `insights` object. Existing response fields and routes remain compatible. No new endpoint, schema, migration, SQL script or role is introduced.
+
+`insights` contains `activeSubscriptions`, `pendingConfirmations`, `expiringSubscriptions`, `fulfillment`, `workload`, `popularPackages`, `deliverySlots` and `scheduledOrders`. Fulfillment includes total, pending, overdue, delivered, collected, fulfilled, homeDelivery, takeaway, mealItems and nullable fulfillmentRate. Seven workload entries cover the selected date through date + 6. All totals are calculated before the configured dashboard row limit is applied.
+
+Service-day counts, deadlines, eligibility and meal demand reuse the existing Delivery Calendar read model. Package demand includes snacks and is not a replacement for eligible meal-selection preparation quantities. Active subscriptions count distinct eligible Confirmed/Active order plans spanning the selected date. Popular packages group these by daily meal/snack quantities. Renewal opportunities use their last scheduled service date within the selected seven-day window. Pending confirmations count both current and legacy pending order statuses across all dates. Slot progress uses actual configured windows or saved snapshots, excludes takeaway, and reports unknown windows without inventing capacities. Fulfillment rate is `(Delivered + Collected) / total * 100`, rounded to one decimal; no scheduled service days yields null.
+
+The SPA polls quietly every 60 seconds and preserves cached data on refresh failures. No order approval, fulfillment, payment or subscription mutation is performed by these reads. No Flutter changes are included.
+
+Implementation: `DashboardInsightsBuilder.cs` (Application), `DashboardInsightsContracts.cs` and the additive property in `OperationsDashboardContracts.cs` (Contracts), `OperationsDashboardService.cs` (Persistence), and `DashboardInsightsTests.cs` (UnitTests).
+
+Validation: 9 dashboard unit tests passed, including service-day totals independent of table limits, delivery/takeaway slot isolation, package grouping, renewal boundaries, seven-day zero filling and unknown-window handling. API compilation passed. Frontend: 10 targeted tests, TypeScript, ESLint and production build passed. Desktop/mobile previews used fixture data. Live PostgreSQL aggregation was not exercised.

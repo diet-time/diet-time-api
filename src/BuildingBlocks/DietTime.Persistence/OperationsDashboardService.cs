@@ -41,7 +41,7 @@ public sealed class OperationsDashboardService(
         // Includes are split into a fixed three queries, avoiding a cartesian product and N+1 reads.
         var orders = await db.Orders.AsNoTracking()
             .Where(OrderWorkflowPolicy.FulfillmentFilter)
-            .Where(order => activeStatuses.Contains(order.Status) && order.EndDate >= date)
+            .Where(order => (activeStatuses.Contains(order.Status) || order.Status == OrderStatuses.Active) && order.EndDate >= date)
             .Include(order => order.DeliveryDays)
             .Include(order => order.Meals)
             .AsSplitQuery()
@@ -126,7 +126,10 @@ public sealed class OperationsDashboardService(
             workload,
             attention,
             todayDeliveries,
-            new(starts, ends));
+            new(starts, ends))
+        {
+            Insights=await BuildInsightsAsync(date,orders,cancellationToken)
+        };
     }
 
     public async Task<DashboardDeliveriesPage> GetDeliveriesAsync(
@@ -199,6 +202,28 @@ public sealed class OperationsDashboardService(
             .ThenBy(delivery => delivery.CustomerName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(delivery => delivery.OrderNumber, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    private async Task<DashboardInsightsDto> BuildInsightsAsync(DateOnly date,IReadOnlyList<Order> orders,CancellationToken ct)
+    {
+        // Reuse the calendar's eligible persisted service days, Qatar deadlines and fulfillment counts.
+        var calendar=new AdminDeliveryCalendarService(db,Options.Create(new MenuRotationOptions()),clock);
+        var week=await calendar.GetMonthAsync(date,date.AddDays(6),null,null,ct);
+        var typeIds=orders.SelectMany(o=>o.Meals).Select(m=>m.MealTypeId).Distinct().ToArray();
+        var mealTypes=await db.MealTypes.AsNoTracking().Where(t=>typeIds.Contains(t.Id)).ToDictionaryAsync(t=>t.Id,t=>t.Code,ct);
+        bool Snack(OrderMeal meal) => mealTypes.TryGetValue(meal.MealTypeId,out var code) && MealTypeClassification.IsSnack(code);
+        var subscriptions=orders.Select(o=>new DashboardSubscriptionSource(o.Id,o.StartDate,o.EndDate,
+            o.Meals.Where(m=>!Snack(m)).Sum(m=>m.Quantity),o.Meals.Where(Snack).Sum(m=>m.Quantity),
+            OperationsDashboardScheduling.LastScheduledDate(o.StartDate,o.EndDate,o.DeliveryDays.Select(d=>d.DayOfWeek).ToArray()))).ToArray();
+        var configuredSlots=await db.DeliveryTimeSlots.AsNoTracking().ToDictionaryAsync(s=>s.Id,ct);
+        var slots=orders.Select(o=> {
+            var configured=o.DeliveryTimeSlotId is { } id ? configuredSlots.GetValueOrDefault(id) : null;
+            var hasSnapshot=!string.IsNullOrWhiteSpace(o.DeliveryTimeSlotName) && o.DeliveryEndTime!=o.DeliveryStartTime;
+            return new DashboardSlotSource(o.Id,configured?.Name ?? (string.IsNullOrWhiteSpace(o.DeliveryTimeSlotName) ? "Slot not recorded" : o.DeliveryTimeSlotName),
+                configured?.StartTime ?? (hasSnapshot ? o.DeliveryStartTime : null),configured?.EndTime ?? (hasSnapshot ? o.DeliveryEndTime : null));
+        }).ToArray();
+        var pending=await db.Orders.AsNoTracking().CountAsync(o=>o.Status=="PENDING_APPROVAL" || o.Status=="PENDING",ct);
+        return DashboardInsightsBuilder.Build(date,week.Days,subscriptions,slots,pending,options.TodayDeliveriesLimit);
     }
 
     private static bool IsScheduled(Order order, DateOnly date) =>
