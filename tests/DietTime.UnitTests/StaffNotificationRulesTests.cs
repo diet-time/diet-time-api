@@ -26,6 +26,14 @@ public sealed class StaffNotificationRulesTests
         }
     }
     [Fact]
+    public void Customer_copy_uses_the_order_customer_name_and_keeps_a_safe_fallback() {
+        var placed=StaffNotificationRules.Content("ORDER_RECEIVED","ORD-42",null,"  Sara Ali  ");
+        Assert.Contains("Sara Ali placed order ORD-42",placed.Message);
+        var confirmed=StaffNotificationRules.Content("ORDER_APPROVED","ORD-42",null,"Sara Ali");
+        Assert.Contains("Sara Ali",confirmed.Message);Assert.Contains("confirmed",confirmed.Message);
+        Assert.Contains("A customer placed order",StaffNotificationRules.Content("ORDER_RECEIVED","ORD-42",null).Message);
+    }
+    [Fact]
     public void Links_reuse_existing_screens() {
         var order=Guid.NewGuid();var day=Guid.NewGuid();
         Assert.Equal($"/orders?orderId={order}",StaffNotificationRules.Target(order,null,null));

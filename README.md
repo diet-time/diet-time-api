@@ -706,6 +706,10 @@ An ASP.NET Core background worker runs at startup and every 30 seconds, independ
 
 Outbox source keys and per-recipient delivery keys are unique. Projection uses transactional row locks with SKIP LOCKED; notification inserts use ON CONFLICT DO NOTHING. A crash or multiple API instances cannot create duplicate recipient notifications. Repeated mark-read requests preserve the original read time. Notifications are ordered by event creation time, then ID, newest first.
 
+Notification list responses include an optional customerName derived from the linked order's customer profile and user profile. Titles/messages are enriched at read time with that customer's name, rather than the notification recipient's name. Names are batch-loaded for the current page; missing names retain generic customer wording. Existing notification rows, event times and read timestamps are not rewritten, and no schema change is required. The client refreshes notifications, calendar and order data in place without a page-wide loading overlay.
+
+The customer-specific copy update passed 14 notification-rule unit tests and the API build. The corresponding React update passed 50 targeted tests. Database-backed customer-name lookup still requires the existing opt-in PostgreSQL test environment.
+
 **API**
 
 Both /api/admin and /api/v1/admin route prefixes are supported:

@@ -9,16 +9,20 @@ public static class StaffNotificationRules
         "CANCELLED" when previous is not null => "ORDER_CANCELLED",
         _ => null
     };
-    public static (string Title, string Message) Content(string type, string number, DateOnly? date) => type switch {
-        "ORDER_RECEIVED" => ("New order — Pending Confirmation", $"Order {number} is awaiting staff confirmation."),
-        "ORDER_APPROVED" => ("Order confirmed", $"Order {number} has been approved."),
-        "ORDER_REJECTED" => ("Order rejected", $"Order {number} has been rejected."),
-        "ORDER_CANCELLED" => ("Order cancelled", $"Order {number} has been cancelled."),
-        "DELIVERY_OVERDUE" => ("Delivery overdue", $"Order {number} for {date:yyyy-MM-dd} has passed its delivery deadline."),
-        "DELIVERED" => ("Order delivered", $"Order {number} for {date:yyyy-MM-dd} was marked Delivered."),
-        "COLLECTED" => ("Takeaway collected", $"Order {number} for {date:yyyy-MM-dd} was marked Collected."),
-        _ => throw new ArgumentOutOfRangeException(nameof(type))
-    };
+    public static (string Title, string Message) Content(string type, string number, DateOnly? date, string? customerName = null)
+    {
+        var name = string.IsNullOrWhiteSpace(customerName) ? "the customer" : customerName.Trim();
+        return type switch {
+            "ORDER_RECEIVED" => ("New order received", $"{(name == "the customer" ? "A customer" : name)} placed order {number}. Awaiting confirmation."),
+            "ORDER_APPROVED" => ("Order confirmed", $"Order {number} for {name} has been confirmed."),
+            "ORDER_REJECTED" => ("Order rejected", $"Order {number} for {name} has been rejected."),
+            "ORDER_CANCELLED" => ("Order cancelled", $"Order {number} for {name} has been cancelled."),
+            "DELIVERY_OVERDUE" => ("Delivery overdue", $"Delivery for {name}, order {number} on {date:yyyy-MM-dd}, is overdue."),
+            "DELIVERED" => ("Order delivered", $"Order {number} for {name} on {date:yyyy-MM-dd} was delivered."),
+            "COLLECTED" => ("Takeaway collected", $"Order {number} for {name} on {date:yyyy-MM-dd} was collected."),
+            _ => throw new ArgumentOutOfRangeException(nameof(type))
+        };
+    }
     public static string Target(Guid orderId, Guid? dayId, DateOnly? date) => dayId.HasValue && date.HasValue
         ? $"/operations/delivery-calendar?date={date:yyyy-MM-dd}&serviceDayId={dayId}"
         : $"/orders?orderId={orderId}";

@@ -185,7 +185,7 @@ public sealed class CustomerMealPlanPurchaseService(
                         DailyPrice(row.DiscountedPrice ?? row.Amount, row.ServiceDays),
                         row.Name,
                         row.Description,
-                        row.PackageCode, row.PackageName, plan.Id, row.PackageOptionId, true, true, row.DiscountedPrice, row.Amount, now, today.AddDays(leadDays), leadDays, row.IsDeliveryEnabled))
+                        row.PackageCode, row.PackageName, plan.Id, row.PackageOptionId, true, true, row.DiscountedPrice, row.Amount, now, OrderSchedulingRules.MinimumStartDate(now, leadDays), leadDays, row.IsDeliveryEnabled))
                     .ToArray(), group.Key.PackageOptionId, group.Key.PackageOptionName))
             .ToArray();
 

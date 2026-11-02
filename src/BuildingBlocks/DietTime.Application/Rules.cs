@@ -42,6 +42,14 @@ public static class MealTypeClassification
 
 public static class OrderSchedulingRules
 {
+    public static DateOnly MinimumStartDate(DateTimeOffset now, int minimumLeadTimeDays = 1)
+    {
+        var today = SubscriptionMenuRules.QatarToday(now);
+        var cutoff = SubscriptionMenuRules.TomorrowCutoff(today.AddDays(1));
+        var lead = Math.Max(Math.Max(1, minimumLeadTimeDays), now >= cutoff ? 2 : 1);
+        return today.AddDays(lead);
+    }
+
     public static DateOnly CalculateEndDate(
         DateOnly startDate, IReadOnlyCollection<int> deliveryDays, int serviceDays)
     {

@@ -186,7 +186,7 @@ public sealed class OrderService(
         if (isDelivery && slot is null)
             return Fail(PlaceOrderStatus.DeliveryTimeSlotNotFound, "The selected delivery time slot was not found or is inactive.");
 
-        var minimumStartDate = today.AddDays(Math.Max(1, options.Value.MinimumLeadTimeDays));
+        var minimumStartDate = OrderSchedulingRules.MinimumStartDate(clock.GetUtcNow(), options.Value.MinimumLeadTimeDays);
         if (request.StartDate.DayOfWeek == DayOfWeek.Friday)
             return Fail(PlaceOrderStatus.InvalidStartDate, "Friday is not a delivery day.");
         if (request.StartDate < minimumStartDate)
@@ -285,6 +285,11 @@ public sealed class OrderService(
         db.Orders.Add(order);
         OrderNotificationEvents.Add(db, order, submitted, "ORDER_RECEIVED", now, staff: true);
         await db.SaveChangesAsync(cancellationToken);
+        // Reject requests that crossed the cutoff while waiting for validation or DB writes.
+        minimumStartDate = OrderSchedulingRules.MinimumStartDate(clock.GetUtcNow(), options.Value.MinimumLeadTimeDays);
+        if (request.StartDate < minimumStartDate)
+            return Fail(PlaceOrderStatus.InvalidStartDate,
+                $"The 9:00 PM Qatar booking cutoff has passed. Choose a service start date on or after {minimumStartDate:yyyy-MM-dd}.");
         // The order retains the full agreed schedule. Service days and default meals are
         // initialized only after staff approval and any required prepayment.
         await transaction.CommitAsync(cancellationToken);

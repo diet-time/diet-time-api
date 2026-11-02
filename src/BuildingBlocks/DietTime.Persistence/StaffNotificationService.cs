@@ -14,7 +14,25 @@ public sealed class StaffNotificationService(DietTimeDbContext db,TimeProvider c
         var query=Visible(user,admin).AsNoTracking();
         var total=await query.CountAsync(ct);
         var rows=await query.OrderByDescending(n=>n.CreatedAt).ThenByDescending(n=>n.Id).Skip((page-1)*size).Take(size).ToArrayAsync(ct);
-        return new(rows.Select(n=>new StaffNotificationResponse(n.Id,n.EventType,n.Title,n.Message,n.OrderId,n.OrderNumber,n.ServiceDayId,n.ServiceDate,n.CreatedAt,n.ReadAt,StaffNotificationRules.Target(n.OrderId,n.ServiceDayId,n.ServiceDate))).ToArray(),page,size,total);
+        var orderIds=rows.Select(n=>n.OrderId).Distinct().ToArray();
+        var customers=await (from order in db.Orders.AsNoTracking()
+            join customer in db.CustomerProfiles.AsNoTracking() on order.CustomerProfileId equals customer.Id
+            join profile in db.UserProfiles.AsNoTracking() on customer.UserId equals (Guid?)profile.UserId into profiles
+            from profile in profiles.DefaultIfEmpty()
+            where orderIds.Contains(order.Id)
+            select new { OrderId=order.Id, customer.PreferredName,
+                FirstName=profile == null ? null : profile.FirstName,
+                LastName=profile == null ? null : profile.LastName }).ToArrayAsync(ct);
+        var names=customers.ToDictionary(c=>c.OrderId,c=> {
+            var fullName=$"{c.FirstName} {c.LastName}".Trim();
+            return fullName.Length>0 ? fullName : string.IsNullOrWhiteSpace(c.PreferredName) ? null : c.PreferredName.Trim();
+        });
+        return new(rows.Select(n=> {
+            var name=names.GetValueOrDefault(n.OrderId);
+            // Enrich existing inbox rows at read time without rewriting history or adding schema fields.
+            var content=StaffNotificationRules.Content(n.EventType,n.OrderNumber,n.ServiceDate,name);
+            return new StaffNotificationResponse(n.Id,n.EventType,content.Title,content.Message,n.OrderId,n.OrderNumber,n.ServiceDayId,n.ServiceDate,n.CreatedAt,n.ReadAt,StaffNotificationRules.Target(n.OrderId,n.ServiceDayId,n.ServiceDate),name);
+        }).ToArray(),page,size,total);
     }
     public Task<int> UnreadAsync(Guid user,bool admin,CancellationToken ct) => Visible(user,admin).CountAsync(n=>n.ReadAt==null,ct);
     public async Task<bool> ReadAsync(Guid user,bool admin,Guid id,CancellationToken ct) {
