@@ -29,10 +29,14 @@ public sealed partial class UpcomingMealServiceTests
         Assert.Equal(HttpStatusCode.OK, (await Review(client, orderId, "approve", 1)).StatusCode);
         var days = await db.Set<SubscriptionServiceDay>().AsNoTracking().Where(d => d.OrderId == orderId).OrderBy(d => d.ServiceDate).ToArrayAsync();
         var day = days[0];
+        clock.Now = new DateTimeOffset(day.ServiceDate.AddDays(-1).ToDateTime(new TimeOnly(9, 0)), TimeSpan.FromHours(3)).ToUniversalTime();
         var calendar = new AdminDeliveryCalendarService(db, Options.Create(new MenuRotationOptions()), clock);
         var before = await calendar.GetPreparationSummaryAsync(day.ServiceDate, default);
         var route = $"/api/admin/subscription-service-days/{day.Id}/fulfillment";
         Assert.Equal(HttpStatusCode.BadRequest, (await client.PatchAsJsonAsync(route, new { status = "DELIVERED" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, (await client.PatchAsJsonAsync(route, new { status = "COLLECTED" })).StatusCode);
+        Assert.Null((await db.Set<SubscriptionServiceDay>().AsNoTracking().SingleAsync(d => d.Id == day.Id)).FulfilledAt);
+        clock.Now = new DateTimeOffset(day.ServiceDate.ToDateTime(new TimeOnly(9, 0)), TimeSpan.FromHours(3)).ToUniversalTime();
         var results = await Task.WhenAll(client.PatchAsJsonAsync(route, new { status = "COLLECTED" }), client.PatchAsJsonAsync(route, new { status = "COLLECTED" }));
         Assert.All(results, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
         var first = (await results[0].Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
@@ -62,6 +66,7 @@ public sealed partial class UpcomingMealServiceTests
         // Complete a home-delivery day through the same endpoint.
         await Service().InitializeAsync(order, default);
         var homeDay = await db.Set<SubscriptionServiceDay>().AsNoTracking().FirstAsync(d => d.OrderId == order.Id);
+        clock.Now = new DateTimeOffset(homeDay.ServiceDate.ToDateTime(new TimeOnly(9, 0)), TimeSpan.FromHours(3)).ToUniversalTime();
         Assert.Equal(HttpStatusCode.OK, (await client.PatchAsJsonAsync($"/api/admin/subscription-service-days/{homeDay.Id}/fulfillment", new { status = "DELIVERED" })).StatusCode);
         Assert.Equal("DELIVERED", (await db.Set<SubscriptionServiceDay>().AsNoTracking().SingleAsync(d => d.Id == homeDay.Id)).Status);
     }

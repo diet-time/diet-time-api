@@ -28,6 +28,8 @@ public static class ServiceDayFulfillment
         }
         if (status != expected)
             throw new FulfillmentException(400, "fulfillment_method_mismatch", $"This order requires {expected}.");
+        if (day.ServiceDate > SubscriptionMenuRules.QatarToday(now))
+            throw new FulfillmentException(409, "service_day_in_future", "A future service day cannot be marked as delivered or collected. Wait until its service date in Qatar.");
         if (!DailyFulfillmentTracking.IsEligible(day, order))
             throw new FulfillmentException(409, "order_not_eligible", "This order is not eligible for fulfillment on this service date.");
         if (day.Status is not ("SCHEDULED" or "PLANNED" or "CONFIRMED"))

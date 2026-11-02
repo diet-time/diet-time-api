@@ -29,6 +29,14 @@ public static class PackagePauseRules
     public static DateOnly MinimumResumeDate(DateTimeOffset now) =>
         SubscriptionMenuRules.QatarToday(now).AddDays(now >= SubscriptionMenuRules.TomorrowCutoff(SubscriptionMenuRules.QatarToday(now).AddDays(1)) ? 2 : 1);
 
+    public static DateOnly MaximumResumeDate(DateTimeOffset now) => SubscriptionMenuRules.QatarToday(now).AddMonths(6);
+
+    public static void ValidateResumeDate(DateOnly date, DateTimeOffset now)
+    {
+        if (date < MinimumResumeDate(now) || date > MaximumResumeDate(now))
+            throw new UpcomingMealException(400, "invalid_resume_date", "Choose an available future restart date within six months.");
+    }
+
     public static IReadOnlyDictionary<Guid, DateOnly> Schedule(IReadOnlyList<SubscriptionServiceDay> moving,
         IReadOnlyList<SubscriptionServiceDay> all, DateOnly resumeDate, IReadOnlySet<int> weekdays)
     {

@@ -5,6 +5,8 @@ namespace DietTime.Application;
 
 public static class OrderWorkflowPolicy
 {
+    public static bool CanRecordPayment(Order order) => order.Status != OrderStatuses.Cancelled;
+
     public static readonly Expression<Func<Order, bool>> FulfillmentFilter = order =>
         (order.Status == OrderStatuses.Confirmed || order.Status == OrderStatuses.Active) &&
         order.FulfillmentBlockedReason == null &&

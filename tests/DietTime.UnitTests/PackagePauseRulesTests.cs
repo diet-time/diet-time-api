@@ -4,6 +4,23 @@ namespace DietTime.UnitTests;
 
 public sealed class PackagePauseRulesTests
 {
+    [Theory]
+    [InlineData("2026-11-03", true)]
+    [InlineData("2027-05-02", true)]
+    [InlineData("2027-05-03", false)]
+    [InlineData("2026-11-02", false)]
+    public void Restart_date_is_bounded_to_six_calendar_months(string date, bool valid)
+    {
+        if (valid) PackagePauseRules.ValidateResumeDate(DateOnly.Parse(date), Now);
+        else Assert.Equal(400, Assert.Throws<UpcomingMealException>(() => PackagePauseRules.ValidateResumeDate(DateOnly.Parse(date), Now)).StatusCode);
+    }
+
+    [Fact]
+    public void Six_month_limit_clamps_month_end_and_uses_Qatar_date()
+    {
+        Assert.Equal(new DateOnly(2027, 2, 28), PackagePauseRules.MaximumResumeDate(DateTimeOffset.Parse("2026-08-30T21:00:00Z")));
+        Assert.Equal(new DateOnly(2026, 11, 4), PackagePauseRules.MinimumResumeDate(DateTimeOffset.Parse("2026-11-02T18:00:00Z")));
+    }
     private static readonly DateTimeOffset Now = new(2026, 11, 2, 10, 0, 0, TimeSpan.Zero);
     private static SubscriptionServiceDay Day(int offset) => new() { Id = Guid.NewGuid(), ServiceDate = new DateOnly(2026, 11, 2).AddDays(offset) };
 

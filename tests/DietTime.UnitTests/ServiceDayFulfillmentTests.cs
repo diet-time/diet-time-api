@@ -5,6 +5,26 @@ namespace DietTime.UnitTests;
 
 public sealed class ServiceDayFulfillmentTests
 {
+    [Theory]
+    [InlineData("HOME_DELIVERY", "DELIVERED")]
+    [InlineData("TAKEAWAY", "COLLECTED")]
+    public void Future_service_day_is_rejected_without_modification(string method, string target)
+    {
+        var (order, day) = Scheduled(method);
+        var error = Assert.Throws<FulfillmentException>(() => ServiceDayFulfillment.Apply(day, order, target, DateTimeOffset.Parse("2026-10-31T20:59:59Z"), Guid.NewGuid()));
+        Assert.Equal(409, error.Status);
+        Assert.Equal("service_day_in_future", error.Code);
+        Assert.Equal("PLANNED", day.Status);
+        Assert.Null(day.FulfilledAt);
+        Assert.Null(day.FulfilledBy);
+    }
+
+    [Fact]
+    public void Service_date_begins_at_Qatar_midnight()
+    {
+        var (order, day) = Scheduled();
+        Assert.True(ServiceDayFulfillment.Apply(day, order, "DELIVERED", DateTimeOffset.Parse("2026-10-31T21:00:00Z"), null));
+    }
     private static (Order Order, SubscriptionServiceDay Day) Scheduled(string method = "HOME_DELIVERY")
     {
         var order = new Order { Id = Guid.NewGuid(), Status = "CONFIRMED", PaymentStatus = "PENDING",

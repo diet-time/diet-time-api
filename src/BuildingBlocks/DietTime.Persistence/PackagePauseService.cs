@@ -11,7 +11,7 @@ namespace DietTime.Persistence;
 // Reuses eligibility, menu rotation and selection auditing from UpcomingMealService.
 public sealed partial class UpcomingMealService : IPackageManagementService
 {
-    private sealed record ScheduleChange(Guid ServiceDayId, DateOnly From, DateOnly To, DateTimeOffset? FromCutoff = null);
+    private sealed record ScheduleChange(Guid ServiceDayId, DateOnly From, DateOnly To, DateTimeOffset? FromCutoff = null, DateOnly? RequestedResumeDate = null);
     private static UpcomingMealException PauseError(string code, string message) => new(409, code, message);
     private static string ScheduleVersion(IEnumerable<SubscriptionServiceDay> days) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
         string.Join(";", days.OrderBy(d => d.Id).Select(d => $"{d.Id}|{d.ServiceDate:yyyy-MM-dd}|{d.Revision}|{d.Status}|{d.SelectionStatus}|{d.SelectionLocked}|{d.CustomerConfirmedAt:O}|{d.AutoFinalizedAt:O}|{d.FulfilledAt:O}|{d.SelectionCutoffAt:O}")))));
@@ -43,8 +43,7 @@ public sealed partial class UpcomingMealService : IPackageManagementService
             var ids = JsonSerializer.Deserialize<ScheduleChange[]>(pause.ScheduleChangesJson)!.Select(c => c.ServiceDayId).ToHashSet();
             var moving = days.Where(d => ids.Contains(d.Id) && PackagePauseRules.CanMove(d, now)).ToArray();
             if (moving.Length > 0) {
-                var first = new[] { PackagePauseRules.MinimumResumeDate(now), pause.PauseStartDate }.Max();
-                canResume = PackagePauseRules.Schedule(moving, days, first, order.DeliveryDays.Select(d => d.DayOfWeek).ToHashSet()).Values.Min() < pause.ResumeDate;
+                canResume = true;
             }
         }
         return new(orderId, order.RowVersion, now, pause == null ? order.Status : PauseStatus(pause, today), remaining.Length,
@@ -60,10 +59,11 @@ public sealed partial class UpcomingMealService : IPackageManagementService
         if (!OrderWorkflowPolicy.CanFulfill(order)) throw PauseError("package_not_active", "This package is not eligible for pausing.");
         var eligible = days.Where(d => PackagePauseRules.CanMove(d, now) && IsWeekday(order, d)).OrderBy(d => d.ServiceDate).ToArray();
         if (eligible.Length == 0) throw PauseError("no_eligible_service_days", "There are no unlocked future service days available to pause.");
-        if (!eligible.Any(d => d.ServiceDate == request.PauseStartDate))
+        if (request.MoveRemaining ? request.PauseStartDate != PackagePauseRules.MinimumResumeDate(now) : !eligible.Any(d => d.ServiceDate == request.PauseStartDate))
             throw PauseError("pause_date_unavailable", "Choose an unlocked future service date. Today's delivery and committed deliveries cannot be paused.");
-        if (request.ResumeDate <= request.PauseStartDate)
+        if (request.MoveRemaining ? request.ResumeDate < request.PauseStartDate : request.ResumeDate <= request.PauseStartDate)
             throw new UpcomingMealException(400, "invalid_resume_date", "Choose a resume date after the pause start.");
+        PackagePauseRules.ValidateResumeDate(request.ResumeDate, now);
         if (days.Select(d => d.SubscriptionId).Distinct().Count() != 1)
             throw PauseError("schedule_review_required", "This order contains multiple subscriptions and needs a schedule review.");
         var moving = eligible.Where(d => d.ServiceDate >= request.PauseStartDate).ToArray();
@@ -120,7 +120,7 @@ public sealed partial class UpcomingMealService : IPackageManagementService
         var days = await LockedPackageDaysAsync(orderId, ct);
         if (history.Count == 0 && days.Count != SubscriptionMenuRules.ServiceDates(order.StartDate, order.EndDate, order.DeliveryDays.Select(d => d.DayOfWeek).ToHashSet()).Count())
             throw PauseError("schedule_review_required", "Some purchased service days are missing. Diet Time must review the schedule before pausing.");
-        var plan = BuildPause(order, days, new(request.PauseStartDate, request.ResumeDate), clock.GetUtcNow());
+        var plan = BuildPause(order, days, new(request.PauseStartDate, request.ResumeDate, request.MoveRemaining), clock.GetUtcNow());
         if (plan.Preview.ScheduleVersion != request.ScheduleVersion) throw PauseError("schedule_changed", "Delivery preparation changed. Refresh the pause preview.");
         var changes = plan.Moving.Select(d => new ScheduleChange(d.Id, d.ServiceDate, plan.Schedule[d.Id], d.SelectionCutoffAt)).ToArray();
         await MovePackageDaysAsync(order, days, plan.Moving, plan.Schedule, userId, ct);
@@ -142,7 +142,12 @@ public sealed partial class UpcomingMealService : IPackageManagementService
         var order = await LockPackageAsync(orderId, userId, ct);
         var pause = await db.Set<SubscriptionPause>().SingleOrDefaultAsync(p => p.Id == request.PauseId && p.OrderId == orderId, ct) ?? throw Missing();
         await db.Entry(pause).ReloadAsync(ct);
-        if (pause.Status == "RESUMED" && pause.ResumeCommandId == request.CommandId) { await tx.CommitAsync(ct); return await GetPackageAsync(orderId, userId, ct); }
+        if (pause.Status == "RESUMED" && pause.ResumeCommandId == request.CommandId) {
+            var previous = JsonSerializer.Deserialize<ScheduleChange[]>(pause.ScheduleChangesJson)!;
+            if (previous.LastOrDefault()?.RequestedResumeDate != request.ResumeDate)
+                throw PauseError("idempotency_conflict", "This command ID belongs to a different restart date.");
+            await tx.CommitAsync(ct); return await GetPackageAsync(orderId, userId, ct);
+        }
         if (!OrderWorkflowPolicy.CanFulfill(order) || pause.Status != "CONFIRMED" || pause.ResumeDate <= SubscriptionMenuRules.QatarToday(clock.GetUtcNow()))
             throw PauseError("resume_not_available", "This package cannot be resumed early.");
         if (order.RowVersion != request.ExpectedRowVersion) throw PauseError("order_changed", "This package changed. Refresh before resuming.");
@@ -152,10 +157,11 @@ public sealed partial class UpcomingMealService : IPackageManagementService
         var now = clock.GetUtcNow();
         var moving = days.Where(d => ids.Contains(d.Id) && PackagePauseRules.CanMove(d, now)).ToArray();
         if (moving.Length == 0) throw PauseError("no_eligible_service_days", "There are no unlocked future service days to resume early.");
-        var first = new[] { PackagePauseRules.MinimumResumeDate(now), pause.PauseStartDate }.Max();
+        var first = request.ResumeDate ?? new[] { PackagePauseRules.MinimumResumeDate(now), pause.PauseStartDate }.Max();
+        PackagePauseRules.ValidateResumeDate(first, now);
         var schedule = PackagePauseRules.Schedule(moving, days, first, order.DeliveryDays.Select(d => d.DayOfWeek).ToHashSet());
-        if (schedule.Values.Min() >= pause.ResumeDate) throw PauseError("resume_not_available", "No earlier eligible delivery date is available.");
-        var changes = moving.Select(d => new ScheduleChange(d.Id, d.ServiceDate, schedule[d.Id], d.SelectionCutoffAt)).ToArray();
+        if (request.ResumeDate == null && schedule.Values.Min() >= pause.ResumeDate) throw PauseError("resume_not_available", "No earlier eligible delivery date is available.");
+        var changes = moving.Select(d => new ScheduleChange(d.Id, d.ServiceDate, schedule[d.Id], d.SelectionCutoffAt, request.ResumeDate)).ToArray();
         await MovePackageDaysAsync(order, days, moving, schedule, userId, ct);
         if (schedule.Values.Any(date => date < PackagePauseRules.MinimumResumeDate(clock.GetUtcNow())) ||
             changes.Any(c => c.FromCutoff.HasValue && clock.GetUtcNow() >= c.FromCutoff.Value))
@@ -186,6 +192,8 @@ public sealed partial class UpcomingMealService : IPackageManagementService
             day.Revision++; day.UpdatedAt = now; day.UpdatedBy = actor;
         }
         order.EndDate = all.Where(HasEntitlement).Max(d => d.ServiceDate);
+        // Removing a scheduled pause may restart before the original package start.
+        order.StartDate = new[] { order.StartDate, all.Where(HasEntitlement).Min(d => d.ServiceDate) }.Min();
         order.RowVersion++; order.UpdatedAt = now; order.UpdatedBy = actor;
         await db.SaveChangesAsync(ct);
         var profile = await ProfileAsync(order.CustomerProfileId, ct);

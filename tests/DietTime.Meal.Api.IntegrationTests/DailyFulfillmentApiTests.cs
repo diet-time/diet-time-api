@@ -32,6 +32,7 @@ public sealed partial class UpcomingMealServiceTests
             expires: DateTime.UtcNow.AddMinutes(5), signingCredentials: new SigningCredentials(new SymmetricSecurityKey(Encoding.UTF8.GetBytes("test-only-key-at-least-thirty-two-characters-long")), SecurityAlgorithms.HmacSha256)));
         client.DefaultRequestHeaders.Authorization = new("Bearer", token);
         var route = $"/api/admin/subscription-service-days/{dayId}/fulfillment";
+        clock.Now = new DateTimeOffset(before[dayId].ServiceDate.ToDateTime(new TimeOnly(9, 0)), TimeSpan.FromHours(3)).ToUniversalTime();
         var results = await Task.WhenAll(client.PatchAsJsonAsync(route,new { status }), client.PatchAsJsonAsync(route,new { status }));
         Assert.All(results,r => Assert.Equal(HttpStatusCode.OK,r.StatusCode));
         var after = await db.Set<SubscriptionServiceDay>().AsNoTracking().Where(d => d.OrderId == order.Id).ToArrayAsync();

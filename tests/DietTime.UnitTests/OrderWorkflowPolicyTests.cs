@@ -5,6 +5,15 @@ namespace DietTime.UnitTests;
 public sealed class OrderWorkflowPolicyTests
 {
     [Theory]
+    [InlineData("CANCELLED", false)]
+    [InlineData("PENDING_APPROVAL", true)]
+    [InlineData("CONFIRMED", true)]
+    [InlineData("ACTIVE", true)]
+    public void Cancelled_orders_cannot_record_payment(string status, bool allowed)
+    {
+        Assert.Equal(allowed, OrderWorkflowPolicy.CanRecordPayment(new Order { Status = status }));
+    }
+    [Theory]
     [InlineData("PENDING_APPROVAL","CONFIRMED",true)]
     [InlineData("PENDING_APPROVAL","REJECTED",true)]
     [InlineData("PENDING_APPROVAL","ON_HOLD",false)]

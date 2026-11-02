@@ -1,8 +1,8 @@
 namespace DietTime.Contracts;
-public sealed record PausePreviewRequest(DateOnly PauseStartDate, DateOnly ResumeDate);
+public sealed record PausePreviewRequest(DateOnly PauseStartDate, DateOnly ResumeDate, bool MoveRemaining = false);
 public sealed record PausePackageRequest(Guid CommandId, long ExpectedRowVersion, string ScheduleVersion,
-    DateOnly PauseStartDate, DateOnly ResumeDate, string? Reason);
-public sealed record ResumePackageRequest(Guid CommandId, Guid PauseId, long ExpectedRowVersion);
+    DateOnly PauseStartDate, DateOnly ResumeDate, string? Reason, bool MoveRemaining = false);
+public sealed record ResumePackageRequest(Guid CommandId, Guid PauseId, long ExpectedRowVersion, DateOnly? ResumeDate = null);
 public sealed record PackagePauseResponse(Guid Id, DateOnly PauseStartDate, DateOnly ResumeDate, string Status, string? Reason);
 public sealed record PausePreviewResponse(long RowVersion, string ScheduleVersion, DateOnly EarliestPauseDate,
     DateOnly PauseStartDate, DateOnly ResumeDate, int AffectedServiceDays, int RescheduledServiceDays,

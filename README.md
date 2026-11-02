@@ -771,3 +771,25 @@ The SPA polls quietly every 60 seconds and preserves cached data on refresh fail
 Implementation: `DashboardInsightsBuilder.cs` (Application), `DashboardInsightsContracts.cs` and the additive property in `OperationsDashboardContracts.cs` (Contracts), `OperationsDashboardService.cs` (Persistence), and `DashboardInsightsTests.cs` (UnitTests).
 
 Validation: 9 dashboard unit tests passed, including service-day totals independent of table limits, delivery/takeaway slot isolation, package grouping, renewal boundaries, seven-day zero filling and unknown-window handling. API compilation passed. Frontend: 10 targeted tests, TypeScript, ESLint and production build passed. Desktop/mobile previews used fixture data. Live PostgreSQL aggregation was not exercised.
+
+## Recent notifications, fulfillment dates and package restart dates
+
+The Admin notification dropdown requests only the newest 50 inbox items using the existing pageSize parameter. Older notifications remain stored; the unread badge and read-all endpoint still cover the recipient's entire authorized inbox.
+
+The existing fulfillment PATCH endpoint rejects a new Delivered/Collected transition when the service date is after today's Asia/Qatar date: HTTP 409, code `service_day_in_future`. The UI also hides those future-date actions. Same-status retries preserve existing completion audit metadata.
+
+The customer pause UI chooses one restart date. Preview and confirmation requests set `moveRemaining: true` and submit the system's next eligible future date as pauseStartDate, moving all remaining uncommitted service days. Omitting moveRemaining retains the existing two-date contract. Restart dates may extend past the original package end but must be within six calendar months of the current Qatar date. The existing next-day cutoff still determines the earliest eligible restart. The API calculates the end date from the remaining purchased service days, respecting delivery weekdays and preserving committed deliveries.
+
+The existing `POST /api/v1/orders/{orderId}/resume` request additionally accepts optional `resumeDate` (YYYY-MM-DD). The app supplies the selected restart date when removing a pause. Requests without that field retain the previous earliest-resume behavior. Command retries with a conflicting restart date return 409. The requested date is recorded in the existing schedule-change JSON; no database column, migration or SQL file is added. When an earlier restart precedes the original order start, the order start bound is extended to include it. Payment and approval statuses remain independent.
+
+The customer dashboard shows only the package pause status on the existing plan card. Pause/resume controls remain on the existing order-details screen. No new screen or role is introduced. Deploy the API before the updated customer app so the selected resumeDate is honored.
+
+Validation for this update: 34 Admin frontend tests, 44 Flutter tests, 62 backend unit tests and 20 API integration tests passed. The integration suite used a disposable local PostgreSQL 18 database with no skipped tests. Coverage includes actual future-date rejection, delivery/collection HTTP calls, single restart-date scheduling from tomorrow, six-month limits, pause/resume persistence, retries, entitlement preservation, authorization and existing preparation/PDF behavior. TypeScript, targeted ESLint, Flutter static analysis and the SPA production build passed. Existing compiler/Vite advisories remain. No existing application database was modified.
+
+## Cancelled-order payment protection
+
+The existing Admin order payment endpoint rejects all manual payment-status changes for cancelled orders with HTTP 409 and code `cancelled_order_payment_locked`. This check runs inside the existing order transaction/row lock before payment assignment, history creation, version increment or service-day initialization. Pending and confirmed order payment behavior and cancellation's existing automatic refund-pending handling are preserved.
+
+The Admin UI hides Record Payment Status on cancelled order details. Its Daily Orders table now groups order/created time, customer, package, service period and fulfillment information with readable Qatar dates and status badges. Activity history omits the internal actor/history ID disclosure; stored audit records remain unchanged. No new endpoint, database field, migration or SQL script is included. Deploy the API change with the Admin SPA.
+
+Validation: 37 distinct targeted React tests passed, plus 36 workflow-policy unit tests and 3 PostgreSQL integration tests (zero skipped). The integration tests cover cancelled-payment rejection without payment/version/history changes and existing payment/approval/cancellation behavior. TypeScript, targeted ESLint and the SPA production build passed, with existing compiler/Vite advisories. Browser previews used fixture data to check the updated order list, cancelled-order action visibility and activity history. A disposable PostgreSQL 18 cluster was used; no application database was changed.

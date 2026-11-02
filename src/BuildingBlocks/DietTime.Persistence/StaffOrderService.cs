@@ -84,6 +84,8 @@ public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, 
         string? eventCode = null;
         if (action == "payment")
         {
+            if (!OrderWorkflowPolicy.CanRecordPayment(order))
+                throw Error(409, "cancelled_order_payment_locked", "Payment status cannot be changed for a cancelled order.");
             var next = payment!.PaymentStatus;
             if (!OrderWorkflowPolicy.CanChangePayment(order.PaymentStatus, next)) throw Error(409, "invalid_payment_transition", "This payment transition is not allowed.");
             order.PaymentStatus = next;
