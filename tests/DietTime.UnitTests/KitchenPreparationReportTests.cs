@@ -22,6 +22,41 @@ public sealed class KitchenPreparationReportTests
         Assert.Equal(expected, DietTime.Application.PreparationDisplayText.Label(code));
 
     [Fact]
+    public async Task Pdf_uses_configured_categories_for_the_same_dish_and_separates_dietary_groups()
+    {
+        var breakfast = Guid.NewGuid(); var lunch = Guid.NewGuid(); var dish = Guid.NewGuid();
+        var summary = DietTime.Application.DeliveryPreparationAggregation.Build(new(2026, 11, 2),
+            [new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Balanced")], [
+                new(Guid.NewGuid(), breakfast, "Early Breakfast", 1, dish, "Shared dish", 1),
+                new(Guid.NewGuid(), lunch, "Late Lunch", 2, dish, "Shared dish", 2)]) with {
+            Selections = [new KitchenSelectionResponse(Guid.NewGuid(), "ORD-CATEGORY", Guid.NewGuid(), "AUTO_FINALIZED", ["DEFAULT"], [
+                new("Shared dish", "meal", 1) { MealCategoryId = breakfast, MealCategoryName = "Early Breakfast", MealCategoryDisplayOrder = 1 },
+                new("Shared dish", "meal", 2) { MealCategoryId = lunch, MealCategoryName = "Late Lunch", MealCategoryDisplayOrder = 2 }], [], null) {
+                    FoodPreferences = ["Seafood"], Allergens = ["Celery", "Eggs (including traces)"] }]
+        };
+        var text = ExtractText(await Generator().GenerateAsync(summary, default));
+        Assert.Contains("Early Breakfast", text); Assert.Contains("Late Lunch", text);
+        Assert.Contains("1 x Shared dish", text); Assert.Contains("2 x Shared dish", text);
+        Assert.Contains("Food Preferences: Seafood", text);
+        Assert.Contains("Allergens: Celery, Eggs (including traces)", text);
+        Assert.DoesNotContain("(meal)", text); Assert.DoesNotContain("Allergen:", text);
+        Assert.Equal(3, summary.MealItemCount);
+    }
+
+    [Fact]
+    public void Dietary_groups_preserve_notes_deduplicate_and_prefer_structured_values()
+    {
+        var legacy = DietTime.Application.PreparationDisplayText.Dietary(null, null,
+            ["Seafood", "Allergen: Celery", "ALLERGEN: celery", "Allergen: Eggs (including traces)", "Avoid sauces: spicy"]);
+        Assert.Equal(new[] { "Seafood", "Avoid sauces: spicy" }, legacy.Preferences);
+        Assert.Equal(new[] { "Celery", "Eggs (including traces)" }, legacy.Allergens);
+        var structured = DietTime.Application.PreparationDisplayText.Dietary([], ["Hen eggs", "hen eggs"], ["Allergen: obsolete"]);
+        Assert.Empty(structured.Preferences);
+        Assert.Equal(new[] { "Hen eggs" }, structured.Allergens);
+        Assert.Equal("Eggs (Avoid traces: shared utensils)", DietTime.Application.PreparationDisplayText.AllergenLabel("Allergen: Eggs", "Avoid traces: shared utensils"));
+    }
+
+    [Fact]
     public async Task Pdf_includes_customer_names_home_addresses_and_friendly_dietary_labels()
     {
         var customerId = Guid.NewGuid();
@@ -39,7 +74,9 @@ public sealed class KitchenPreparationReportTests
         var text = ExtractText(await Generator().GenerateAsync(summary, default));
         Assert.Contains("Biju Manayagath", text);
         Assert.Contains("Building 10, Street 20, Zone 30, Doha", text);
-        Assert.Contains("High Protein, Allergen: Hen eggs", text);
+        Assert.Contains("Food Preferences: High Protein", text);
+        Assert.Contains("Allergens: Hen eggs", text);
+        Assert.DoesNotContain("Allergen:", text);
         Assert.Contains("Azizia branch", text);
         Assert.DoesNotContain(customerId.ToString(), text);
         Assert.DoesNotContain("Must not display for takeaway", text);

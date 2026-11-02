@@ -22,7 +22,11 @@ public sealed record DeliveryPreparationMealTypeResponse(
     Guid MealTypeId,
     string MealTypeName,
     int Quantity,
-    IReadOnlyList<DeliveryPreparationMenuItemResponse> Items);
+    IReadOnlyList<DeliveryPreparationMenuItemResponse> Items)
+{
+    public string MealClassification { get; init; } = "meal";
+    public int MealCategoryDisplayOrder { get; init; }
+}
 
 public sealed record DeliveryPreparationMenuItemResponse(
     Guid MenuItemId,
@@ -34,12 +38,21 @@ public sealed record DeliveryPreparationPlanResponse(
     string MealPlanName,
     int OrderCount);
 
-public sealed record KitchenDishResponse(string MealName, string Category, int Quantity);
+public sealed record KitchenDishResponse(string MealName, string Category, int Quantity)
+{
+    public Guid? MealCategoryId { get; init; }
+    public string? MealCategoryName { get; init; }
+    public int MealCategoryDisplayOrder { get; init; } = int.MaxValue;
+    public string MealClassification { get; init; } = Category;
+}
 public sealed record KitchenSelectionResponse(Guid ServiceDayId, string OrderReference, Guid CustomerReference,
     string FinalizationStatus, IReadOnlyList<string> SelectionSources, IReadOnlyList<KitchenDishResponse> Dishes,
     IReadOnlyList<string> DietaryRestrictions, string? ReviewReason,
     string FulfillmentMethod = "HOME_DELIVERY", string? TakeawayBranchName = null, string? TakeawayBranchAddress = null)
 {
+    public string? MealPlanName { get; init; }
+    public IReadOnlyList<string>? FoodPreferences { get; init; }
+    public IReadOnlyList<string>? Allergens { get; init; }
     public string? CustomerName { get; init; }
     public string? FulfillmentStatus { get; init; }
     public DateTimeOffset? FulfilledAt { get; init; }

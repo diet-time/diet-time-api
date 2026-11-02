@@ -5,6 +5,22 @@ namespace DietTime.UnitTests;
 public sealed class DeliveryPreparationTests
 {
     [Fact]
+    public void Same_dish_keeps_each_configured_category_and_classification_without_double_counting()
+    {
+        var order = Guid.NewGuid(); var dish = Guid.NewGuid(); var lunch = Guid.NewGuid(); var breakfast = Guid.NewGuid();
+        var summary = DeliveryPreparationAggregation.Build(new(2026, 11, 2),
+            [new(order, Guid.NewGuid(), Guid.NewGuid(), "Balanced")], [
+                new(order, lunch, "Configured Lunch", 20, dish, "Shared dish", 2),
+                new(order, breakfast, "Configured Breakfast", 10, dish, "Shared dish", 1),
+                new(order, Guid.Empty, "Uncategorized Snack", int.MaxValue, dish, "Shared dish", 1, "snack")]);
+        Assert.Equal(new[] { "Configured Breakfast", "Configured Lunch", "Uncategorized Snack" }, summary.MealTypes.Select(g => g.MealTypeName));
+        Assert.Equal(4, summary.MealItemCount);
+        Assert.Equal(4, summary.MealTypes.Sum(g => g.Items.Sum(i => i.Quantity)));
+        Assert.Equal("snack", summary.MealTypes.Last().MealClassification);
+        Assert.Equal(10, summary.MealTypes.First().MealCategoryDisplayOrder);
+    }
+
+    [Fact]
     public void Empty_day_returns_no_deliveries()
     {
         var result = DeliveryPreparationAggregation.Build(new(2026, 8, 14), [], []);

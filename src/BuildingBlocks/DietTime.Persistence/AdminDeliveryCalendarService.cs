@@ -3,13 +3,15 @@ using DietTime.Contracts;
 using DietTime.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 
 namespace DietTime.Persistence;
 
 public sealed class AdminDeliveryCalendarService(
     DietTimeDbContext db,
     IOptions<MenuRotationOptions> rotationOptions,
-    TimeProvider clock) : IAdminDeliveryCalendarService
+    TimeProvider clock,
+    ILogger<AdminDeliveryCalendarService>? logger = null) : IAdminDeliveryCalendarService
 {
     public async Task<AdminDeliveryCalendarResponse> GetMonthAsync(
         DateOnly startDate,
@@ -122,17 +124,34 @@ public sealed class AdminDeliveryCalendarService(
             .Select(day => new { day.OrderId, day.SelectionLocked, day.SelectionStatus, day.ReviewReason, day.CustomerConfirmedAt, day.AutoFinalizedAt })
             .ToListAsync(cancellationToken);
         var trackedOrderIds = trackedDays.Select(day => day.OrderId!.Value).ToHashSet();
-        var persistedRows = await (
+        var selectedRows = await (
             from selection in db.Set<CustomerMealSelection>().AsNoTracking()
             join day in db.Set<SubscriptionServiceDay>().AsNoTracking() on selection.SubscriptionServiceDayId equals day.Id
             join meal in db.MealItems.AsNoTracking() on selection.MenuItemId equals meal.Id
-            join type in db.MealTypes.AsNoTracking() on selection.MealTypeId equals type.Id
+            join option in db.Set<MealPlanSlotOption>().AsNoTracking() on selection.MealPlanSlotOptionId equals (Guid?)option.Id into options
+            from option in options.DefaultIfEmpty()
+            join type in db.MealTypes.AsNoTracking() on (option != null ? option.Slot.MealTypeId : selection.MealTypeId) equals type.Id into types
+            from type in types.DefaultIfEmpty()
             where day.ServiceDate == date && day.OrderId != null && scheduledIds.Contains(day.OrderId.Value) &&
                 day.ReviewReason == null && day.SelectionLocked && (day.CustomerConfirmedAt != null || day.AutoFinalizedAt != null) && selection.Status != "CANCELLED"
-            select new DeliveryPreparationMenuSource(day.OrderId!.Value, type.Id,
-                selection.Category == "snack" ? "Snack" : "Meal", type.DisplayOrder, meal.Id,
-                meal.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? meal.Sku, 1))
+            select new { OrderId = day.OrderId.GetValueOrDefault(), ServiceDayId = day.Id, SelectionId = selection.Id,
+                selection.Category, selection.SelectionSource, MenuItemId = meal.Id,
+                Name = meal.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? meal.Sku,
+                TypeId = type == null ? (Guid?)null : type.Id,
+                TypeName = type == null ? null : type.Translations.Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? type.Code,
+                TypeOrder = type == null ? (int?)null : type.DisplayOrder })
             .ToListAsync(cancellationToken);
+        // One selection-based projection feeds customer details, aggregates and the PDF.
+        // Never derive a category from the dish's many-to-many meal type associations.
+        var persistedRows = selectedRows.Select(row => {
+            var classification = string.Equals(row.Category, "snack", StringComparison.OrdinalIgnoreCase) ? "snack" : "meal";
+            var mapped = row.TypeId.HasValue && !string.IsNullOrWhiteSpace(row.TypeName);
+            if (!mapped) logger?.LogWarning("Preparation selection {SelectionId} has no configured meal category", row.SelectionId);
+            return new DeliveryPreparationMenuSource(row.OrderId, mapped ? row.TypeId!.Value : Guid.Empty,
+                mapped ? row.TypeName!.Trim() : classification == "snack" ? "Uncategorized Snack" : "Uncategorized Meal",
+                mapped ? row.TypeOrder!.Value : int.MaxValue, row.MenuItemId, row.Name, 1,
+                classification, row.ServiceDayId, row.SelectionSource);
+        }).ToArray();
         var details = await (
             from day in db.Set<SubscriptionServiceDay>().AsNoTracking()
             join order in db.Orders.AsNoTracking() on day.OrderId equals (Guid?)order.Id
@@ -147,13 +166,6 @@ public sealed class AdminDeliveryCalendarService(
             .Select(p => new { p.UserId, p.FirstName, p.LastName })
             .ToDictionaryAsync(p => p.UserId,
                 p => $"{p.FirstName} {p.LastName}".Trim(), cancellationToken);
-        var selections = await (from selection in db.Set<CustomerMealSelection>().AsNoTracking()
-            join day in db.Set<SubscriptionServiceDay>() on selection.SubscriptionServiceDayId equals day.Id
-            join meal in db.MealItems on selection.MenuItemId equals meal.Id
-            where day.ServiceDate == date && day.OrderId != null && scheduledIds.Contains(day.OrderId.Value) &&
-                day.SelectionLocked && (day.CustomerConfirmedAt != null || day.AutoFinalizedAt != null) && day.ReviewReason == null && selection.Status != "CANCELLED"
-            select new { day.Id, selection.SelectionSource, selection.Category, Name = meal.Translations
-                .Where(t => t.LanguageCode == "en").Select(t => t.Name).FirstOrDefault() ?? meal.Sku }).ToListAsync(cancellationToken);
         var exceptions = trackedDays.Where(d => d.ReviewReason != null).Select(d => $"Order {d.OrderId}: {d.ReviewReason}")
             .Concat(trackedDays.Where(d => (d.SelectionLocked || d.SelectionStatus == "LOCKED") && d.CustomerConfirmedAt == null && d.AutoFinalizedAt == null)
                 .Select(d => $"Order {d.OrderId}: legacy lock has no validated finalization timestamp; review required."))
@@ -171,16 +183,25 @@ public sealed class AdminDeliveryCalendarService(
             OperationalExceptions = exceptions,
             Selections = details.Select(d => {
                 profiles.TryGetValue(d.Order.CustomerProfileId, out var profile);
-                var rows = selections.Where(s => s.Id == d.Day.Id).ToArray();
+                var rows = persistedRows.Where(s => s.ServiceDayId == d.Day.Id).ToArray();
                 var name = profile?.UserId is { } userId ? userNames.GetValueOrDefault(userId) : null;
                 if (string.IsNullOrWhiteSpace(name)) name = profile?.PreferredName?.Trim();
                 return new KitchenSelectionResponse(d.Day.Id, d.Order.OrderNumber, d.Order.CustomerProfileId,
                     d.Day.CustomerConfirmedAt != null ? "CUSTOMER_CONFIRMED" : d.Day.AutoFinalizedAt != null ? "AUTO_FINALIZED" : "UNFINALIZED",
                     rows.Select(r => r.SelectionSource).Distinct().ToArray(),
-                    rows.GroupBy(r => new { r.Name, r.Category }).Select(g => new KitchenDishResponse(g.Key.Name, g.Key.Category ?? "meal", g.Count())).ToArray(),
+                    rows.GroupBy(r => new { r.MenuItemId, r.MenuItemName, r.MealTypeId, r.MealTypeName, r.MealTypeDisplayOrder, r.MealClassification })
+                        .OrderBy(g => g.Key.MealTypeDisplayOrder).ThenBy(g => g.Key.MealTypeName).ThenBy(g => g.Key.MenuItemName)
+                        .Select(g => new KitchenDishResponse(g.Key.MenuItemName, g.Key.MealClassification, g.Sum(r => r.Quantity)) {
+                            MealCategoryId = g.Key.MealTypeId == Guid.Empty ? null : g.Key.MealTypeId,
+                            MealCategoryName = g.Key.MealTypeName, MealCategoryDisplayOrder = g.Key.MealTypeDisplayOrder,
+                            MealClassification = g.Key.MealClassification }).ToArray(),
                     profile?.Preferences.Select(p => p.PreferenceCode).Concat(profile.Allergens.Select(a => "ALLERGEN: " + a.Allergen.Code)).ToArray() ?? [], d.Day.ReviewReason,
                     d.Order.FulfillmentMethod, d.Order.TakeawayBranchName, d.Order.TakeawayBranchAddress)
                 {
+                    MealPlanName = d.Order.PlanName,
+                    FoodPreferences = PreparationDisplayText.Clean(profile?.Preferences.Select(p => p.PreferenceCode) ?? []),
+                    Allergens = PreparationDisplayText.Clean(profile?.Allergens.Select(a => PreparationDisplayText.AllergenLabel(
+                        a.Allergen.Translations.FirstOrDefault(t => t.LanguageCode == "en" && !string.IsNullOrWhiteSpace(t.Name))?.Name ?? a.Allergen.Code, a.Notes)) ?? []),
                     FulfillmentStatus = ServiceDayFulfillment.DisplayStatus(d.Day.Status),
                     FulfilledAt = d.Day.FulfilledAt,
                     FulfilledBy = d.Day.FulfilledBy,

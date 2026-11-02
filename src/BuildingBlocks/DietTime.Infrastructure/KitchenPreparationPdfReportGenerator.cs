@@ -82,8 +82,17 @@ public sealed class KitchenPreparationPdfReportGenerator : IKitchenPreparationRe
             section.AddParagraph($"Order {selection.OrderReference} / Customer: {selection.CustomerName ?? "Name not recorded"} - {selection.FinalizationStatus} - {string.Join(", ", selection.SelectionSources)}");
             var dietaryLabels = selection.DietaryRestrictionLabels.Count > 0 ? selection.DietaryRestrictionLabels
                 : selection.DietaryRestrictions.Select(PreparationDisplayText.Label).ToArray();
-            section.AddParagraph("Dietary requirements: " + (dietaryLabels.Count > 0 ? string.Join(", ", dietaryLabels) : "None recorded"));
-            foreach (var dish in selection.Dishes) section.AddParagraph($"{dish.Quantity} x {dish.MealName} ({dish.Category})");
+            var dietary = PreparationDisplayText.Dietary(selection.FoodPreferences, selection.Allergens, dietaryLabels);
+            section.AddParagraph("Food Preferences: " + (dietary.Preferences.Count > 0 ? string.Join(", ", dietary.Preferences) : "None specified"));
+            var allergies = section.AddParagraph("Allergens: " + (dietary.Allergens.Count > 0 ? string.Join(", ", dietary.Allergens) : "None specified"));
+            allergies.Format.Font.Bold = true;
+            if (dietary.Allergens.Count > 0) allergies.Format.Font.Color = Color.Parse("#B42318");
+            foreach (var group in selection.Dishes.OrderBy(d => d.MealCategoryDisplayOrder)
+                .GroupBy(d => new { d.MealCategoryId, Name = d.MealCategoryName ?? (d.MealClassification == "snack" ? "Uncategorized Snack" : "Uncategorized Meal") }))
+            {
+                section.AddParagraph(group.Key.Name).Format.Font.Bold = true;
+                foreach (var dish in group) section.AddParagraph($"{dish.Quantity} x {dish.MealName}");
+            }
         }
 
         if (summary.MealItemCount == 0 && summary.MealTypes.Count == 0 && !summary.IsPreliminary)

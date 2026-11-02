@@ -46,7 +46,10 @@ public sealed record DeliveryPreparationMenuSource(
     int MealTypeDisplayOrder,
     Guid MenuItemId,
     string MenuItemName,
-    int Quantity);
+    int Quantity,
+    string MealClassification = "meal",
+    Guid ServiceDayId = default,
+    string SelectionSource = "");
 
 public static class DeliveryPreparationAggregation
 {
@@ -60,7 +63,8 @@ public static class DeliveryPreparationAggregation
             {
                 row.MealTypeId,
                 row.MealTypeName,
-                row.MealTypeDisplayOrder
+                row.MealTypeDisplayOrder,
+                row.MealClassification
             })
             .OrderBy(group => group.Key.MealTypeDisplayOrder)
             .ThenBy(group => group.Key.MealTypeName, StringComparer.OrdinalIgnoreCase)
@@ -79,7 +83,7 @@ public static class DeliveryPreparationAggregation
                     group.Key.MealTypeId,
                     group.Key.MealTypeName,
                     items.Sum(item => item.Quantity),
-                    items);
+                    items) { MealClassification = group.Key.MealClassification, MealCategoryDisplayOrder = group.Key.MealTypeDisplayOrder };
             })
             .ToArray();
 

@@ -11,6 +11,46 @@ namespace DietTime.Meal.Api.IntegrationTests;
 public sealed partial class UpcomingMealServiceTests
 {
     [UpcomingPostgresFact]
+    public Task Preparation_preserves_customer_selected_slot_categories_and_totals() => AssertPreparationCategories(false);
+
+    [UpcomingPostgresFact]
+    public Task Preparation_preserves_automatically_assigned_slot_categories_and_totals() => AssertPreparationCategories(true);
+
+    private async Task AssertPreparationCategories(bool automatic)
+    {
+        var menu = await PrepareAsync();
+        var types = await db.MealTypes.ToListAsync();
+        foreach (var type in types) type.Translations.Add(new MealTypeTranslation {
+            Id = Guid.NewGuid(), LanguageCode = "en", Name = "Configured " + type.Code });
+        await db.SaveChangesAsync();
+        if (automatic) { clock.Now = menu.CutoffAt.AddSeconds(1); await Service().FinalizeDueAsync(default); }
+        else await Service().ConfirmAsync(order.Id, menu.SubscriptionServiceDayId!.Value, userId, "en", Request(menu), default);
+        var rows = await db.Set<CustomerMealSelection>().Where(r => r.SubscriptionServiceDayId == menu.SubscriptionServiceDayId && r.Status != "CANCELLED").OrderBy(r => r.SelectionNumber).ToListAsync();
+        var meals = rows.Where(r => r.Category == "meal").Take(2).ToArray();
+        // A historical dish may appear in two slots. Its own associations must not override either slot.
+        meals[1].MenuItemId = meals[0].MenuItemId;
+        meals[0].MealTypeId = meals[1].MealTypeId; // Explicit option/slot mapping takes precedence.
+        await db.SaveChangesAsync();
+        var before = rows.Select(r => (r.Id, r.MenuItemId, r.MealTypeId, r.MealPlanSlotOptionId, r.SelectionSource)).ToArray();
+        var options = await db.MealPlanSlotOptions.Include(o => o.Slot).ThenInclude(slot => slot.MealType).ThenInclude(t => t.Translations)
+            .Where(o => rows.Select(r => r.MealPlanSlotOptionId).Contains(o.Id)).ToDictionaryAsync(o => o.Id);
+        var service = new AdminDeliveryCalendarService(db, Options.Create(new MenuRotationOptions()), clock);
+        var summary = await service.GetPreparationSummaryAsync(menu.DeliveryDate, default);
+        var customer = Assert.Single(summary.Selections);
+        Assert.Equal(rows.Count, summary.MealItemCount);
+        Assert.Equal(summary.MealItemCount, summary.MealTypes.Sum(g => g.Items.Sum(d => d.Quantity)));
+        Assert.Equal(summary.MealItemCount, customer.Dishes.Sum(d => d.Quantity));
+        Assert.Equal(types.OrderBy(t => t.DisplayOrder).Select(t => t.Id), summary.MealTypes.Select(g => g.MealTypeId));
+        foreach (var row in rows) {
+            var type = options[row.MealPlanSlotOptionId!.Value].Slot.MealType;
+            Assert.Contains(customer.Dishes, d => d.MealCategoryId == type.Id && d.MealCategoryName == type.Translations.Single().Name && d.MealClassification == row.Category);
+        }
+        Assert.Equal(automatic ? "AUTO_FINALIZED" : "CUSTOMER_CONFIRMED", customer.FinalizationStatus);
+        await db.Entry(meals[0]).ReloadAsync();
+        Assert.Equal(before, rows.Select(r => (r.Id, r.MenuItemId, r.MealTypeId, r.MealPlanSlotOptionId, r.SelectionSource)));
+    }
+
+    [UpcomingPostgresFact]
     public async Task Preparation_uses_customer_names_saved_addresses_and_translated_dietary_labels_before_finalization()
     {
         var profile = await db.CustomerProfiles.SingleAsync(p => p.Id == order.CustomerProfileId);
@@ -21,7 +61,7 @@ public sealed partial class UpcomingMealServiceTests
         var allergen = new Allergen { Id = Guid.NewGuid(), Code = "EGGS", IsActive = true };
         allergen.Translations.Add(new AllergenTranslation { Id = Guid.NewGuid(), LanguageCode = "en", Name = "Hen eggs" });
         db.Allergens.Add(allergen);
-        db.CustomerProfileAllergens.Add(new CustomerProfileAllergen { Id = Guid.NewGuid(), CustomerProfileId = profile.Id, AllergenId = allergen.Id });
+        db.CustomerProfileAllergens.Add(new CustomerProfileAllergen { Id = Guid.NewGuid(), CustomerProfileId = profile.Id, AllergenId = allergen.Id, Notes = "Avoid traces: shared utensils" });
         order.DeliveryFormattedAddress = "Building 10, Street 20, Zone 30, Doha";
         order.DeliveryDirections = "Reception desk";
         await db.SaveChangesAsync();
@@ -37,6 +77,8 @@ public sealed partial class UpcomingMealServiceTests
         Assert.Equal("Building 10, Street 20, Zone 30, Doha · Reception desk", selection.DeliveryAddress);
         Assert.Contains("High Protein", selection.DietaryRestrictionLabels);
         Assert.Contains("Allergen: Hen eggs", selection.DietaryRestrictionLabels);
+        Assert.Equal(new[] { "High Protein" }, selection.FoodPreferences);
+        Assert.Equal(new[] { "Hen eggs (Avoid traces: shared utensils)" }, selection.Allergens);
         Assert.Contains("HIGH_PROTEIN", selection.DietaryRestrictions); // Existing machine-readable contract is retained.
         Assert.Contains("ALLERGEN: EGGS", selection.DietaryRestrictions);
 
