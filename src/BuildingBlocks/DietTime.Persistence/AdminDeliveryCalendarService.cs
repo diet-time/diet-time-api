@@ -113,7 +113,7 @@ public sealed class AdminDeliveryCalendarService(
                 order.Id,
                 order.CustomerProfileId,
                 order.MealPlanTemplateId,
-                order.PlanName))
+                order.PlanName) { OrderNumber = order.OrderNumber })
             .ToListAsync(cancellationToken);
 
         if (scheduledOrders.Count == 0)
@@ -168,10 +168,13 @@ public sealed class AdminDeliveryCalendarService(
             .Select(p => new { p.UserId, p.FirstName, p.LastName })
             .ToDictionaryAsync(p => p.UserId,
                 p => $"{p.FirstName} {p.LastName}".Trim(), cancellationToken);
-        var exceptions = trackedDays.Where(d => d.ReviewReason != null).Select(d => $"Order {d.OrderId}: {d.ReviewReason}")
+        var orderNumbers = scheduledOrders.ToDictionary(o => o.OrderId, o => o.OrderNumber);
+        string OrderReference(Guid? id) => id.HasValue && orderNumbers.TryGetValue(id.Value, out var number) && !string.IsNullOrWhiteSpace(number)
+            ? $"Order {number.Trim()}" : "Order number not recorded";
+        var exceptions = trackedDays.Where(d => d.ReviewReason != null).Select(d => $"{OrderReference(d.OrderId)}: {d.ReviewReason}")
             .Concat(trackedDays.Where(d => (d.SelectionLocked || d.SelectionStatus == "LOCKED") && d.CustomerConfirmedAt == null && d.AutoFinalizedAt == null)
-                .Select(d => $"Order {d.OrderId}: legacy lock has no validated finalization timestamp; review required."))
-            .Concat(scheduledOrders.Where(o => !trackedOrderIds.Contains(o.OrderId)).Select(o => $"Order {o.OrderId}: service days have not been initialized; review required."))
+                .Select(d => $"{OrderReference(d.OrderId)}: legacy lock has no validated finalization timestamp; review required."))
+            .Concat(scheduledOrders.Where(o => !trackedOrderIds.Contains(o.OrderId)).Select(o => $"{OrderReference(o.OrderId)}: service days have not been initialized; review required."))
             .ToArray();
         var preliminary = now < SubscriptionMenuRules.TomorrowCutoff(date) || trackedDays.Any(d => !d.SelectionLocked) || exceptions.Length > 0;
         var summary = DeliveryPreparationAggregation.Build(date, scheduledOrders, persistedRows);

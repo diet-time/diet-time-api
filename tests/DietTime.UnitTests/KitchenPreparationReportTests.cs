@@ -12,6 +12,18 @@ namespace DietTime.UnitTests;
 
 public sealed class KitchenPreparationReportTests
 {
+    [Fact]
+    public async Task Pdf_preserves_order_numbers_in_preparation_review_warnings()
+    {
+        var summary = new DeliveryPreparationSummaryResponse(new(2026, 11, 3), "NeedsReview", 1, 1, 0, [], [])
+        {
+            IsPreliminary = true,
+            OperationalExceptions = ["Order ORD-20261102-000085: Not enough eligible meal types."]
+        };
+        var text = ExtractText(await Generator().GenerateAsync(summary, default));
+        Assert.Contains("ORD-20261102-000085", string.Concat(text.Where(c => !char.IsWhiteSpace(c))));
+        Assert.Contains("Not enough eligible meal types.", text);
+    }
     [Theory]
     [InlineData("HIGH_PROTEIN", "High Protein")]
     [InlineData("SEAFOOD", "Seafood")]

@@ -164,6 +164,7 @@ builder.Services.AddScoped<ICustomerAddressService, CustomerAddressService>();
 builder.Services.AddScoped<IDeliveryTimeSlotService, DeliveryTimeSlotService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<StaffOrderService>();
+builder.Services.AddScoped<AdminCustomerService>();
 builder.Services.AddScoped<StaffNotificationService>();
 builder.Services.AddHostedService<StaffNotificationWorker>();
 builder.Services.AddScoped<ServiceDayFulfillmentService>();

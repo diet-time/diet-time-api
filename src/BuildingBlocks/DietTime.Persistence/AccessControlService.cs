@@ -205,6 +205,15 @@ public sealed class AccessControlService(
                     SubMenuCode = "AUDIT", SubMenuName = "Audit History", RouteUrl = "/audit",
                     Icon = "history", DisplayOrder = 130, IsActive = true
                 }, true, false));
+            if (!await db.Menus.AnyAsync(x => x.RouteUrl == "/customers" ||
+                    (x.MainMenuCode == "OPERATIONS" && x.SubMenuCode == "CUSTOMERS"), cancellationToken))
+                result.Add(ToScreen(new Menu
+                {
+                    Id = Guid.Parse("10000000-0000-0000-0000-000000000032"),
+                    MainMenuCode = "OPERATIONS", MainMenuName = "Operations",
+                    SubMenuCode = "CUSTOMERS", SubMenuName = "Customers", RouteUrl = "/customers",
+                    Icon = "people", DisplayOrder = 46, IsActive = true
+                }, true, false));
             return result.OrderBy(x => x.DisplayOrder).ToList();
         }
 

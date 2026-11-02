@@ -37,7 +37,10 @@ public sealed record DeliveryPreparationOrderSource(
     Guid OrderId,
     Guid CustomerId,
     Guid MealPlanId,
-    string MealPlanName);
+    string MealPlanName)
+{
+    public string? OrderNumber { get; init; }
+}
 
 public sealed record DeliveryPreparationMenuSource(
     Guid OrderId,

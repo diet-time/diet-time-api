@@ -15,9 +15,10 @@ public sealed class OrderReviewException(int status, string code, string detail)
 public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, IOptions<OrderOptions> options,
     IUpcomingMealService meals, IOrderNotificationQueue notifications)
 {
-    public async Task<StaffOrderListResponse> ListAsync(string? status, int page, int size, CancellationToken ct, DateOnly? serviceDate = null)
+    public async Task<StaffOrderListResponse> ListAsync(string? status, int page, int size, CancellationToken ct, DateOnly? serviceDate = null, Guid? customerProfileId = null)
     {
         var query = db.Orders.AsNoTracking();
+        if (customerProfileId is { } profileId) query = query.Where(o => o.CustomerProfileId == profileId);
         if (!string.IsNullOrWhiteSpace(status))
         {
             var approvalStatuses = OrderApprovalFilter.MatchingStatuses(status);
