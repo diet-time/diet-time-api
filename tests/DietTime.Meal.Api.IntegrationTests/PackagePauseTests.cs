@@ -147,6 +147,7 @@ public sealed partial class UpcomingMealServiceTests
 
     [UpcomingPostgresFact]
     public async Task Pause_rolls_back_parked_dates_if_a_later_schedule_write_fails() {
+        await EnforceManagedServiceDayConstraintAsync();
         await PrepareAsync();var service=Service();var before=await db.Set<SubscriptionServiceDay>().AsNoTracking().Where(d=>d.OrderId==order.Id).OrderBy(d=>d.Id).Select(d=>d.ServiceDate).ToArrayAsync();
         var management=await service.GetPackageAsync(order.Id,userId,default);var start=management.EligiblePauseDates.First();
         var preview=await service.PreviewPauseAsync(order.Id,userId,new(start,start.AddDays(7)),default);
@@ -161,6 +162,7 @@ public sealed partial class UpcomingMealServiceTests
 
     [UpcomingPostgresFact]
     public async Task Pause_HTTP_endpoints_authenticate_scope_preview_replay_resume_and_return_actual_dates() {
+        await EnforceManagedServiceDayConstraintAsync();
         await PrepareAsync();
         await using var factory=new ApiFactory(connection, services=> {
             services.AddSingleton<TimeProvider>(clock);

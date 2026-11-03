@@ -68,7 +68,7 @@ public sealed partial class UpcomingMealServiceTests
     }
 
     [UpcomingPostgresFact]
-    public async Task Master_export_includes_all_pages_inactive_records_raw_translations_and_missing_labels()
+    public async Task Master_export_is_screen_scoped_and_contains_only_English_and_Arabic()
     {
         var setup = await ApprovalClient(); await using var factory = setup.Factory; using var client = setup.Client;
         for (var i = 0; i < 105; i++)
@@ -80,17 +80,35 @@ public sealed partial class UpcomingMealServiceTests
             Translations = [new IngredientTranslation { Id = Guid.NewGuid(), LanguageCode = "en", Name = "=SUM(A1)", Description = "English only" }] });
         await db.SaveChangesAsync();
         var before = await db.Ingredients.CountAsync();
-        using var response = await client.GetAsync("/api/v1/admin/master-data/export");
+        using var response = await client.GetAsync("/api/v1/admin/master-data/export?resource=ingredients");
         response.EnsureSuccessStatusCode();
         Assert.Equal("text/csv", response.Content.Headers.ContentType!.MediaType);
         Assert.EndsWith(".csv", response.Content.Headers.ContentDisposition!.FileNameStar ?? response.Content.Headers.ContentDisposition.FileName!.Trim('"'));
         var bytes = await response.Content.ReadAsByteArrayAsync();
         Assert.True(bytes.AsSpan(0, 3).SequenceEqual(new byte[] { 239, 187, 191 }));
         var text = Encoding.UTF8.GetString(bytes);
-        Assert.Contains("EXPORT-104", text); Assert.Contains("EXPORT-001", text); Assert.Contains("مكون 104", text);
-        Assert.Contains("NO-AR", text); Assert.Contains("Arabic missing", text); Assert.Contains("'" + "=SUM(A1)", text);
+        Assert.Contains("Ingredient 104", text); Assert.Contains("Ingredient 1", text); Assert.Contains("مكون 104", text);
+        Assert.DoesNotContain("NO-AR", text); Assert.DoesNotContain("Arabic missing", text); Assert.Contains("'" + "=SUM(A1)", text);
         Assert.Contains("Text with, comma and \"\"quote\"\"\nSecond line", text);
-        Assert.Contains("Meal categories", text); Assert.Contains("Meal types", text); Assert.Contains("Meals", text); Assert.Contains("Meal plans", text);
+        Assert.DoesNotContain("EXPORT-104", text);
+        using (var reader = new Microsoft.VisualBasic.FileIO.TextFieldParser(new StringReader(text.TrimStart('\uFEFF'))))
+        {
+            reader.SetDelimiters(","); reader.HasFieldsEnclosedInQuotes = true;
+            Assert.Equal(new[] { "English", "Arabic" }, reader.ReadFields());
+            while (!reader.EndOfData) Assert.Equal(2, reader.ReadFields()!.Length);
+        }
+        var onlyAllergens = await client.GetStringAsync("/api/v1/admin/master-data/export?resource=allergens");
+        Assert.DoesNotContain("Ingredient 104", onlyAllergens);
+        Assert.DoesNotContain("English only", onlyAllergens);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/v1/admin/master-data/export")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await client.GetAsync("/api/v1/admin/master-data/export?resource=unknown")).StatusCode);
+        var selectedPlan = new MealPlanTemplate { Id = Guid.NewGuid(), VersionGroupId = Guid.NewGuid(), Code = "EXPORT-SELECTED", IsLatest = true,
+            Translations = [new MealPlanTemplateTranslation { Id = Guid.NewGuid(), LanguageCode = "en", Name = "Chosen template" }] };
+        var otherPlan = new MealPlanTemplate { Id = Guid.NewGuid(), VersionGroupId = Guid.NewGuid(), Code = "EXPORT-OTHER", IsLatest = true,
+            Translations = [new MealPlanTemplateTranslation { Id = Guid.NewGuid(), LanguageCode = "en", Name = "Unselected template" }] };
+        db.MealPlanTemplates.AddRange(selectedPlan, otherPlan); await db.SaveChangesAsync();
+        var selected = await client.GetStringAsync($"/api/v1/admin/master-data/export?resource=meal-plans&planId={selectedPlan.Id}");
+        Assert.Contains("Chosen template", selected); Assert.DoesNotContain("Unselected template", selected);
         Assert.Equal(before, await db.Ingredients.CountAsync());
         Assert.DoesNotContain(order.CustomerProfileId.ToString(), text);
         var directory = Environment.GetEnvironmentVariable("MASTER_EXPORT_PREVIEW_DIR");

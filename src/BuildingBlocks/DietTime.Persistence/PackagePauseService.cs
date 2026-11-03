@@ -186,7 +186,15 @@ public sealed partial class UpcomingMealService : IPackageManagementService
         // Park only unlocked rows inside this transaction to avoid immediate unique-date collisions,
         // in either direction. No observer can see the temporary dates; no records are deleted.
         var parking = all.Select(d => d.ServiceDate).Concat(schedule.Values).Max().AddDays(moving.Count + 31);
-        foreach (var day in moving) { day.ServiceDate = parking; day.DayOfWeek = (short)parking.DayOfWeek; parking = parking.AddDays(1); }
+        foreach (var day in moving)
+        {
+            // ck_managed_service_day also applies to intermediate writes inside a transaction.
+            // Preserve its Friday exclusion while freeing the unique service dates.
+            while (parking.DayOfWeek == DayOfWeek.Friday) parking = parking.AddDays(1);
+            day.ServiceDate = parking;
+            day.DayOfWeek = (short)parking.DayOfWeek;
+            parking = parking.AddDays(1);
+        }
         await db.SaveChangesAsync(ct);
         foreach (var day in moving) {
             day.ServiceDate = schedule[day.Id]; day.DayOfWeek = (short)day.ServiceDate.DayOfWeek;
