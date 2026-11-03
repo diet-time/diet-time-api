@@ -568,10 +568,16 @@ public sealed class AdminMealService(
         return AdminWriteResult.Success;
     }
 
-    public async Task<PagedResult<AdminMealSummaryResponse>> GetMealsAsync(string? search, int page, int pageSize, CancellationToken ct)
+    public async Task<PagedResult<AdminMealSummaryResponse>> GetMealsAsync(string? search, int page, int pageSize, CancellationToken ct, string? status = null)
     {
         var now = clock.GetUtcNow();
         var query = db.MealItems.AsNoTracking().Where(x => x.IsLatest);
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            if (!MealStatuses.IsValid(status)) throw new ArgumentException("Invalid meal status.", nameof(status));
+            var normalizedStatus = MealStatuses.Normalize(status);
+            query = query.Where(x => x.Status == normalizedStatus);
+        }
         if (!string.IsNullOrWhiteSpace(search))
         {
             var term = search.Trim();

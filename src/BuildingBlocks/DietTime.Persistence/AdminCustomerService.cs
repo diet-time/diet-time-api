@@ -38,7 +38,7 @@ public sealed class AdminCustomerService(DietTimeDbContext db, TimeProvider cloc
             PreferredLanguage = profile.PreferredLanguage
         };
 
-    public async Task<AdminCustomerListResponse> ListAsync(string? search, int page, int size, CancellationToken ct)
+    public async Task<AdminCustomerListResponse> ListAsync(string? search, int page, int size, CancellationToken ct, string sort = "name_asc")
     {
         var query = Contacts();
         if (!string.IsNullOrWhiteSpace(search))
@@ -48,7 +48,18 @@ public sealed class AdminCustomerService(DietTimeDbContext db, TimeProvider cloc
                 c.Phone != null && c.Phone.ToLower().Contains(term) || c.Email != null && c.Email.ToLower().Contains(term));
         }
         var total = await query.CountAsync(ct);
-        var contacts = await query.OrderBy(c => c.Name).ThenBy(c => c.Id).Skip((page - 1) * size).Take(size).ToArrayAsync(ct);
+        var ordered = sort switch
+        {
+            "name_desc" => query.OrderByDescending(c => c.Name).ThenBy(c => c.Id),
+            "booked_desc" => query.OrderByDescending(c => db.Orders.Count(o => o.CustomerProfileId == c.Id &&
+                (o.Status == "CONFIRMED" || o.Status == "ACTIVE" || o.Status == "COMPLETED"))).ThenBy(c => c.Name).ThenBy(c => c.Id),
+            "latest_order_desc" => query.OrderByDescending(c => db.Orders.Any(o => o.CustomerProfileId == c.Id))
+                .ThenByDescending(c => db.Orders.Where(o => o.CustomerProfileId == c.Id).Select(o => (DateTimeOffset?)o.PlacedAt).Max())
+                .ThenBy(c => c.Name).ThenBy(c => c.Id),
+            "newest_desc" => query.OrderByDescending(c => c.RegisteredAt.HasValue).ThenByDescending(c => c.RegisteredAt).ThenBy(c => c.Id),
+            _ => query.OrderBy(c => c.Name).ThenBy(c => c.Id)
+        };
+        var contacts = await ordered.Skip((page - 1) * size).Take(size).ToArrayAsync(ct);
         return new(await SummariesAsync(contacts, ct), total, page, size);
     }
 

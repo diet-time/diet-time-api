@@ -11,11 +11,11 @@ namespace DietTime.Meal.Api.Controllers;
 public sealed class AdminCustomersController(AdminCustomerService customers, StaffOrderService orders) : ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> List(string? search = null, int pageNumber = 1, int pageSize = 20, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> List(string? search = null, int pageNumber = 1, int pageSize = 20, CancellationToken cancellationToken = default, string sort = "name_asc")
     {
-        if (pageNumber < 1 || pageSize is < 1 or > 100 || search?.Length > 200)
+        if (pageNumber < 1 || pageSize is < 1 or > 100 || search?.Length > 200 || !new[] { "name_asc", "name_desc", "booked_desc", "latest_order_desc", "newest_desc" }.Contains(sort))
             return BadRequest(new ProblemDetails { Detail = "Use a valid page, page size (1–100) and search text up to 200 characters." });
-        return Ok(await customers.ListAsync(search, pageNumber, pageSize, cancellationToken));
+        return Ok(await customers.ListAsync(search, pageNumber, pageSize, cancellationToken, sort));
     }
 
     [HttpGet("{customerId:guid}")]

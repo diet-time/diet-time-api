@@ -186,7 +186,7 @@ public interface IAdminMealService
     Task<PagedResult<AdminMealTypeResponse>> GetMealTypesAsync(string? search, string? sort, int page, int pageSize, CancellationToken cancellationToken);
     Task<Guid?> CreateMealTypeAsync(UpsertMealTypeRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<AdminWriteResult> UpdateMealTypeAsync(Guid mealTypeId, UpsertMealTypeRequest request, Guid? userId, CancellationToken cancellationToken);
-    Task<PagedResult<AdminMealSummaryResponse>> GetMealsAsync(string? search, int page, int pageSize, CancellationToken cancellationToken);
+    Task<PagedResult<AdminMealSummaryResponse>> GetMealsAsync(string? search, int page, int pageSize, CancellationToken cancellationToken, string? status = null);
     Task<AdminMealResponse?> GetMealAsync(Guid mealId, CancellationToken cancellationToken);
     Task<Guid> CreateMealAsync(UpsertMealRequest request, Guid? userId, CancellationToken cancellationToken);
     Task<VersionedUpdateResponse?> UpdateMealAsync(Guid mealId, UpsertMealRequest request, Guid? userId, CancellationToken cancellationToken);
