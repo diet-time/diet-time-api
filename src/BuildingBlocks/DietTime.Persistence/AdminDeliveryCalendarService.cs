@@ -113,7 +113,7 @@ public sealed class AdminDeliveryCalendarService(
                 order.Id,
                 order.CustomerProfileId,
                 order.MealPlanTemplateId,
-                order.PlanName) { OrderNumber = order.OrderNumber })
+                order.PlanName) { OrderNumber = order.OrderNumber, FulfillmentMethod = order.FulfillmentMethod })
             .ToListAsync(cancellationToken);
 
         if (scheduledOrders.Count == 0)
@@ -159,6 +159,14 @@ public sealed class AdminDeliveryCalendarService(
             join order in db.Orders.AsNoTracking() on day.OrderId equals (Guid?)order.Id
             where day.ServiceDate == date && scheduledIds.Contains(order.Id)
             select new { Day = day, Order = order }).ToListAsync(cancellationToken);
+        var addressIds = details.Where(d => !PreparationOrderLocation.HasSnapshot(d.Order) && d.Order.CustomerAddressId.HasValue)
+            .Select(d => d.Order.CustomerAddressId!.Value).Distinct().ToArray();
+        var linkedAddresses = await db.CustomerAddresses.AsNoTracking().Where(a => addressIds.Contains(a.Id))
+            .ToDictionaryAsync(a => a.Id, cancellationToken);
+        var branchIds = details.Where(d => d.Order.TakeawayBranchId.HasValue && (string.IsNullOrWhiteSpace(d.Order.TakeawayBranchName) || string.IsNullOrWhiteSpace(d.Order.TakeawayBranchAddress)))
+            .Select(d => d.Order.TakeawayBranchId!.Value).Distinct().ToArray();
+        var branches = await db.TakeawayBranches.AsNoTracking().Where(b => branchIds.Contains(b.Id))
+            .ToDictionaryAsync(b => b.Id, cancellationToken);
         var profileIds = details.Select(d => d.Order.CustomerProfileId).Distinct().ToArray();
         var profiles = await db.CustomerProfiles.AsNoTracking().Include(p => p.Preferences).Include(p => p.Allergens)
             .ThenInclude(a => a.Allergen).ThenInclude(a => a.Translations)
@@ -179,6 +187,8 @@ public sealed class AdminDeliveryCalendarService(
         var preliminary = now < SubscriptionMenuRules.TomorrowCutoff(date) || trackedDays.Any(d => !d.SelectionLocked) || exceptions.Length > 0;
         var summary = DeliveryPreparationAggregation.Build(date, scheduledOrders, persistedRows);
         return summary with {
+            DeliveryOrderCount = scheduledOrders.Count(o => o.FulfillmentMethod == FulfillmentMethods.HomeDelivery),
+            TakeawayOrderCount = scheduledOrders.Count(o => o.FulfillmentMethod == FulfillmentMethods.Takeaway),
             TotalScheduledCount = details.Count(d => DailyFulfillmentTracking.IsTrackableStatus(d.Day.Status)),
             DeliveredCount = details.Count(d => d.Day.Status == "DELIVERED"),
             CollectedCount = details.Count(d => d.Day.Status == "COLLECTED"),
@@ -188,6 +198,9 @@ public sealed class AdminDeliveryCalendarService(
             OperationalExceptions = exceptions,
             Selections = details.Select(d => {
                 profiles.TryGetValue(d.Order.CustomerProfileId, out var profile);
+                var location = PreparationOrderLocation.Resolve(d.Order,
+                    d.Order.CustomerAddressId is { } addressId ? linkedAddresses.GetValueOrDefault(addressId) : null);
+                var branch = d.Order.TakeawayBranchId is { } branchId ? branches.GetValueOrDefault(branchId) : null;
                 var rows = persistedRows.Where(s => s.ServiceDayId == d.Day.Id).ToArray();
                 var name = profile?.UserId is { } userId ? userNames.GetValueOrDefault(userId) : null;
                 if (string.IsNullOrWhiteSpace(name)) name = profile?.PreferredName?.Trim();
@@ -201,7 +214,9 @@ public sealed class AdminDeliveryCalendarService(
                             MealCategoryName = g.Key.MealTypeName, MealCategoryDisplayOrder = g.Key.MealTypeDisplayOrder,
                             MealClassification = g.Key.MealClassification }).ToArray(),
                     profile?.Preferences.Select(p => p.PreferenceCode).Concat(profile.Allergens.Select(a => "ALLERGEN: " + a.Allergen.Code)).ToArray() ?? [], d.Day.ReviewReason,
-                    d.Order.FulfillmentMethod, d.Order.TakeawayBranchName, d.Order.TakeawayBranchAddress)
+                    d.Order.FulfillmentMethod,
+                    !string.IsNullOrWhiteSpace(d.Order.TakeawayBranchName) ? d.Order.TakeawayBranchName : branch?.Name,
+                    !string.IsNullOrWhiteSpace(d.Order.TakeawayBranchAddress) ? d.Order.TakeawayBranchAddress : branch?.Address)
                 {
                     MealPlanName = d.Order.PlanName,
                     FoodPreferences = PreparationDisplayText.Clean(profile?.Preferences.Select(p => p.PreferenceCode) ?? []),
@@ -211,7 +226,10 @@ public sealed class AdminDeliveryCalendarService(
                     FulfilledAt = d.Day.FulfilledAt,
                     FulfilledBy = d.Day.FulfilledBy,
                     CustomerName = string.IsNullOrWhiteSpace(name) ? "Name not recorded" : name,
-                    DeliveryAddress = SavedDeliveryAddress(d.Order),
+                    DeliveryAddress = location.Address,
+                    DeliveryAddressVerificationRequired = location.RequiresVerification,
+                    DeliveryLatitude = location.Latitude,
+                    DeliveryLongitude = location.Longitude,
                     DietaryRestrictionLabels = profile?.Preferences.Where(p => p.PreferenceCode != "NONE")
                         .Select(p => PreparationDisplayText.Label(p.PreferenceCode))
                         .Concat(profile.Allergens.Select(a => "Allergen: " +

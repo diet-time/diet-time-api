@@ -11,6 +11,7 @@ public sealed record OperationsDashboardResponse(
     IReadOnlyList<DashboardDeliveryDto> TodayDeliveries,
     UpcomingPlanActivityDto UpcomingPlanActivity)
 {
+    public DashboardCustomerInsightsDto? CustomerInsights { get; init; }
     public DashboardInsightsDto? Insights { get; init; }
 }
 

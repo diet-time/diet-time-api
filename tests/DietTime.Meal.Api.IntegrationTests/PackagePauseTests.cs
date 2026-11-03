@@ -191,4 +191,52 @@ public sealed partial class UpcomingMealServiceTests
         Assert.Equal(actualDates,details.Delivery.ServiceDates);
         Assert.Equal("PENDING",details.PaymentStatus);
     }
+
+    [UpcomingPostgresFact]
+    public async Task Pause_preview_handles_locked_weekend_and_original_end_restart_without_writes() {
+        clock.Now=new(2026,11,26,9,0,0,TimeSpan.Zero);
+        order.StartDate=new(2026,11,28);order.EndDate=new(2026,12,1);await db.SaveChangesAsync();
+        var service=Service();await service.InitializeAsync(order,default);
+        var rows=await db.Set<SubscriptionServiceDay>().Where(d=>d.OrderId==order.Id).OrderBy(d=>d.ServiceDate).ToArrayAsync();
+        rows[0].SelectionLocked=true;rows[0].AutoFinalizedAt=clock.Now;await db.SaveChangesAsync();
+        var committed=(rows[0].ServiceDate,rows[0].SelectionLocked,rows[0].AutoFinalizedAt,rows[0].Revision);
+        var original=rows.Select(d=>(d.Id,d.ServiceDate,d.Revision)).ToArray();
+        var management=await service.GetPackageAsync(order.Id,userId,default);
+        var start=management.EligiblePauseDates.First();Assert.Equal(new DateOnly(2026,11,29),start);
+        var restart=new DateOnly(2026,12,1);
+        var legacyPreview=await service.PreviewPauseAsync(order.Id,userId,new(PackagePauseRules.MinimumResumeDate(clock.Now),restart,true),default);
+        Assert.Equal(start,legacyPreview.PauseStartDate);
+        var preview=await service.PreviewPauseAsync(order.Id,userId,new(start,restart,true),default);
+        Assert.Equal(start,preview.PauseStartDate);Assert.Equal(restart,preview.ResumeDate);Assert.Equal(restart,preview.ActualRestartDate);
+        Assert.Equal(4,preview.RemainingServiceDays);Assert.Equal(1,preview.PreservedCommittedDays);
+        Assert.Equal(new DateOnly(2026,12,3),preview.ProjectedEndDate);
+        Assert.Equal(original,(await db.Set<SubscriptionServiceDay>().AsNoTracking().Where(d=>d.OrderId==order.Id).OrderBy(d=>d.ServiceDate).ToArrayAsync()).Select(d=>(d.Id,d.ServiceDate,d.Revision)));
+        Assert.Empty(await db.Set<SubscriptionPause>().ToArrayAsync());
+        var command=new PausePackageRequest(Guid.NewGuid(),preview.RowVersion,preview.ScheduleVersion,start,restart,null,true);
+        var paused=await service.PauseAsync(order.Id,userId,command,default);
+        Assert.Equal(4,paused.RemainingServiceDays);Assert.Equal(preview.ProjectedEndDate,paused.ExpectedEndDate);
+        var kept=await db.Set<SubscriptionServiceDay>().AsNoTracking().SingleAsync(d=>d.Id==rows[0].Id);
+        Assert.Equal(committed,(kept.ServiceDate,kept.SelectionLocked,kept.AutoFinalizedAt,kept.Revision));
+        await service.PauseAsync(order.Id,userId,command,default);Assert.Single(await service.GetPausesAsync(order.Id,userId,default));
+        var resumed=await service.ResumeAsync(order.Id,userId,new(Guid.NewGuid(),command.CommandId,paused.RowVersion),default);
+        Assert.Equal(new DateOnly(2026,12,1),resumed.ExpectedEndDate);
+        var friday=await service.PreviewPauseAsync(order.Id,userId,new(start,new(2026,12,3),true),default);
+        Assert.Equal(new DateOnly(2026,12,6),friday.ProjectedEndDate); // Friday Dec 4 is excluded.
+        Assert.Equal(original.Select(d=>d.Id).Order(),(await db.Set<SubscriptionServiceDay>().AsNoTracking().Where(d=>d.OrderId==order.Id).Select(d=>d.Id).ToArrayAsync()).Order());
+    }
+
+    [UpcomingPostgresFact]
+    public async Task Pause_confirmation_rejects_expired_preparation_snapshot_without_database_flag_changes() {
+        await PrepareAsync();var service=Service();
+        var rows=await db.Set<SubscriptionServiceDay>().Where(d=>d.OrderId==order.Id).OrderBy(d=>d.ServiceDate).ToArrayAsync();
+        rows[1].SelectionCutoffAt=clock.Now.AddMinutes(1);await db.SaveChangesAsync();
+        var start=rows[0].ServiceDate;var restart=start.AddDays(5);
+        var preview=await service.PreviewPauseAsync(order.Id,userId,new(start,restart,true),default);
+        var before=rows.Select(d=>(d.Id,d.ServiceDate,d.Revision)).ToArray();
+        clock.Now=clock.Now.AddMinutes(2);
+        var error=await Assert.ThrowsAsync<UpcomingMealException>(()=>service.PauseAsync(order.Id,userId,new(Guid.NewGuid(),preview.RowVersion,preview.ScheduleVersion,start,restart,null,true),default));
+        Assert.Equal("schedule_changed",error.Code);
+        Assert.Equal(before,(await db.Set<SubscriptionServiceDay>().AsNoTracking().Where(d=>d.OrderId==order.Id).OrderBy(d=>d.ServiceDate).ToArrayAsync()).Select(d=>(d.Id,d.ServiceDate,d.Revision)));
+        Assert.Empty(await db.Set<SubscriptionPause>().ToArrayAsync());
+    }
 }

@@ -10,8 +10,70 @@ using PdfSharp.Pdf.IO;
 
 namespace DietTime.UnitTests;
 
-public sealed class KitchenPreparationReportTests
+public sealed partial class KitchenPreparationReportTests
 {
+    [Fact]
+    public async Task Overview_is_first_and_customer_orders_keep_meals_in_separate_cards_without_selection_metadata()
+    {
+        var categories = new[] { "Breakfast", "Lunch", "Dinner", "AM Meal", "PM Meal", "Snack / Dessert" };
+        var names = new[] { "Pancake", "Diet Time Beef Biryani", "Chicken Fajita", "Egg Roll", "Alfredo White Pasta", "Greek Yogurt With Granola" };
+        var dishes = categories.Select((name, i) => new KitchenDishResponse(names[i], i == 5 ? "snack" : "meal", 1)
+        { MealCategoryId = Guid.NewGuid(), MealCategoryName = name, MealCategoryDisplayOrder = i }).ToArray();
+        var customer = Guid.NewGuid();
+        var first = new KitchenSelectionResponse(Guid.NewGuid(), "ORD-1001", customer, "AUTO_FINALIZED", ["DEFAULT"], dishes, [], null)
+        { CustomerName = "Sample Customer", MealPlanName = "Complete Balance", DeliveryAddress = "Building 25, Street 10, Doha", FoodPreferences = ["Seafood", "Beef", "Chicken"], Allergens = ["Celery", "Eggs", "Gluten cereals"] };
+        var second = first with { ServiceDayId = Guid.NewGuid(), OrderReference = "ORD-1002", Dishes = [dishes[0], dishes[5]], FinalizationStatus = "CUSTOMER_CONFIRMED", FulfillmentMethod = "TAKEAWAY", TakeawayBranchName = "Azizia Branch", TakeawayBranchAddress = "Azizia, Doha" };
+        var summary = new DeliveryPreparationSummaryResponse(new(2026, 11, 2), "Finalized", 2, 1, 8,
+            dishes.Select((dish, i) => new DeliveryPreparationMealTypeResponse(dish.MealCategoryId!.Value, categories[i], i is 0 or 5 ? 2 : 1,
+                [new(Guid.NewGuid(), names[i], i is 0 or 5 ? 2 : 1)])).ToArray(), [new(Guid.NewGuid(), "Complete Balance", 2)])
+        { Selections = [first, second] };
+        var pdf = await Generator(new DateTimeOffset(2026, 11, 2, 18, 49, 0, TimeSpan.Zero)).GenerateAsync(summary, default);
+        var directory = Environment.GetEnvironmentVariable("KITCHEN_REPORT_PREVIEW_DIR");
+        if (!string.IsNullOrWhiteSpace(directory)) { Directory.CreateDirectory(directory); await File.WriteAllBytesAsync(Path.Combine(directory, "kitchen-preparation-sample.pdf"), pdf); }
+        using var document = PdfReader.Open(new MemoryStream(pdf));
+        Assert.True(document.PageCount >= 2);
+        foreach (PdfSharp.Pdf.PdfPage page in document.Pages)
+        {
+            Assert.Contains("DIET TIME", ExtractText(page));
+            var images = page.Resources.Elements.GetDictionary("/XObject");
+            Assert.NotNull(images);
+            Assert.Contains(images.Elements.Values, value =>
+                value is PdfSharp.Pdf.Advanced.PdfReference reference &&
+                reference.Value is PdfSharp.Pdf.PdfDictionary image &&
+                image.Elements.GetName("/Subtype") == "/Image");
+        }
+        var overview = ExtractText(document.Pages[0]); var packing = string.Join(" ", document.Pages.Cast<PdfSharp.Pdf.PdfPage>().Skip(1).Select(ExtractText));
+        Assert.Contains("PREPARATION OVERVIEW", overview); Assert.Contains("TOTAL MEAL ITEMS TO PREPARE", overview);
+        Assert.DoesNotContain("Sample Customer", overview);
+        Assert.Contains("Customer Orders", packing); Assert.Contains("Sample Customer", packing);
+        var compactPacking = string.Concat(packing.Where(c => !char.IsWhiteSpace(c)));
+        Assert.Contains("ORD-1001", compactPacking); Assert.Contains("ORD-1002", compactPacking);
+        Assert.DoesNotContain("Selections:", packing);
+        Assert.DoesNotContain("Automatically assigned", packing);
+        Assert.Contains("MEALS FOR THIS ORDER", packing);
+        Assert.Contains("Allergens: Celery, Eggs, Gluten cereals", packing);
+        Assert.DoesNotContain("AUTO_FINALIZED", packing); Assert.DoesNotContain("DEFAULT", packing);
+        Assert.Contains("Azizia Branch", packing); Assert.Contains("Building 25, Street 10, Doha", packing);
+        foreach (var name in names) Assert.Contains(name, packing);
+    }
+
+    [Fact]
+    public async Task Long_customer_order_flows_across_pages_without_losing_dishes_or_allergy_notes()
+    {
+        var dishes = Enumerable.Range(1, 70).Select(i => new KitchenDishResponse($"Customer dish {i:000} with a long descriptive kitchen name", "meal", 1)
+        { MealCategoryName = "Lunch", MealCategoryDisplayOrder = 1 }).ToArray();
+        var summary = new DeliveryPreparationSummaryResponse(new(2026, 11, 2), "Preliminary", 1, 1, 70,
+            [new(Guid.NewGuid(), "Lunch", 70, [new(Guid.NewGuid(), "Bulk preparation", 70)])], [new(Guid.NewGuid(), "Balance", 1)])
+        { IsPreliminary = true, Selections = [new(Guid.NewGuid(), "ORD-LONG", Guid.NewGuid(), "AUTO_FINALIZED", ["DEFAULT"], dishes, [], null)
+            { CustomerName = "Long order customer", DeliveryAddress = "Long delivery address in Doha", Allergens = ["Eggs (Avoid traces: shared utensils)"] }] };
+        var pdf = await Generator().GenerateAsync(summary, default);
+        using var document = PdfReader.Open(new MemoryStream(pdf));
+        Assert.True(document.PageCount > 2);
+        var text = ExtractText(document);
+        Assert.Contains("Customer dish 001", text); Assert.Contains("Customer dish 070", text);
+        Assert.Contains("Avoid traces: shared utensils", text); Assert.Contains("MEAL ITEMS IN THIS ORDER", text);
+        Assert.Contains("PRELIMINARY", text);
+    }
     [Fact]
     public async Task Pdf_preserves_order_numbers_in_preparation_review_warnings()
     {
@@ -48,7 +110,7 @@ public sealed class KitchenPreparationReportTests
         };
         var text = ExtractText(await Generator().GenerateAsync(summary, default));
         Assert.Contains("Early Breakfast", text); Assert.Contains("Late Lunch", text);
-        Assert.Contains("1 x Shared dish", text); Assert.Contains("2 x Shared dish", text);
+        Assert.Contains("Shared dish", text); Assert.Contains("Qty", text);
         Assert.Contains("Food Preferences: Seafood", text);
         Assert.Contains("Allergens: Celery, Eggs (including traces)", text);
         Assert.DoesNotContain("(meal)", text); Assert.DoesNotContain("Allergen:", text);
@@ -236,8 +298,8 @@ public sealed class KitchenPreparationReportTests
         Assert.DoesNotContain("customer@example.com", ExtractText(pdf), StringComparison.OrdinalIgnoreCase);
     }
 
-    private static KitchenPreparationPdfReportGenerator Generator() => new(
-        new FixedTimeProvider(new DateTimeOffset(2026, 8, 14, 3, 30, 0, TimeSpan.Zero)),
+    private static KitchenPreparationPdfReportGenerator Generator(DateTimeOffset? now = null) => new(
+        new FixedTimeProvider(now ?? new DateTimeOffset(2026, 8, 14, 3, 30, 0, TimeSpan.Zero)),
         Options.Create(new OperationsDashboardOptions { BusinessTimeZone = "Asia/Qatar" }),
         NullLogger<KitchenPreparationPdfReportGenerator>.Instance);
 

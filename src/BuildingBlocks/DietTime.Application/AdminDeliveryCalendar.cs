@@ -40,6 +40,7 @@ public sealed record DeliveryPreparationOrderSource(
     string MealPlanName)
 {
     public string? OrderNumber { get; init; }
+    public string FulfillmentMethod { get; init; } = "HOME_DELIVERY";
 }
 
 public sealed record DeliveryPreparationMenuSource(

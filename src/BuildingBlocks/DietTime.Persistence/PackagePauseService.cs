@@ -13,8 +13,8 @@ public sealed partial class UpcomingMealService : IPackageManagementService
 {
     private sealed record ScheduleChange(Guid ServiceDayId, DateOnly From, DateOnly To, DateTimeOffset? FromCutoff = null, DateOnly? RequestedResumeDate = null);
     private static UpcomingMealException PauseError(string code, string message) => new(409, code, message);
-    private static string ScheduleVersion(IEnumerable<SubscriptionServiceDay> days) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-        string.Join(";", days.OrderBy(d => d.Id).Select(d => $"{d.Id}|{d.ServiceDate:yyyy-MM-dd}|{d.Revision}|{d.Status}|{d.SelectionStatus}|{d.SelectionLocked}|{d.CustomerConfirmedAt:O}|{d.AutoFinalizedAt:O}|{d.FulfilledAt:O}|{d.SelectionCutoffAt:O}")))));
+    private static string ScheduleVersion(IEnumerable<SubscriptionServiceDay> days, DateTimeOffset now) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+        string.Join(";", days.OrderBy(d => d.Id).Select(d => $"{d.Id}|{d.ServiceDate:yyyy-MM-dd}|{d.Revision}|{d.Status}|{d.SelectionStatus}|{d.SelectionLocked}|{d.CustomerConfirmedAt:O}|{d.AutoFinalizedAt:O}|{d.FulfilledAt:O}|{d.SelectionCutoffAt:O}|{PackagePauseRules.CanMove(d, now)}")))));
     private static bool HasEntitlement(SubscriptionServiceDay d) => d.Status is not ("SKIPPED" or "CANCELLED");
     private static bool IsWeekday(Order o, SubscriptionServiceDay d) => o.DeliveryDays.Any(w => w.DayOfWeek == (d.ServiceDate.DayOfWeek == DayOfWeek.Sunday ? 7 : (int)d.ServiceDate.DayOfWeek));
     private static string PauseStatus(SubscriptionPause p, DateOnly today) => p.Status == "RESUMED" ? "RESUMED" : today < p.PauseStartDate ? "SCHEDULED" : today < p.ResumeDate ? "PAUSED" : "COMPLETED";
@@ -59,21 +59,25 @@ public sealed partial class UpcomingMealService : IPackageManagementService
         if (!OrderWorkflowPolicy.CanFulfill(order)) throw PauseError("package_not_active", "This package is not eligible for pausing.");
         var eligible = days.Where(d => PackagePauseRules.CanMove(d, now) && IsWeekday(order, d)).OrderBy(d => d.ServiceDate).ToArray();
         if (eligible.Length == 0) throw PauseError("no_eligible_service_days", "There are no unlocked future service days available to pause.");
-        if (request.MoveRemaining ? request.PauseStartDate != PackagePauseRules.MinimumResumeDate(now) : !eligible.Any(d => d.ServiceDate == request.PauseStartDate))
+        if (request.MoveRemaining ? request.PauseStartDate != PackagePauseRules.MinimumResumeDate(now) && request.PauseStartDate != eligible[0].ServiceDate : !eligible.Any(d => d.ServiceDate == request.PauseStartDate))
             throw PauseError("pause_date_unavailable", "Choose an unlocked future service date. Today's delivery and committed deliveries cannot be paused.");
         if (request.MoveRemaining ? request.ResumeDate < request.PauseStartDate : request.ResumeDate <= request.PauseStartDate)
             throw new UpcomingMealException(400, "invalid_resume_date", "Choose a resume date after the pause start.");
         PackagePauseRules.ValidateResumeDate(request.ResumeDate, now);
         if (days.Select(d => d.SubscriptionId).Distinct().Count() != 1)
             throw PauseError("schedule_review_required", "This order contains multiple subscriptions and needs a schedule review.");
-        var moving = eligible.Where(d => d.ServiceDate >= request.PauseStartDate).ToArray();
+        var effectiveStart = request.MoveRemaining ? eligible[0].ServiceDate : request.PauseStartDate;
+        var moving = eligible.Where(d => d.ServiceDate >= effectiveStart).ToArray();
         if (moving.Any(d => d.ServiceSequence is not > 0 || d.MealPlanTemplateId == null || d.MealCount is null or < 1 || d.SnackCount is null or < 0))
             throw PauseError("schedule_review_required", "The saved menu schedule needs review by Diet Time before it can be moved.");
         var schedule = PackagePauseRules.Schedule(moving, days, request.ResumeDate, order.DeliveryDays.Select(d => d.DayOfWeek).ToHashSet());
         var end = days.Where(HasEntitlement).Select(d => schedule.GetValueOrDefault(d.Id, d.ServiceDate)).Max();
-        return (moving, schedule, new(order.RowVersion, ScheduleVersion(days), eligible[0].ServiceDate,
-            request.PauseStartDate, request.ResumeDate, moving.Count(d => d.ServiceDate < request.ResumeDate), moving.Length,
-            days.Count(d => HasEntitlement(d) && d.ServiceDate >= request.PauseStartDate && d.ServiceDate < request.ResumeDate && !PackagePauseRules.CanMove(d, now)), end));
+        return (moving, schedule, new(order.RowVersion, ScheduleVersion(days, now), eligible[0].ServiceDate,
+            effectiveStart, request.ResumeDate, moving.Count(d => d.ServiceDate < request.ResumeDate), moving.Length,
+            days.Count(d => HasEntitlement(d) && d.Status is not ("DELIVERED" or "COLLECTED") && d.ServiceDate >= SubscriptionMenuRules.QatarToday(now) && d.ServiceDate < request.ResumeDate && !PackagePauseRules.CanMove(d, now)), end) {
+                RemainingServiceDays = days.Count(d => HasEntitlement(d) && d.Status is not ("DELIVERED" or "COLLECTED")),
+                ActualRestartDate = schedule.Values.Min()
+            });
     }
 
     public async Task<PausePreviewResponse> PreviewPauseAsync(Guid orderId, Guid userId, PausePreviewRequest request, CancellationToken ct)

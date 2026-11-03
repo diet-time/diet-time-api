@@ -17,7 +17,7 @@ public sealed class OperationsDashboardOptions
     public string[] ReviewOrderStatuses { get; set; } = [OrderStatuses.PendingApproval];
 }
 
-public sealed class OperationsDashboardService(
+public sealed partial class OperationsDashboardService(
     DietTimeDbContext db,
     TimeProvider clock,
     IOptions<OperationsDashboardOptions> configuredOptions) : IOperationsDashboardService
@@ -128,7 +128,8 @@ public sealed class OperationsDashboardService(
             todayDeliveries,
             new(starts, ends))
         {
-            Insights=await BuildInsightsAsync(date,orders,cancellationToken)
+            Insights=await BuildInsightsAsync(date,orders,cancellationToken),
+            CustomerInsights = await BuildCustomerInsightsAsync(date, cancellationToken)
         };
     }
 

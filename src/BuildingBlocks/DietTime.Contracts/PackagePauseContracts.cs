@@ -6,7 +6,11 @@ public sealed record ResumePackageRequest(Guid CommandId, Guid PauseId, long Exp
 public sealed record PackagePauseResponse(Guid Id, DateOnly PauseStartDate, DateOnly ResumeDate, string Status, string? Reason);
 public sealed record PausePreviewResponse(long RowVersion, string ScheduleVersion, DateOnly EarliestPauseDate,
     DateOnly PauseStartDate, DateOnly ResumeDate, int AffectedServiceDays, int RescheduledServiceDays,
-    int PreservedCommittedDays, DateOnly ProjectedEndDate);
+    int PreservedCommittedDays, DateOnly ProjectedEndDate)
+{
+    public int RemainingServiceDays { get; init; }
+    public DateOnly? ActualRestartDate { get; init; }
+}
 public sealed record PackageManagementResponse(Guid OrderId, long RowVersion, DateTimeOffset ServerNow,
     string Status, int RemainingServiceDays, DateOnly? NextScheduledDelivery, DateOnly ExpectedEndDate,
     IReadOnlyList<DateOnly> EligiblePauseDates, string? PauseUnavailableReason,
