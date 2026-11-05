@@ -58,7 +58,7 @@ public sealed partial class UpcomingMealServiceTests
         var preparation=await new AdminDeliveryCalendarService(db,Options.Create(new MenuRotationOptions()),clock).GetPreparationSummaryAsync(new(2026,10,27),default);
         Assert.Equal(1,preparation.OrderCount); // Only the historical approved seed order.
         var tomorrow=await client.GetFromJsonAsync<JsonElement>($"/api/v1/orders/{id}/tomorrow-menu");Assert.False(tomorrow.GetProperty("data").GetProperty("canConfirm").GetBoolean());
-        foreach (var removed in new[] { "hold", "resume", "cancel", "activate", "complete" })
+        foreach (var removed in new[] { "hold", "resume", "activate", "complete" })
             Assert.Equal(HttpStatusCode.NotFound, (await Review(client,id,removed,1,"No longer supported")).StatusCode);
         Assert.Equal(HttpStatusCode.OK,(await Review(client,id,"approve",1)).StatusCode);
         var saved=await db.Orders.AsNoTracking().SingleAsync(o=>o.Id==id);
@@ -149,7 +149,7 @@ public sealed partial class UpcomingMealServiceTests
         foreach(var other in legacy)Assert.Equal(other.Status,(await db.Orders.AsNoTracking().SingleAsync(o=>o.Id==other.Id)).Status);
         await using var scope=factory.Services.CreateAsyncScope();
         var service=scope.ServiceProvider.GetRequiredService<StaffOrderService>();
-        foreach(var action in new[]{"activate","complete","hold","resume","cancel","CONFIRMED"})
+        foreach(var action in new[]{"activate","complete","hold","resume","CONFIRMED"})
         {
             var error=await Assert.ThrowsAsync<OrderReviewException>(()=>service.ChangeAsync(id,action,saved.RowVersion,"Bypass attempt",userId,default));
             Assert.Equal("unsupported_order_action",error.Code);
@@ -216,6 +216,53 @@ public sealed partial class UpcomingMealServiceTests
     }
 
     [UpcomingPostgresFact]
+    public async Task Cancellation_is_customer_only_before_confirmation_and_staff_only_after_confirmation()
+    {
+        var setup = await ApprovalClient();
+        await using var factory = setup.Factory;
+        using var client = setup.Client;
+        foreach (var payment in new[] { "PENDING", "PAID" })
+        {
+            var id = (await SubmitApprovalOrder(client, setup.Request)).GetProperty("id").GetGuid();
+            Assert.Equal(HttpStatusCode.Conflict, (await Review(client, id, "cancel", 1, "Staff cannot cancel pending orders")).StatusCode);
+            long version = 1;
+            if (payment == "PAID")
+            {
+                Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/api/admin/orders/{id}/payment", new RecordOrderPaymentRequest(version, payment, "Receipt"))).StatusCode);
+                version++;
+            }
+            Assert.Equal(HttpStatusCode.OK, (await Review(client, id, "approve", version)).StatusCode);
+            version++;
+            var historyBefore = await db.OrderStatusHistory.CountAsync(h => h.OrderId == id);
+            var customer = await client.PostAsJsonAsync($"/api/v1/orders/{id}/cancel", new OrderReviewRequest(version, "Customer request"));
+            Assert.Equal(HttpStatusCode.Conflict, customer.StatusCode);
+            Assert.Contains(PackagePauseRules.CancellationCode, await customer.Content.ReadAsStringAsync());
+            Assert.Equal(HttpStatusCode.BadRequest, (await Review(client, id, "cancel", version, " ")).StatusCode);
+            Assert.Equal(HttpStatusCode.Conflict, (await Review(client, id, "cancel", version - 1, "Stale cancellation")).StatusCode);
+            Assert.Equal(historyBefore, await db.OrderStatusHistory.CountAsync(h => h.OrderId == id));
+            Assert.Equal(HttpStatusCode.OK, (await Review(client, id, "cancel", version, "Customer contacted staff")).StatusCode);
+            var saved = await db.Orders.AsNoTracking().SingleAsync(o => o.Id == id);
+            Assert.Equal("CANCELLED", saved.Status);
+            Assert.Equal(payment == "PAID" ? "REFUND_PENDING" : payment, saved.PaymentStatus);
+            Assert.Equal(version + 1, saved.RowVersion);
+            var history = Assert.Single(await db.OrderStatusHistory.Where(h => h.OrderId == id && h.Status == "CANCELLED").ToArrayAsync());
+            Assert.Equal(userId, history.ChangedBy);
+            Assert.Equal("Customer contacted staff", history.Notes);
+            Assert.Equal(HttpStatusCode.Conflict, (await Review(client, id, "cancel", saved.RowVersion, "Duplicate cancellation")).StatusCode);
+        }
+        var pendingPaid = (await SubmitApprovalOrder(client, setup.Request)).GetProperty("id").GetGuid();
+        await client.PostAsJsonAsync($"/api/admin/orders/{pendingPaid}/payment", new RecordOrderPaymentRequest(1, "PAID", "Receipt"));
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/api/v1/orders/{pendingPaid}/cancel", new OrderReviewRequest(2, "Before confirmation"))).StatusCode);
+        Assert.Equal("REFUND_PENDING", (await db.Orders.AsNoTracking().SingleAsync(o => o.Id == pendingPaid)).PaymentStatus);
+
+        var preparing = (await SubmitApprovalOrder(client, setup.Request)).GetProperty("id").GetGuid();
+        await Review(client, preparing, "approve", 1);
+        await db.Set<SubscriptionServiceDay>().Where(d => d.OrderId == preparing).ExecuteUpdateAsync(s => s.SetProperty(d => d.SelectionLocked, true));
+        Assert.Equal(HttpStatusCode.Conflict, (await Review(client, preparing, "cancel", 2, "Already prepared")).StatusCode);
+        Assert.Equal("CONFIRMED", (await db.Orders.AsNoTracking().SingleAsync(o => o.Id == preparing)).Status);
+    }
+
+    [UpcomingPostgresFact]
     public async Task Customers_cannot_review_orders_and_missing_templates_are_retained_durably()
     {
         var setup=await ApprovalClient();await using var factory=setup.Factory;using var client=setup.Client;
@@ -223,6 +270,7 @@ public sealed partial class UpcomingMealServiceTests
         var token=new JwtSecurityTokenHandler().WriteToken(new JwtSecurityToken("DietTime.Tests","DietTime.Tests",[new Claim(ClaimTypes.NameIdentifier,userId.ToString()),new Claim(ClaimTypes.Role,"Customer")],expires:DateTime.UtcNow.AddMinutes(5),signingCredentials:new SigningCredentials(new SymmetricSecurityKey(Encoding.UTF8.GetBytes("test-only-key-at-least-thirty-two-characters-long")),SecurityAlgorithms.HmacSha256)));
         client.DefaultRequestHeaders.Authorization=new("Bearer",token);
         Assert.Equal(HttpStatusCode.Forbidden,(await Review(client,id,"approve",1)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,(await Review(client,id,"cancel",1,"Unauthorized cancellation")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden,(await client.GetAsync("/api/admin/orders")).StatusCode);
         client.DefaultRequestHeaders.Authorization=null;
         using var scope=factory.Services.CreateScope();await scope.ServiceProvider.GetRequiredService<IOrderNotificationSender>().SendAsync(id,default);

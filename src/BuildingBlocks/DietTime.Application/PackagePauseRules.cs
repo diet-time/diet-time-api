@@ -18,8 +18,8 @@ public interface IPackageManagementService
 public static class PackagePauseRules
 {
     public const string CancellationCode = "ORDER_CANCELLATION_NOT_ALLOWED";
-    public const string CancellationMessage = "This booking is confirmed and paid. You cannot cancel it from the app. You may pause future deliveries or contact Diet Time.";
-    public static bool CancellationBlocked(Order order) => order.PaymentStatus == PaymentStatuses.Paid &&
+    public const string CancellationMessage = "This booking is confirmed. Please contact Diet Time to request cancellation. You may also pause future deliveries.";
+    public static bool CancellationBlocked(Order order) =>
         (order.Status is "CONFIRMED" or "ACTIVE" or "PAUSED" ||
          order.ApprovedAt.HasValue && order.Status is not ("CANCELLED" or "REJECTED"));
 

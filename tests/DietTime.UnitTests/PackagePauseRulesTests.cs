@@ -53,10 +53,11 @@ public sealed class PackagePauseRulesTests
     }
     [Theory]
     [InlineData("CONFIRMED", "PAID", true)] [InlineData("ACTIVE", "PAID", true)] [InlineData("PAUSED", "PAID", true)]
-    [InlineData("CONFIRMED", "PENDING", false)] [InlineData("CONFIRMED", "UNPAID", false)]
+    [InlineData("CONFIRMED", "PENDING", true)] [InlineData("CONFIRMED", "UNPAID", true)]
+    [InlineData("ACTIVE", "UNPAID", true)] [InlineData("PAUSED", "PENDING", true)]
     [InlineData("PENDING_APPROVAL", "PENDING", false)] [InlineData("PENDING_APPROVAL", "PAID", false)]
     [InlineData("CANCELLED", "PAID", false)]
-    public void Approval_and_payment_are_separate_conditions(string approval, string payment, bool blocked) {
+    public void Confirmation_blocks_customer_cancellation_regardless_of_payment(string approval, string payment, bool blocked) {
         var order = new Order { Status = approval, PaymentStatus = payment };
         Assert.Equal(blocked, PackagePauseRules.CancellationBlocked(order));
         Assert.Equal(payment, order.PaymentStatus); Assert.Equal(approval, order.Status);

@@ -61,7 +61,7 @@ public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, 
         CancellationToken ct, RecordOrderPaymentRequest? payment = null, ReviseOrderDatesRequest? dates = null, Guid? customerUserId = null)
     {
         // Customer cancellation remains available through its existing owned-order endpoint.
-        if (customerUserId.HasValue ? action != "cancel" : action is not ("approve" or "reject" or "payment" or "revise-dates"))
+        if (customerUserId.HasValue ? action != "cancel" : action is not ("approve" or "reject" or "cancel" or "payment" or "revise-dates"))
             throw Error(409, "unsupported_order_action", "This manual order action is no longer supported.");
         if (version < 1 || reason?.Length > 500) throw Error(400, "invalid_review", "A current row version and a reason of at most 500 characters are required.");
         await using var tx = await db.Database.BeginTransactionAsync(ct);
@@ -69,8 +69,10 @@ public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, 
         var order = await db.Orders.Include(x => x.Meals).Include(x => x.DeliveryDays).SingleOrDefaultAsync(x => x.Id == id, ct);
         if (order is null || customerUserId.HasValue && !await db.CustomerProfiles.AnyAsync(p => p.Id == order.CustomerProfileId && p.UserId == customerUserId, ct))
             throw Error(404, "order_not_found", "Order was not found.");
+        await db.Entry(order).ReloadAsync(ct);
+        if (action == "cancel" && !customerUserId.HasValue && order.Status != "CONFIRMED")
+            throw Error(409, "invalid_transition", "Only confirmed orders can be cancelled from the staff dashboard.");
         if (customerUserId.HasValue) {
-            await db.Entry(order).ReloadAsync(ct);
             if (action == "cancel" && PackagePauseRules.CancellationBlocked(order))
                 throw Error(409, PackagePauseRules.CancellationCode, PackagePauseRules.CancellationMessage);
         }
