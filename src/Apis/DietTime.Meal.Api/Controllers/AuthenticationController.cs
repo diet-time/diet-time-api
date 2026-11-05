@@ -84,10 +84,12 @@ public class AuthenticationController(
                 Title = "Validation Error",
                 Detail = "Phone number must use E.164 format, for example +97455555555."
             });
-        if (string.IsNullOrWhiteSpace(request.Otp))
+        if (string.IsNullOrWhiteSpace(request.Otp) || !Regex.IsMatch(request.Otp, @"\A[0-9]{6}\z"))
             return BadRequest(new ProblemDetails { Title = "Validation Error", Detail = "OTP is required." });
 
         var result = await authService.LoginWithPhoneOtpAsync(request, cancellationToken);
+        if (result.Status == PhoneOtpAuthStatus.TooManyAttempts)
+            return StatusCode(429, new ProblemDetails { Title = "Too many OTP attempts. Try again later." });
         if (result.Status == PhoneOtpAuthStatus.Disabled)
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new ProblemDetails
             {

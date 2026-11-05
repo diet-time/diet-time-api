@@ -270,7 +270,7 @@ public interface IPhoneOtpVerifier
 {
     Task<PhoneOtpVerificationStatus> VerifyAsync(string phoneNumber, string otp, CancellationToken cancellationToken);
 }
-public enum PhoneOtpVerificationStatus { Valid, Invalid, Disabled }
-public enum PhoneOtpAuthStatus { Success, InvalidOtp, Disabled, Conflict }
+public enum PhoneOtpVerificationStatus { Valid, Invalid, Disabled, TooManyAttempts }
+public enum PhoneOtpAuthStatus { Success, InvalidOtp, Disabled, Conflict, TooManyAttempts }
 public sealed record PhoneOtpAuthResult(PhoneOtpAuthStatus Status, AuthSessionResponse? Session = null);
 

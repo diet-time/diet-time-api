@@ -56,6 +56,8 @@ public sealed class AuthService(
     {
         var phoneNumber = request.PhoneNumber.Trim();
         var verification = await phoneOtpVerifier.VerifyAsync(phoneNumber, request.Otp, ct);
+        if (verification == PhoneOtpVerificationStatus.TooManyAttempts)
+            return new(PhoneOtpAuthStatus.TooManyAttempts);
         if (verification == PhoneOtpVerificationStatus.Disabled)
             return new(PhoneOtpAuthStatus.Disabled);
         if (verification != PhoneOtpVerificationStatus.Valid)

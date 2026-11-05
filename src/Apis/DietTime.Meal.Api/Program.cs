@@ -151,7 +151,13 @@ builder.Services.AddScoped<IMealPlanPricingService, MealPlanPricingService>();
 builder.Services.AddScoped<ITemplateMenuReader>(services => (AdminMealService)services.GetRequiredService<IAdminMealService>()); 
 builder.Services.AddScoped<IOperationalCalendarService, DefaultOperationalCalendarService>(); 
 builder.Services.AddScoped<IDeliverySchedulingService, DeliverySchedulingService>(); 
-builder.Services.AddScoped<IPhoneOtpVerifier, TestPhoneOtpVerifier>(); 
+builder.Services.Configure<TwilioVerifyOptions>(builder.Configuration.GetSection(TwilioVerifyOptions.SectionName));
+builder.Services.AddHttpClient<TwilioPhoneOtpService>(client => client.Timeout = TimeSpan.FromSeconds(15));
+// A static test code must never authenticate a deployed environment.
+if (builder.Environment.IsDevelopment() && !builder.Configuration.GetValue<bool>("TwilioVerify:Enabled"))
+    builder.Services.AddScoped<IPhoneOtpVerifier, TestPhoneOtpVerifier>();
+else
+    builder.Services.AddScoped<IPhoneOtpVerifier>(sp => sp.GetRequiredService<TwilioPhoneOtpService>());
 builder.Services.AddScoped<IAuthService, AuthService>(); 
 builder.Services.AddSingleton<ICustomerNutritionCalculator>(services =>
     new CustomerNutritionCalculator(
