@@ -153,8 +153,9 @@ builder.Services.AddScoped<IOperationalCalendarService, DefaultOperationalCalend
 builder.Services.AddScoped<IDeliverySchedulingService, DeliverySchedulingService>(); 
 builder.Services.Configure<TwilioVerifyOptions>(builder.Configuration.GetSection(TwilioVerifyOptions.SectionName));
 builder.Services.AddHttpClient<TwilioPhoneOtpService>(client => client.Timeout = TimeSpan.FromSeconds(15));
-// A static test code must never authenticate a deployed environment.
-if (builder.Environment.IsDevelopment() && !builder.Configuration.GetValue<bool>("TwilioVerify:Enabled"))
+// Test verification is an explicit staging opt-in and never a live-send fallback.
+var phoneOtpMode = builder.Configuration.GetSection(PhoneOtpOptions.SectionName).Get<PhoneOtpOptions>() ?? new();
+if (phoneOtpMode.ShouldUseTestVerifier(builder.Environment.EnvironmentName, builder.Configuration.GetValue<bool>("TwilioVerify:Enabled")))
     builder.Services.AddScoped<IPhoneOtpVerifier, TestPhoneOtpVerifier>();
 else
     builder.Services.AddScoped<IPhoneOtpVerifier>(sp => sp.GetRequiredService<TwilioPhoneOtpService>());

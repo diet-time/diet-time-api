@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using DietTime.Application;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 
 namespace DietTime.Infrastructure;
 
@@ -20,7 +21,7 @@ public sealed class TwilioVerifyOptions
 public sealed class TwilioPhoneOtpService(
     HttpClient client,
     IOptions<TwilioVerifyOptions> options,
-    IOptions<TwilioWhatsAppOptions> credentials) : IPhoneOtpVerifier
+    IOptions<TwilioWhatsAppOptions> credentials, ILogger<TwilioPhoneOtpService>? logger = null) : IPhoneOtpVerifier
 {
     public async Task<PhoneOtpSendResult> SendAsync(string phoneNumber, CancellationToken ct)
     {
@@ -43,10 +44,19 @@ public sealed class TwilioPhoneOtpService(
             ? PhoneOtpVerificationStatus.Valid : PhoneOtpVerificationStatus.Invalid;
     }
 
-    private bool Configured() => options.Value.Enabled &&
-        Regex.IsMatch(options.Value.ServiceSid, @"\AVA[0-9a-fA-F]{32}\z") &&
-        Regex.IsMatch(credentials.Value.AccountSid, @"\AAC[0-9a-fA-F]{32}\z") &&
-        !string.IsNullOrWhiteSpace(credentials.Value.AuthToken);
+    private bool Configured()
+    {
+        var checks = new Dictionary<string, bool> {
+            ["TwilioVerify:Enabled"] = options.Value.Enabled,
+            ["TwilioVerify:ServiceSid"] = Regex.IsMatch(options.Value.ServiceSid ?? "", @"\AVA[0-9a-fA-F]{32}\z"),
+            ["TwilioWhatsApp:AccountSid"] = Regex.IsMatch(credentials.Value.AccountSid ?? "", @"\AAC[0-9a-fA-F]{32}\z"),
+            ["TwilioWhatsApp:AuthToken"] = !string.IsNullOrWhiteSpace(credentials.Value.AuthToken)
+        };
+        var missing = checks.Where(c => !c.Value).Select(c => c.Key).ToArray();
+        if (missing.Length > 0)
+            logger?.LogWarning("OTP delivery unavailable. MissingOrInvalidSettings={Settings}", string.Join(",", missing));
+        return missing.Length == 0;
+    }
 
     private async Task<ProviderResult> PostAsync(string resource, Dictionary<string, string> fields, CancellationToken ct)
     {
@@ -61,14 +71,23 @@ public sealed class TwilioPhoneOtpService(
             if (response.StatusCode == HttpStatusCode.TooManyRequests) return new(429);
             // An expired, consumed or missing verification is reported as 404.
             if (response.StatusCode == HttpStatusCode.NotFound && resource == "VerificationCheck") return new(401);
-            if (!response.IsSuccessStatusCode) return new(503);
+            if (!response.IsSuccessStatusCode)
+            {
+                int? providerCode = null;
+                try {
+                    using var error = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+                    if (error.RootElement.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.Number && code.TryGetInt32(out var numericCode)) providerCode = numericCode;
+                } catch (JsonException) { }
+                logger?.LogWarning("Twilio OTP request failed. Resource={Resource} HttpStatus={HttpStatus} ProviderCode={ProviderCode}", resource, (int)response.StatusCode, providerCode);
+                return new(503);
+            }
             using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
             string? Read(string name) => json.RootElement.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
             return new(200, Read("status"), Read("sid"), Read("to"), Read("channel"));
         }
-        catch (HttpRequestException) { return new(503); }
+        catch (HttpRequestException) { logger?.LogWarning("Twilio OTP service could not be reached."); return new(503); }
         catch (JsonException) { return new(503); }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return new(503); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { logger?.LogWarning("Twilio OTP request timed out."); return new(503); }
     }
 
     private sealed record ProviderResult(int StatusCode, string? Status = null, string? Sid = null, string? To = null, string? Channel = null);

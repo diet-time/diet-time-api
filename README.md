@@ -170,6 +170,58 @@ Example request body:
 }
 ```
 
+## WhatsApp notification schema deployment
+
+Before deploying the current notification worker, apply the existing migration
+[`20261105010000_WhatsAppNotifications`](src/BuildingBlocks/DietTime.Persistence/Migrations/20261105010000_WhatsAppNotifications.cs)
+to the same PostgreSQL database used by the API, as the schema owner. Application
+startup does not apply this migration automatically.
+
+`The required column 'content_sid' was not present in the results of a 'FromSql'
+operation` indicates that the worker's `SELECT * FROM public.order_notifications`
+returned an older table shape than the mapped `OrderNotification` entity. The
+migration adds `content_sid` together with `event_key`, `payload_json`,
+`recipient_phone`, `template_name`, `provider_status`, `delivered_at`, and `read_at`;
+it also updates history nullability, creates the webhook receipt table and adds
+notification deduplication indexes. Adding only `content_sid` can leave the next
+missing-column error unresolved. Do not remove fields from the mapping to hide
+this deployment mismatch.
+
+If EF migration history is maintained for this database, run from `diet-time-api`
+with the API configuration pointing to the intended database:
+
+```sh
+dotnet ef database update 20261105010000_WhatsAppNotifications --project src/BuildingBlocks/DietTime.Persistence --startup-project src/Apis/DietTime.Meal.Api
+```
+
+Check pending migrations first: `database update` also applies any earlier pending
+migrations. For databases maintained using manual SQL instead of EF history,
+review and execute the existing migration's complete `Up` SQL in a transaction,
+with its five-second lock timeout. Its column/table/index additions use
+`IF NOT EXISTS`. Existing notifications are retained; no events are replayed or
+marked as sent by the migration. Unique-index creation will fail if existing
+non-null event keys or message SIDs are duplicated; resolve those records explicitly
+rather than deleting history.
+
+Read-only verification after applying the migration:
+
+```sql
+SELECT column_name, data_type, is_nullable
+FROM information_schema.columns
+WHERE table_schema = 'public' AND table_name = 'order_notifications'
+  AND column_name IN ('event_key', 'payload_json', 'recipient_phone',
+    'template_name', 'content_sid', 'provider_status', 'delivered_at', 'read_at')
+ORDER BY column_name;
+-- Expect all eight columns.
+SELECT to_regclass('public.whatsapp_webhook_receipts');
+```
+
+Restart the API/worker after the schema update. `OrderId=00000000-0000-0000-0000-000000000000`
+in this worker's error log denotes its periodic pending-notification poll, not an
+order with that identifier. This schema failure belongs to order notifications,
+not the separate login OTP/Verify endpoint. Changing OTP test-mode flags does not
+apply notification schema changes.
+
 ## Staff order approval
 
 Apply the EF migration `20261030020000_StaffOrderApproval` as the schema owner

@@ -5,13 +5,14 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Options;
 
 namespace DietTime.Meal.Api.Controllers;
 
 [ApiController]
 [ApiVersion("1")]
 [Route("api/v{version:apiVersion}/auth/phone-otp")]
-public sealed class PhoneOtpDeliveryController(TwilioPhoneOtpService otp) : ControllerBase
+public sealed class PhoneOtpDeliveryController(TwilioPhoneOtpService otp, IOptions<PhoneOtpOptions> mode) : ControllerBase
 {
     [HttpPost("request")]
     [AllowAnonymous]
@@ -21,6 +22,8 @@ public sealed class PhoneOtpDeliveryController(TwilioPhoneOtpService otp) : Cont
         var phone = request.PhoneNumber?.Trim() ?? "";
         if (!Regex.IsMatch(phone, @"\A\+[1-9][0-9]{7,14}\z") || request.Channel != "whatsapp")
             return BadRequest(new ProblemDetails { Title = "Enter a valid international phone number and use WhatsApp." });
+        if (mode.Value.UseTestOtp)
+            return Ok(ApiResponse<PhoneOtpDeliveryResponse>.Ok(new("test-verification", 600)));
         var result = await otp.SendAsync(phone, ct);
         if (result.StatusCode != 200)
             return StatusCode(result.StatusCode, new ProblemDetails {
