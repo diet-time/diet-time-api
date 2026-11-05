@@ -14,4 +14,17 @@ public sealed record PausePreviewResponse(long RowVersion, string ScheduleVersio
 public sealed record PackageManagementResponse(Guid OrderId, long RowVersion, DateTimeOffset ServerNow,
     string Status, int RemainingServiceDays, DateOnly? NextScheduledDelivery, DateOnly ExpectedEndDate,
     IReadOnlyList<DateOnly> EligiblePauseDates, string? PauseUnavailableReason,
-    PackagePauseResponse? CurrentPause, bool CanResumeEarly);
+    PackagePauseResponse? CurrentPause, bool CanResumeEarly)
+{
+    public DateOnly? FirstDeliveryAfterPause { get; init; }
+    public PackageChangeResponse? LatestRequest { get; init; }
+}
+
+public sealed record PackageChangeResponse(Guid Id, string Type, string Status, DateOnly? PauseStartDate,
+    DateOnly? ResumeDate, DateOnly? ProjectedEndDate, string? Reason, DateTimeOffset CreatedAt,
+    DateTimeOffset? ReviewedAt, string? ReviewReason);
+public sealed record StaffPackageChangeResponse(Guid OrderId, string OrderNumber, string PlanName,
+    string CustomerName, PackageChangeResponse Request);
+public sealed record PackageChangeReviewRequest(bool Approve, string? Reason = null);
+public sealed record StaffPackageChangeListResponse(IReadOnlyList<StaffPackageChangeResponse> Items,
+    int TotalCount, int PageNumber, int PageSize);

@@ -35,22 +35,29 @@ public sealed partial class UpcomingMealService : IPackageManagementService
         var now = clock.GetUtcNow(); var today = SubscriptionMenuRules.QatarToday(now);
         var pause = await db.Set<SubscriptionPause>().AsNoTracking().Where(p => p.OrderId == orderId && p.Status == "CONFIRMED" && p.ResumeDate > today)
             .OrderByDescending(p => p.CreatedAt).FirstOrDefaultAsync(ct);
-        var eligible = OrderWorkflowPolicy.CanFulfill(order) && pause == null
+        var latestRequest = await db.Set<PackageChangeRequest>().AsNoTracking().Where(r => r.OrderId == orderId)
+            .OrderByDescending(r => r.Status == "PENDING_APPROVAL").ThenByDescending(r => r.CreatedAt).ThenByDescending(r => r.Id).FirstOrDefaultAsync(ct);
+        var pending = latestRequest?.Status == "PENDING_APPROVAL";
+        var eligible = OrderWorkflowPolicy.CanFulfill(order) && pause == null && !pending
             ? days.Where(d => PackagePauseRules.CanMove(d, now) && IsWeekday(order, d)).Select(d => d.ServiceDate).Distinct().Order().ToArray() : [];
         var remaining = days.Where(HasEntitlement).Where(d => d.Status is not ("DELIVERED" or "COLLECTED")).ToArray();
         var canResume = false;
         if (pause != null && OrderWorkflowPolicy.CanFulfill(order)) {
             var ids = JsonSerializer.Deserialize<ScheduleChange[]>(pause.ScheduleChangesJson)!.Select(c => c.ServiceDayId).ToHashSet();
             var moving = days.Where(d => ids.Contains(d.Id) && PackagePauseRules.CanMove(d, now)).ToArray();
-            if (moving.Length > 0) {
+            if (moving.Length > 0 && !pending) {
                 canResume = true;
             }
         }
         return new(orderId, order.RowVersion, now, pause == null ? order.Status : PauseStatus(pause, today), remaining.Length,
             remaining.Where(d => d.ServiceDate >= today).Select(d => (DateOnly?)d.ServiceDate).Min(), order.EndDate,
-            eligible, eligible.Length > 0 ? null : pause != null ? "This package already has a scheduled pause." :
+            eligible, eligible.Length > 0 ? null : pending ? "A package change is awaiting staff confirmation." : pause != null ? "This package already has a scheduled pause." :
                 !OrderWorkflowPolicy.CanFulfill(order) ? "This package is not eligible for pausing." : "There are no unlocked future service days available to pause.",
-            pause == null ? null : PauseResponse(pause, today), canResume);
+            pause == null ? null : PauseResponse(pause, today), canResume) {
+                LatestRequest = latestRequest == null ? null : ChangeResponse(latestRequest),
+                FirstDeliveryAfterPause = pause == null ? null : days.Where(HasEntitlement)
+                    .Where(d => d.ServiceDate >= pause.ResumeDate).Select(d => (DateOnly?)d.ServiceDate).Min()
+            };
     }
 
     private static (SubscriptionServiceDay[] Moving, IReadOnlyDictionary<Guid, DateOnly> Schedule, PausePreviewResponse Preview) BuildPause(
@@ -109,13 +116,13 @@ public sealed partial class UpcomingMealService : IPackageManagementService
     public async Task<PackageManagementResponse> PauseAsync(Guid orderId, Guid userId, PausePackageRequest request, CancellationToken ct)
     {
         if (request.CommandId == Guid.Empty || request.Reason?.Length > 500) throw new UpcomingMealException(400, "invalid_pause_request", "Provide a command ID and keep any reason within 500 characters.");
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await using var tx = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
         var order = await LockPackageAsync(orderId, userId, ct);
         var replay = await db.Set<SubscriptionPause>().AsNoTracking().SingleOrDefaultAsync(p => p.Id == request.CommandId, ct);
         if (replay != null) {
             if (replay.OrderId != orderId || replay.CreatedBy != userId || replay.PauseStartDate != request.PauseStartDate || replay.RequestedResumeDate != request.ResumeDate || replay.Reason != request.Reason?.Trim())
                 throw PauseError("idempotency_conflict", "This command ID belongs to a different pause request.");
-            await tx.CommitAsync(ct); return await GetPackageAsync(orderId, userId, ct);
+            if (tx is not null) await tx.CommitAsync(ct); return await GetPackageAsync(orderId, userId, ct);
         }
         var history = await db.Set<SubscriptionPause>().Where(p => p.OrderId == orderId).ToListAsync(ct);
         if (history.Any(p => p.Status == "CONFIRMED" && p.ResumeDate > SubscriptionMenuRules.QatarToday(clock.GetUtcNow())))
@@ -135,14 +142,14 @@ public sealed partial class UpcomingMealService : IPackageManagementService
         var now = clock.GetUtcNow();
         if (changes.Any(c => c.From <= SubscriptionMenuRules.QatarToday(now) || now >= SubscriptionMenuRules.TomorrowCutoff(c.From) || c.FromCutoff.HasValue && now >= c.FromCutoff.Value))
             throw PauseError("pause_date_unavailable", "The delivery deadline passed. Preview a later pause date.");
-        await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
+        await db.SaveChangesAsync(ct); if (tx is not null) await tx.CommitAsync(ct);
         return await GetPackageAsync(orderId, userId, ct);
     }
 
     public async Task<PackageManagementResponse> ResumeAsync(Guid orderId, Guid userId, ResumePackageRequest request, CancellationToken ct)
     {
         if (request.CommandId == Guid.Empty) throw new UpcomingMealException(400, "invalid_resume_request", "A command ID is required.");
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await using var tx = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
         var order = await LockPackageAsync(orderId, userId, ct);
         var pause = await db.Set<SubscriptionPause>().SingleOrDefaultAsync(p => p.Id == request.PauseId && p.OrderId == orderId, ct) ?? throw Missing();
         await db.Entry(pause).ReloadAsync(ct);
@@ -150,7 +157,7 @@ public sealed partial class UpcomingMealService : IPackageManagementService
             var previous = JsonSerializer.Deserialize<ScheduleChange[]>(pause.ScheduleChangesJson)!;
             if (previous.LastOrDefault()?.RequestedResumeDate != request.ResumeDate)
                 throw PauseError("idempotency_conflict", "This command ID belongs to a different restart date.");
-            await tx.CommitAsync(ct); return await GetPackageAsync(orderId, userId, ct);
+            if (tx is not null) await tx.CommitAsync(ct); return await GetPackageAsync(orderId, userId, ct);
         }
         if (!OrderWorkflowPolicy.CanFulfill(order) || pause.Status != "CONFIRMED" || pause.ResumeDate <= SubscriptionMenuRules.QatarToday(clock.GetUtcNow()))
             throw PauseError("resume_not_available", "This package cannot be resumed early.");
@@ -172,7 +179,7 @@ public sealed partial class UpcomingMealService : IPackageManagementService
             throw PauseError("schedule_changed", "The delivery deadline passed. Refresh before resuming.");
         pause.ResumeDate = schedule.Values.Min(); pause.Status = "RESUMED"; pause.ResumeCommandId = request.CommandId; pause.UpdatedAt = clock.GetUtcNow();
         pause.ScheduleChangesJson = JsonSerializer.Serialize(oldChanges.Concat(changes));
-        await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
+        await db.SaveChangesAsync(ct); if (tx is not null) await tx.CommitAsync(ct);
         return await GetPackageAsync(orderId, userId, ct);
     }
 

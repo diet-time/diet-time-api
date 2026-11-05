@@ -22,9 +22,9 @@ public sealed class OrdersController(IOrderService orders, StaffOrderService wor
     [HttpPost("{orderId:guid}/pause/preview")]
     public Task<IActionResult> PreviewPause(Guid orderId, PausePreviewRequest request, CancellationToken ct) => PackageAction(u => packages.PreviewPauseAsync(orderId, u, request, ct));
     [HttpPost("{orderId:guid}/pause")]
-    public Task<IActionResult> Pause(Guid orderId, PausePackageRequest request, CancellationToken ct) => PackageAction(u => packages.PauseAsync(orderId, u, request, ct));
+    public Task<IActionResult> Pause(Guid orderId, PausePackageRequest request, CancellationToken ct) => PackageAction(u => packages.RequestPauseAsync(orderId, u, request, ct));
     [HttpPost("{orderId:guid}/resume")]
-    public Task<IActionResult> Resume(Guid orderId, ResumePackageRequest request, CancellationToken ct) => PackageAction(u => packages.ResumeAsync(orderId, u, request, ct));
+    public Task<IActionResult> Resume(Guid orderId, ResumePackageRequest request, CancellationToken ct) => PackageAction(u => packages.RequestResumeAsync(orderId, u, request, ct));
     private async Task<IActionResult> PackageAction<T>(Func<Guid, Task<T>> action)
     {
         if (!TryGetUserId(out var userId)) return Unauthorized();

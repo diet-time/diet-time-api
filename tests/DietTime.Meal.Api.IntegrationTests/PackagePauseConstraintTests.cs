@@ -16,6 +16,27 @@ public sealed partial class UpcomingMealServiceTests
             AND EXTRACT(isodow FROM service_date) <> 5)) NOT VALID;
         """);
     [UpcomingPostgresFact]
+    public async Task Pause_dates_distinguish_today_from_first_persisted_delivery_after_requested_restart()
+    {
+        await EnforceManagedServiceDayConstraintAsync();
+        await PrepareAsync();
+        clock.Now = new(2026, 10, 27, 9, 0, 0, TimeSpan.Zero);
+        var service = Service();
+        var start = new DateOnly(2026, 10, 28);
+        var requested = new DateOnly(2026, 11, 6); // Friday: actual restart is Saturday.
+        var preview = await service.PreviewPauseAsync(order.Id, userId, new(start, requested, true), default);
+        var result = await service.PauseAsync(order.Id, userId,
+            new(Guid.NewGuid(), preview.RowVersion, preview.ScheduleVersion, start, requested, null, true), default);
+        Assert.Equal(new DateOnly(2026, 10, 27), result.NextScheduledDelivery);
+        Assert.Equal(requested, result.CurrentPause!.ResumeDate);
+        Assert.Equal(new DateOnly(2026, 11, 7), result.FirstDeliveryAfterPause);
+        Assert.Equal(preview.ProjectedEndDate, result.ExpectedEndDate);
+        await using var fresh = Context();
+        var persisted = await Service(fresh).GetPackageAsync(order.Id, userId, default);
+        Assert.Equal(result.FirstDeliveryAfterPause, persisted.FirstDeliveryAfterPause);
+        Assert.Equal(12, persisted.RemainingServiceDays);
+    }
+    [UpcomingPostgresFact]
     public async Task Pause_24_remaining_days_preserves_deployed_managed_day_constraint()
     {
         // Match the reported November 4 -> December 17 pause with paid entitlement.

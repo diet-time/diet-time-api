@@ -7,6 +7,10 @@ public interface IPackageManagementService
     Task<PackageManagementResponse> GetPackageAsync(Guid orderId, Guid userId, CancellationToken ct);
     Task<IReadOnlyList<PackagePauseResponse>> GetPausesAsync(Guid orderId, Guid userId, CancellationToken ct);
     Task<PausePreviewResponse> PreviewPauseAsync(Guid orderId, Guid userId, PausePreviewRequest request, CancellationToken ct);
+    Task<PackageManagementResponse> RequestPauseAsync(Guid orderId, Guid userId, PausePackageRequest request, CancellationToken ct);
+    Task<PackageManagementResponse> RequestResumeAsync(Guid orderId, Guid userId, ResumePackageRequest request, CancellationToken ct);
+    Task<StaffPackageChangeListResponse> ListChangeRequestsAsync(int page, int size, CancellationToken ct);
+    Task<PackageChangeResponse> ReviewChangeRequestAsync(Guid requestId, Guid reviewer, PackageChangeReviewRequest request, CancellationToken ct);
     Task<PackageManagementResponse> PauseAsync(Guid orderId, Guid userId, PausePackageRequest request, CancellationToken ct);
     Task<PackageManagementResponse> ResumeAsync(Guid orderId, Guid userId, ResumePackageRequest request, CancellationToken ct);
 }

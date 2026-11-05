@@ -7,6 +7,18 @@ public static class UpcomingMealConfigurations
 {
     public static void Configure(ModelBuilder b)
     {
+        b.Entity<PackageChangeRequest>(e => {
+            e.ToTable("package_change_requests", "public");
+            e.HasOne(r => r.Order).WithMany().HasForeignKey(r => r.OrderId).OnDelete(DeleteBehavior.Restrict);
+            e.Property(r => r.PayloadJson).HasColumnType("jsonb");
+            e.Property(r => r.Type).HasMaxLength(20);
+            e.Property(r => r.Status).HasMaxLength(30);
+            e.Property(r => r.Reason).HasMaxLength(500);
+            e.Property(r => r.ReviewReason).HasMaxLength(500);
+            e.HasIndex(r => r.OrderId).IsUnique().HasFilter("status = 'PENDING_APPROVAL'")
+                .HasDatabaseName("ux_package_change_requests_pending_order");
+            e.HasIndex(r => new { r.OrderId, r.CreatedAt });
+        });
         b.Entity<SubscriptionPause>(e => {
             e.ToTable("subscription_pauses", "public");
             e.HasOne(p => p.Order).WithMany().HasForeignKey(p => p.OrderId).OnDelete(DeleteBehavior.Restrict);
