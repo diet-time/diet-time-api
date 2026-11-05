@@ -19,16 +19,25 @@ public sealed class OrderWhatsAppTemplateOptions
     public string RejectedContentSid { get; set; } = "";
     public string OnHoldContentSid { get; set; } = "";
     public string PaymentReceivedContentSid { get; set; } = "";
+    public string CancelledContentSid { get; set; } = "";
+    public string PausedContentSid { get; set; } = "";
+    public string ResumedContentSid { get; set; } = "";
+    public string MealReminderContentSid { get; set; } = "";
+    public bool MealRemindersEnabled { get; set; }
+    public int ReminderMinutesBeforeCutoff { get; set; } = 120;
     public string ForEvent(string code) => code switch
     {
         "ORDER_RECEIVED" => ReceivedContentSid, "ORDER_APPROVED" => ApprovedContentSid,
         "ORDER_REJECTED" => RejectedContentSid, "ORDER_ON_HOLD" => OnHoldContentSid,
-        "PAYMENT_RECEIVED" => PaymentReceivedContentSid, _ => ""
+        "PAYMENT_RECEIVED" => PaymentReceivedContentSid, "ORDER_CANCELLED" => CancelledContentSid,
+        "PACKAGE_PAUSED" => PausedContentSid, "PACKAGE_RESUMED" => ResumedContentSid,
+        "MEAL_REMINDER" => MealReminderContentSid, _ => ""
     };
 }
 
 public sealed class WhatsAppSendResult
 {
+    public int? ProviderHttpStatusCode { get; init; }
     public bool Success { get; init; }
     public string? MessageId { get; init; }
     public string? Status { get; init; }
@@ -78,9 +87,11 @@ public sealed record NewOrderWhatsAppNotification(
     string DeliveryAddress,
     decimal TotalAmount,
     string Currency,
-    string OrderStatus);
+    string OrderStatus,
+    string DeliveryMode = "Home delivery");
 
 public sealed record TwilioWhatsAppTemplateMessage(
     string To,
     string ContentSid,
-    IReadOnlyDictionary<string, string> ContentVariables);
+    IReadOnlyDictionary<string, string> ContentVariables,
+    string? StatusCallback = null);

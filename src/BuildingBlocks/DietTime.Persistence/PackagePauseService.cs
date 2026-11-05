@@ -135,9 +135,12 @@ public sealed partial class UpcomingMealService : IPackageManagementService
         if (plan.Preview.ScheduleVersion != request.ScheduleVersion) throw PauseError("schedule_changed", "Delivery preparation changed. Refresh the pause preview.");
         var changes = plan.Moving.Select(d => new ScheduleChange(d.Id, d.ServiceDate, plan.Schedule[d.Id], d.SelectionCutoffAt)).ToArray();
         await MovePackageDaysAsync(order, days, plan.Moving, plan.Schedule, userId, ct);
-        db.Add(new SubscriptionPause { Id = request.CommandId, OrderId = orderId, SubscriptionId = plan.Moving[0].SubscriptionId,
+        var savedPause = new SubscriptionPause { Id = request.CommandId, OrderId = orderId, SubscriptionId = plan.Moving[0].SubscriptionId,
             PauseStartDate = request.PauseStartDate, ResumeDate = request.ResumeDate, RequestedResumeDate = request.ResumeDate, Reason = request.Reason?.Trim(),
-            ScheduleChangesJson = JsonSerializer.Serialize(changes), CreatedBy = userId, CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow() });
+            ScheduleChangesJson = JsonSerializer.Serialize(changes), CreatedBy = userId, CreatedAt = clock.GetUtcNow(), UpdatedAt = clock.GetUtcNow() };
+        db.Add(savedPause);
+        await WhatsAppNotificationSchedule.RecordPauseAsync(db, order, savedPause,
+            days.Count(d => HasEntitlement(d) && d.Status is not ("DELIVERED" or "COLLECTED")), clock.GetUtcNow(), ct);
         // Network/lock waits may cross midnight or the 21:00 cutoff. Validate the ORIGINAL dates again.
         var now = clock.GetUtcNow();
         if (changes.Any(c => c.From <= SubscriptionMenuRules.QatarToday(now) || now >= SubscriptionMenuRules.TomorrowCutoff(c.From) || c.FromCutoff.HasValue && now >= c.FromCutoff.Value))
@@ -179,6 +182,8 @@ public sealed partial class UpcomingMealService : IPackageManagementService
             throw PauseError("schedule_changed", "The delivery deadline passed. Refresh before resuming.");
         pause.ResumeDate = schedule.Values.Min(); pause.Status = "RESUMED"; pause.ResumeCommandId = request.CommandId; pause.UpdatedAt = clock.GetUtcNow();
         pause.ScheduleChangesJson = JsonSerializer.Serialize(oldChanges.Concat(changes));
+        await WhatsAppNotificationSchedule.ScheduleResumeAsync(db, order, pause,
+            days.Count(d => HasEntitlement(d) && d.Status is not ("DELIVERED" or "COLLECTED")), clock.GetUtcNow(), ct);
         await db.SaveChangesAsync(ct); if (tx is not null) await tx.CommitAsync(ct);
         return await GetPackageAsync(orderId, userId, ct);
     }

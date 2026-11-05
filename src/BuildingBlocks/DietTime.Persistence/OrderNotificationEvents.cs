@@ -11,11 +11,12 @@ internal static class OrderNotificationEvents
             db.OrderNotifications.Add(new OrderNotification
             {
                 Id = Guid.NewGuid(), OrderId = order.Id, HistoryId = history.Id, EventCode = eventCode,
-                Audience = audience, Reason = eventCode switch
+                Audience = audience, EventKey = $"history:{history.Id}:{audience}", Reason = eventCode switch
                 {
                     "ORDER_RECEIVED" => "Your order has been received and is awaiting confirmation from Diet Time.",
                     "ORDER_APPROVED" => "Diet Time has confirmed your order.",
                     "PAYMENT_RECEIVED" => "Diet Time has recorded your payment.",
+                    "ORDER_CANCELLED" => history.Notes == "cancel" ? "Reason not provided" : history.Notes,
                     _ => history.Notes
                 }, AvailableAt = now, CreatedAt = now
             });

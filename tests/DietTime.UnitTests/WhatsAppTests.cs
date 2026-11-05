@@ -15,14 +15,14 @@ public sealed class WhatsAppTests
         var options = new TwilioWhatsAppOptions
         {
             Enabled = true,
-            AccountSid = "ACaccount",
+            AccountSid = "AC" + new string('1',32),
             AuthToken = "secret-token",
             FromNumber = "+14155238886"
         };
 
         Assert.False(options.IsValid());
         options.OperationsNumber = "+97474452435";
-        options.NewOrderContentSid = "HXneworder";
+        options.NewOrderContentSid = "HX" + new string('2',32);
         Assert.True(options.IsValid());
     }
 
@@ -46,7 +46,7 @@ public sealed class WhatsAppTests
             Options.Create(new TwilioWhatsAppOptions
             {
                 Enabled = true,
-                AccountSid = "ACaccount",
+                AccountSid = "AC" + new string('1',32),
                 AuthToken = "secret-token",
                 FromNumber = "+14155238886"
             }),
@@ -59,8 +59,8 @@ public sealed class WhatsAppTests
 
         Assert.True(result.Success);
         Assert.Equal("SM123", result.MessageId);
-        Assert.Equal("https://api.twilio.com/2010-04-01/Accounts/ACaccount/Messages.json", handler.RequestUri);
-        Assert.Equal("Basic QUNhY2NvdW50OnNlY3JldC10b2tlbg==", handler.Authorization);
+        Assert.Equal("https://api.twilio.com/2010-04-01/Accounts/AC" + new string('1',32) + "/Messages.json", handler.RequestUri);
+        Assert.Equal("Basic " + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("AC" + new string('1',32) + ":secret-token")), handler.Authorization);
         var form = ParseForm(handler.Body!);
         Assert.Equal("whatsapp:+97474452435", form["To"]);
         Assert.Equal("whatsapp:+14155238886", form["From"]);
@@ -80,7 +80,7 @@ public sealed class WhatsAppTests
             NullLogger<TwilioWhatsAppService>.Instance);
 
         var result = await service.SendTemplateAsync(new(
-            "+97474452435", "HXtemplate", new Dictionary<string, string> { ["1"] = "value" }));
+            "+97474452435", "HX" + new string('2',32), new Dictionary<string, string> { ["1"] = "value" }));
 
         Assert.False(result.Success);
         Assert.Equal("twilio_whatsapp_disabled", result.ErrorCode);
@@ -99,14 +99,14 @@ public sealed class WhatsAppTests
             Options.Create(new TwilioWhatsAppOptions
             {
                 Enabled = true,
-                AccountSid = "ACaccount",
+                AccountSid = "AC" + new string('1',32),
                 AuthToken = "secret-token",
                 FromNumber = "+14155238886"
             }),
             NullLogger<TwilioWhatsAppService>.Instance);
 
         var result = await service.SendTemplateAsync(new(
-            "+97474452435", "HXtemplate", new Dictionary<string, string> { ["1"] = "value" }));
+            "+97474452435", "HX" + new string('2',32), new Dictionary<string, string> { ["1"] = "value" }));
 
         Assert.False(result.Success);
         Assert.Equal("21608", result.ErrorCode);
@@ -126,11 +126,11 @@ public sealed class WhatsAppTests
             Options.Create(new TwilioWhatsAppOptions
             {
                 Enabled = true,
-                AccountSid = "ACaccount",
+                AccountSid = "AC" + new string('1',32),
                 AuthToken = "secret-token",
                 FromNumber = "+14155238886",
                 OperationsNumber = "+97474452435",
-                NewOrderContentSid = "HXneworder"
+                NewOrderContentSid = "HX" + new string('2',32)
             }),
             NullLogger<TwilioWhatsAppService>.Instance);
 
@@ -143,20 +143,19 @@ public sealed class WhatsAppTests
         Assert.True(result.Success);
         var form = ParseForm(handler.Body!);
         Assert.Equal("whatsapp:+97474452435", form["To"]);
-        Assert.Equal("HXneworder", form["ContentSid"]);
+        Assert.Equal("HX" + new string('2',32), form["ContentSid"]);
         using var variables = JsonDocument.Parse(form["ContentVariables"]);
-        Assert.Equal(11, variables.RootElement.EnumerateObject().Count());
+        Assert.Equal(10, variables.RootElement.EnumerateObject().Count());
         Assert.Equal("ORD-20260814-000015", variables.RootElement.GetProperty("1").GetString());
         Assert.Equal("Rugma", variables.RootElement.GetProperty("2").GetString());
         Assert.Equal("+97433116397", variables.RootElement.GetProperty("3").GetString());
         Assert.Equal("Balanced Living", variables.RootElement.GetProperty("4").GetString());
-        Assert.Equal("22 Aug 2026", variables.RootElement.GetProperty("5").GetString());
-        Assert.Equal("Monthly", variables.RootElement.GetProperty("6").GetString());
-        Assert.Equal("3 Meals", variables.RootElement.GetProperty("7").GetString());
-        Assert.Equal("Sat, Sun, Mon, Tue, Wed, Thu", variables.RootElement.GetProperty("8").GetString());
+        Assert.Equal("Monthly", variables.RootElement.GetProperty("5").GetString());
+        Assert.Equal("3 Meals", variables.RootElement.GetProperty("6").GetString());
+        Assert.Equal("22 Aug 2026", variables.RootElement.GetProperty("7").GetString());
+        Assert.Equal("Home delivery", variables.RootElement.GetProperty("8").GetString());
         Assert.Equal("Pinned location, Qatar", variables.RootElement.GetProperty("9").GetString());
         Assert.Equal("QAR 3200.00", variables.RootElement.GetProperty("10").GetString());
-        Assert.Equal("Confirmed", variables.RootElement.GetProperty("11").GetString());
     }
 
     [Fact]
@@ -168,11 +167,11 @@ public sealed class WhatsAppTests
             Options.Create(new TwilioWhatsAppOptions
             {
                 Enabled = true,
-                AccountSid = "ACaccount",
+                AccountSid = "AC" + new string('1',32),
                 AuthToken = "secret-token",
                 FromNumber = "+14155238886",
                 OperationsNumber = "+97474452435",
-                NewOrderContentSid = "HXneworder"
+                NewOrderContentSid = "HX" + new string('2',32)
             }),
             NullLogger<TwilioWhatsAppService>.Instance);
 
@@ -203,7 +202,7 @@ public sealed class WhatsAppTests
     {
         var handler = new RecordingHandler((_, _) => new(HttpStatusCode.Created) { Content = new StringContent("{\"status\":\"queued\"}") });
         var service = DiagnosticService(handler);
-        var result = await service.SendTemplateAsync(new("+97455555555", "HXtemplate", new Dictionary<string,string> { ["1"] = "value" }));
+        var result = await service.SendTemplateAsync(new("+97455555555", "HX" + new string('2',32), new Dictionary<string,string> { ["1"] = "value" }));
         Assert.False(result.Success); Assert.Equal("invalid_provider_response", result.ErrorCode);
     }
 
@@ -214,7 +213,7 @@ public sealed class WhatsAppTests
     {
         var handler = new RecordingHandler((_, _) => new(HttpStatusCode.Created) {
             Content = new StringContent(JsonSerializer.Serialize(new { sid = "SMtest", status, error_code = 63015, error_message = "Sandbox recipient not joined" })) });
-        var result = await DiagnosticService(handler).SendTemplateAsync(new("+97455555555", "HXtemplate", new Dictionary<string,string> { ["1"] = "value" }));
+        var result = await DiagnosticService(handler).SendTemplateAsync(new("+97455555555", "HX" + new string('2',32), new Dictionary<string,string> { ["1"] = "value" }));
         Assert.False(result.Success); Assert.Equal("63015", result.ErrorCode); Assert.Equal(status, result.Status); Assert.Equal("SMtest", result.MessageId);
     }
 
@@ -222,7 +221,7 @@ public sealed class WhatsAppTests
     public async Task Queued_provider_status_is_preserved_without_claiming_handset_delivery()
     {
         var handler = new RecordingHandler((_, _) => new(HttpStatusCode.Created) { Content = new StringContent("{\"sid\":\"SMtest\",\"status\":\"queued\"}") });
-        var result = await DiagnosticService(handler).SendTemplateAsync(new("+97455555555", "HXtemplate", new Dictionary<string,string> { ["1"] = "value" }));
+        var result = await DiagnosticService(handler).SendTemplateAsync(new("+97455555555", "HX" + new string('2',32), new Dictionary<string,string> { ["1"] = "value" }));
         Assert.True(result.Success); Assert.Equal("queued", result.Status);
     }
 

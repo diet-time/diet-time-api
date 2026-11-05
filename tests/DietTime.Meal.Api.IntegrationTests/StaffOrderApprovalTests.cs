@@ -16,7 +16,7 @@ using Microsoft.IdentityModel.Tokens;
 namespace DietTime.Meal.Api.IntegrationTests;
 public sealed partial class UpcomingMealServiceTests
 {
-    private async Task<(ApiFactory Factory,HttpClient Client,PlaceOrderRequest Request)> ApprovalClient(bool prepaid=false)
+    private async Task<(ApiFactory Factory,HttpClient Client,PlaceOrderRequest Request)> ApprovalClient(bool prepaid=false, Action<IServiceCollection>? configure = null)
     {
         clock.Now=new(2026,10,26,10,0,0,TimeSpan.Zero);
         var branch=new TakeawayBranch { Id=Guid.NewGuid(),Name="Diet Time – Azizia Branch",IsActive=true };
@@ -29,6 +29,7 @@ public sealed partial class UpcomingMealServiceTests
                 o.TokenValidationParameters.ValidIssuer="DietTime.Tests";o.TokenValidationParameters.ValidAudience="DietTime.Tests";
             });
             services.PostConfigure<DietTime.Infrastructure.TwilioWhatsAppOptions>(o=>o.Enabled=false);
+            configure?.Invoke(services);
         });
         var client=factory.CreateClient();client.DefaultRequestHeaders.Add("X-Development-User-Id",userId.ToString());
         var price=await db.MealPlanPrices.SingleAsync();
@@ -237,7 +238,6 @@ public sealed partial class UpcomingMealServiceTests
             var customer = await client.PostAsJsonAsync($"/api/v1/orders/{id}/cancel", new OrderReviewRequest(version, "Customer request"));
             Assert.Equal(HttpStatusCode.Conflict, customer.StatusCode);
             Assert.Contains(PackagePauseRules.CancellationCode, await customer.Content.ReadAsStringAsync());
-            Assert.Equal(HttpStatusCode.BadRequest, (await Review(client, id, "cancel", version, " ")).StatusCode);
             Assert.Equal(HttpStatusCode.Conflict, (await Review(client, id, "cancel", version - 1, "Stale cancellation")).StatusCode);
             Assert.Equal(historyBefore, await db.OrderStatusHistory.CountAsync(h => h.OrderId == id));
             Assert.Equal(HttpStatusCode.OK, (await Review(client, id, "cancel", version, "Customer contacted staff")).StatusCode);

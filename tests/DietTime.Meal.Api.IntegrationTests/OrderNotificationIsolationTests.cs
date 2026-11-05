@@ -19,11 +19,16 @@ public sealed partial class UpcomingMealServiceTests
         var address = new CustomerAddress { Id = Guid.NewGuid(), CustomerProfileId = order.CustomerProfileId, AddressType = "HOME", Area = "Doha", IsActive = true };
         db.AddRange(slot, address);
         await db.SaveChangesAsync();
+        await db.Users.Where(u => u.Id == userId).ExecuteUpdateAsync(s => s.SetProperty(u => u.PhoneNumber, "+97455555555"));
         var provider = new SlowFailingTwilio();
         await using var factory = new ApiFactory(connection, services =>
         {
             services.AddSingleton<TimeProvider>(clock);
             services.AddSingleton<ITwilioWhatsAppService>(provider);
+            services.PostConfigure<DietTime.Infrastructure.TwilioWhatsAppOptions>(o => {
+                o.Enabled = true; o.OperationsNumber = "+97455555555"; o.NewOrderContentSid = "HX" + new string('1',32);
+                o.PublicWebhookBaseUrl = "https://diettime.test";
+            });
         });
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Development-User-Id", userId.ToString());
@@ -70,6 +75,8 @@ public sealed partial class UpcomingMealServiceTests
             return await Release.Task.WaitAsync(cancellationToken);
         }
         public Task<WhatsAppMessageStatusResult> GetMessageStatusAsync(string messageSid, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<WhatsAppSendResult> SendTemplateAsync(TwilioWhatsAppTemplateMessage message, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public async Task<WhatsAppSendResult> SendTemplateAsync(TwilioWhatsAppTemplateMessage message, CancellationToken cancellationToken = default) {
+            Interlocked.Increment(ref Calls); Started.TrySetResult(); return await Release.Task.WaitAsync(cancellationToken);
+        }
     }
 }

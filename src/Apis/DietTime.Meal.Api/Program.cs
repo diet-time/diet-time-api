@@ -66,10 +66,7 @@ builder.Services.Configure<OrderOptions>(builder.Configuration.GetSection(OrderO
 builder.Services.Configure<OperationsDashboardOptions>(builder.Configuration.GetSection(OperationsDashboardOptions.SectionName));
 builder.Services.Configure<SmtpOptions>(builder.Configuration.GetSection(SmtpOptions.SectionName));
 builder.Services.AddOptions<TwilioWhatsAppOptions>()
-    .Bind(builder.Configuration.GetSection(TwilioWhatsAppOptions.SectionName))
-    .Validate(options => options.IsValid(),
-        "Enabled Twilio WhatsApp integration requires a valid AccountSid, AuthToken, FromNumber, OperationsNumber, and NewOrderContentSid.")
-    .ValidateOnStart();
+    .Bind(builder.Configuration.GetSection(TwilioWhatsAppOptions.SectionName));
 builder.Services.PostConfigure<StorageOptions>(options =>
 {
     options.ServiceUrl = builder.Configuration["AWS_ENDPOINT_URL"] ?? options.ServiceUrl;
@@ -169,6 +166,9 @@ builder.Services.AddScoped<StaffNotificationService>();
 builder.Services.AddHostedService<StaffNotificationWorker>();
 builder.Services.AddScoped<ServiceDayFulfillmentService>();
 builder.Services.Configure<OrderWhatsAppTemplateOptions>(builder.Configuration.GetSection(OrderWhatsAppTemplateOptions.SectionName));
+builder.Services.AddSingleton<IWhatsAppRuntimeConfiguration>(sp => sp.GetRequiredService<IOptions<TwilioWhatsAppOptions>>().Value);
+builder.Services.AddScoped<WhatsAppWebhookService>();
+builder.Services.AddScoped<WhatsAppNotificationSchedule>();
 builder.Services.AddScoped<IOrderNotificationSender, OrderWhatsAppNotificationSender>();
 builder.Services.AddSingleton<OrderNotificationWorker>();
 builder.Services.AddSingleton<IOrderNotificationQueue>(services => services.GetRequiredService<OrderNotificationWorker>());

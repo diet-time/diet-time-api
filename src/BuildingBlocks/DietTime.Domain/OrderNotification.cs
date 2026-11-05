@@ -4,7 +4,7 @@ namespace DietTime.Domain;
 public sealed class OrderNotification : Entity
 {
     public Guid OrderId { get; set; }
-    public Guid HistoryId { get; set; }
+    public Guid? HistoryId { get; set; }
     public string EventCode { get; set; } = "";
     public string Audience { get; set; } = "CUSTOMER";
     public string? Reason { get; set; }
@@ -16,4 +16,12 @@ public sealed class OrderNotification : Entity
     public DateTimeOffset? SentAt { get; set; }
     public string? MessageSid { get; set; }
     public string? LastError { get; set; }
+    public string? EventKey { get; set; }
+    public string PayloadJson { get; set; } = "{}";
+    public string? RecipientPhone { get; set; }
+    public string? TemplateName { get; set; }
+    public string? ContentSid { get; set; }
+    public string? ProviderStatus { get; set; }
+    public DateTimeOffset? DeliveredAt { get; set; }
+    public DateTimeOffset? ReadAt { get; set; }
 }

@@ -9,16 +9,20 @@ using Microsoft.Extensions.Options;
 
 namespace DietTime.Infrastructure;
 
-public sealed class TwilioWhatsAppOptions
+public sealed class TwilioWhatsAppOptions : IWhatsAppRuntimeConfiguration
 {
     public const string SectionName = "TwilioWhatsApp";
 
     public bool Enabled { get; set; }
+    public bool AdminActionsEnabled { get; set; } // Opt in only after WhatsApp order actions are introduced.
     public string AccountSid { get; set; } = string.Empty;
     public string AuthToken { get; set; } = string.Empty;
     public string FromNumber { get; set; } = string.Empty;
     public string OperationsNumber { get; set; } = string.Empty;
     public string NewOrderContentSid { get; set; } = string.Empty;
+    public string PublicWebhookBaseUrl { get; set; } = string.Empty;
+    // E.164 phone -> existing Admin user ID. No identity is inferred from a display name.
+    public List<WhatsAppAdminIdentity> AuthorizedAdmins { get; set; } = new();
 
     // Format/presence checks only: never expose values or claim provider approval.
     public IReadOnlyDictionary<string, bool> ConfigurationChecks() => new Dictionary<string, bool>
@@ -38,6 +42,8 @@ public sealed class TwilioWhatsAppOptions
          NewOrderContentSid.StartsWith("HX", StringComparison.Ordinal) &&
          NewOrderContentSid.Length <= 64);
 }
+
+public sealed record WhatsAppAdminIdentity { public string Phone { get; set; } = ""; public Guid UserId { get; set; } }
 
 public static class TwilioWhatsAppPhoneNumber
 {
@@ -100,7 +106,7 @@ public sealed class TwilioWhatsAppService(
         }
     }
 
-    private const int MaximumAttempts = 3;
+    private const int MaximumAttempts = 1; // The durable outbox owns retries, never nested HTTP retries.
 
     public Task<WhatsAppSendResult> SendNewOrderNotificationAsync(
         NewOrderWhatsAppNotification notification,
@@ -134,13 +140,12 @@ public sealed class TwilioWhatsAppService(
             ["2"] = notification.CustomerName.Trim(),
             ["3"] = notification.CustomerMobile.Trim(),
             ["4"] = notification.MealPlanName.Trim(),
-            ["5"] = startDate,
-            ["6"] = duration,
-            ["7"] = mealsPerDay,
-            ["8"] = notification.DeliveryDays.Trim(),
+            ["5"] = duration,
+            ["6"] = mealsPerDay,
+            ["7"] = startDate,
+            ["8"] = notification.DeliveryMode,
             ["9"] = notification.DeliveryAddress.Trim(),
-            ["10"] = total,
-            ["11"] = status
+            ["10"] = total
         };
 
         logger.LogInformation(
@@ -164,15 +169,22 @@ public sealed class TwilioWhatsAppService(
             return Failure("twilio_whatsapp_disabled", "Twilio WhatsApp messaging is disabled.");
         }
 
+        if (!configuration.ConfigurationChecks()["AccountSid"] || string.IsNullOrWhiteSpace(configuration.AuthToken))
+            return Failure("twilio_configuration_invalid", "Twilio account credentials are missing or invalid.");
+        if (!TwilioWhatsAppPhoneNumber.IsValid(message.To) || !TwilioWhatsAppPhoneNumber.IsValid(configuration.FromNumber) ||
+            !System.Text.RegularExpressions.Regex.IsMatch(message.ContentSid ?? "", @"\AHX[0-9a-fA-F]{32}\z") ||
+            message.ContentVariables.Count == 0 || message.ContentVariables.Any(p => string.IsNullOrWhiteSpace(p.Value) || p.Value.Length > 1000))
+            return Failure("invalid_template_message", "The template SID, recipient, sender or required variables are invalid.");
         var variables = message.ContentVariables.ToDictionary(
             pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
         var fields = new Dictionary<string, string>
         {
             ["To"] = TwilioWhatsAppPhoneNumber.Format(message.To),
             ["From"] = TwilioWhatsAppPhoneNumber.Format(configuration.FromNumber),
-            ["ContentSid"] = message.ContentSid.Trim(),
+            ["ContentSid"] = message.ContentSid!.Trim(),
             ["ContentVariables"] = JsonSerializer.Serialize(variables)
         };
+        if (message.StatusCallback is not null) fields["StatusCallback"] = message.StatusCallback;
         var endpoint = $"2010-04-01/Accounts/{configuration.AccountSid.Trim()}/Messages.json";
 
         for (var attempt = 1; attempt <= MaximumAttempts; attempt++)
@@ -275,7 +287,7 @@ public sealed class TwilioWhatsAppService(
     {
         var code = ReadString(body, "code") ?? ((int)statusCode).ToString(CultureInfo.InvariantCulture);
         var message = ReadString(body, "message") ?? "Twilio rejected the WhatsApp message.";
-        return Failure(code, message);
+        return new WhatsAppSendResult { ErrorCode = code, ErrorMessage = message, ProviderHttpStatusCode = (int)statusCode };
     }
 
     private static string? ReadString(string body, string property)

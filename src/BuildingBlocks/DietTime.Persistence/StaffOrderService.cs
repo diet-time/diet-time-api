@@ -64,7 +64,7 @@ public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, 
         if (customerUserId.HasValue ? action != "cancel" : action is not ("approve" or "reject" or "cancel" or "payment" or "revise-dates"))
             throw Error(409, "unsupported_order_action", "This manual order action is no longer supported.");
         if (version < 1 || reason?.Length > 500) throw Error(400, "invalid_review", "A current row version and a reason of at most 500 characters are required.");
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await using var tx = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM public.orders WHERE id = {id} FOR UPDATE", ct);
         var order = await db.Orders.Include(x => x.Meals).Include(x => x.DeliveryDays).SingleOrDefaultAsync(x => x.Id == id, ct);
         if (order is null || customerUserId.HasValue && !await db.CustomerProfiles.AnyAsync(p => p.Id == order.CustomerProfileId && p.UserId == customerUserId, ct))
@@ -78,7 +78,7 @@ public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, 
         }
         if (order.RowVersion != version) throw Error(409, "order_changed", "This order changed. Refresh it before taking another action.");
         reason = reason?.Trim();
-        if (action is "reject" or "cancel" or "payment" or "revise-dates" && string.IsNullOrWhiteSpace(reason))
+        if ((action is "reject" or "payment" or "revise-dates" || action == "cancel" && customerUserId.HasValue) && string.IsNullOrWhiteSpace(reason))
             throw Error(400, "reason_required", "Enter a reason for this action.");
         var now = clock.GetUtcNow();
         var today = SubscriptionMenuRules.QatarToday(now);
@@ -134,6 +134,12 @@ public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, 
             if (action == "cancel" && (previous == "CONFIRMED" && order.StartDate <= today || await db.Set<SubscriptionServiceDay>().AnyAsync(d => d.OrderId == id &&
                 (d.SelectionLocked || d.Status == "DELIVERED" || d.Status == "COLLECTED" || d.Status == "PREPARING" || d.Status == "OUT_FOR_DELIVERY"), ct)))
                 throw Error(409, "cancellation_review_required", "Cancellation is unavailable after the service period or preparation starts. Contact Diet Time.");
+            if (action == "cancel") {
+                if (!customerUserId.HasValue) eventCode = "ORDER_CANCELLED";
+                await db.Set<SubscriptionServiceDay>().Where(d => d.OrderId == id && d.ServiceDate >= today &&
+                    d.Status != "DELIVERED" && d.Status != "COLLECTED").ExecuteUpdateAsync(s => s.SetProperty(d => d.Status, "CANCELLED")
+                        .SetProperty(d => d.SelectionLocked, true).SetProperty(d => d.Revision, d => d.Revision + 1), ct);
+            }
             order.Status = next;
             if (next is "REJECTED" or "CANCELLED" && order.PaymentStatus is "PAID" or "PARTIALLY_REFUNDED") order.PaymentStatus = PaymentStatuses.RefundPending;
         }
@@ -144,7 +150,7 @@ public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, 
         if (eventCode != null) OrderNotificationEvents.Add(db, order, history, eventCode, now);
         await db.SaveChangesAsync(ct);
         if (OrderWorkflowPolicy.CanFulfill(order)) await meals.InitializeAsync(order, ct);
-        await tx.CommitAsync(ct);
+        if (tx is not null) await tx.CommitAsync(ct);
         if (eventCode != null) notifications.TryEnqueue(id);
         return (await GetAsync(id, ct))!;
     }

@@ -109,6 +109,13 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
         b.ApplyConfiguration(new CustomerAddressConfiguration());
         b.ApplyConfiguration(new DeliveryTimeSlotConfiguration());
         b.ApplyConfiguration(new OrderConfiguration());
+        b.Entity<WhatsAppWebhookReceipt>(e => {
+            e.ToTable("whatsapp_webhook_receipts", "public");
+            e.Property(x => x.MessageSid).HasMaxLength(50);
+            e.Property(x => x.Action).HasMaxLength(20);
+            e.Property(x => x.Outcome).HasMaxLength(100);
+            e.HasIndex(x => x.MessageSid).IsUnique();
+        });
         b.Entity<OrderNotification>(e =>
         {
             e.ToTable("order_notifications", "public");
@@ -118,6 +125,14 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
             e.Property(x => x.Status).HasMaxLength(30);
             e.Property(x => x.LastError).HasMaxLength(500);
             e.Property(x => x.MessageSid).HasMaxLength(50);
+            e.Property(x => x.PayloadJson).HasColumnType("jsonb");
+            e.Property(x => x.RecipientPhone).HasMaxLength(40);
+            e.Property(x => x.TemplateName).HasMaxLength(100);
+            e.Property(x => x.ContentSid).HasMaxLength(64);
+            e.Property(x => x.ProviderStatus).HasMaxLength(30);
+            e.Property(x => x.EventKey).HasMaxLength(180);
+            e.HasIndex(x => x.EventKey).IsUnique().HasFilter("event_key IS NOT NULL");
+            e.HasIndex(x => x.MessageSid).IsUnique().HasFilter("message_sid IS NOT NULL");
             e.HasIndex(x => new { x.HistoryId, x.Audience }).IsUnique();
             e.HasIndex(x => new { x.Status, x.AvailableAt });
             e.HasOne<Order>().WithMany().HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Cascade);
