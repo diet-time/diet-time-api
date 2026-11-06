@@ -77,8 +77,7 @@ public class AuthenticationController(
         [FromBody] PhoneOtpLoginRequest request,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.PhoneNumber) ||
-            !Regex.IsMatch(request.PhoneNumber.Trim(), @"^\+[1-9]\d{7,14}$"))
+        if (!DietTime.Infrastructure.PhoneOtpNumbers.TryNormalize(request.PhoneNumber, out var normalizedPhone))
             return BadRequest(new ProblemDetails
             {
                 Title = "Validation Error",
@@ -87,17 +86,17 @@ public class AuthenticationController(
         if (string.IsNullOrWhiteSpace(request.Otp) || !Regex.IsMatch(request.Otp, @"\A[0-9]{6}\z"))
             return BadRequest(new ProblemDetails { Title = "Validation Error", Detail = "OTP is required." });
 
-        var result = await authService.LoginWithPhoneOtpAsync(request, cancellationToken);
+        var result = await authService.LoginWithPhoneOtpAsync(request with { PhoneNumber = normalizedPhone }, cancellationToken);
         if (result.Status == PhoneOtpAuthStatus.TooManyAttempts)
             return StatusCode(429, new ProblemDetails { Title = "Too many OTP attempts. Try again later." });
         if (result.Status == PhoneOtpAuthStatus.Disabled)
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new ProblemDetails
             {
                 Title = "Phone login unavailable",
-                Detail = "Phone OTP login is not configured."
+                Detail = "WhatsApp verification is temporarily unavailable. Please request a code again."
             });
         if (result.Status == PhoneOtpAuthStatus.InvalidOtp)
-            return Unauthorized(new ProblemDetails { Title = "Authentication Failed", Detail = "Invalid OTP." });
+            return Unauthorized(new ProblemDetails { Title = "Authentication Failed", Detail = "Invalid or expired verification code. Please request a code again." });
         if (result.Status == PhoneOtpAuthStatus.Conflict || result.Session is null)
             return Conflict(new ProblemDetails { Title = "Login failed", Detail = "A user with this phone number already exists." });
 

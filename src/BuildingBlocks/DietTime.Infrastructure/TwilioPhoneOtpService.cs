@@ -21,7 +21,7 @@ public sealed class TwilioVerifyOptions
 public sealed class TwilioPhoneOtpService(
     HttpClient client,
     IOptions<TwilioVerifyOptions> options,
-    IOptions<TwilioWhatsAppOptions> credentials, ILogger<TwilioPhoneOtpService>? logger = null) : IPhoneOtpVerifier
+    IOptions<TwilioWhatsAppOptions> credentials, ILogger<TwilioPhoneOtpService>? logger = null) : IPhoneOtpProvider
 {
     public async Task<PhoneOtpSendResult> SendAsync(string phoneNumber, CancellationToken ct)
     {
@@ -44,6 +44,12 @@ public sealed class TwilioPhoneOtpService(
             ? PhoneOtpVerificationStatus.Valid : PhoneOtpVerificationStatus.Invalid;
     }
 
+    public async Task<bool> CancelAsync(string requestId, CancellationToken ct)
+    {
+        if (!Regex.IsMatch(requestId, @"\AVE[0-9a-fA-F]{32}\z") || !Configured()) return false;
+        var result = await PostAsync($"Verifications/{requestId}", new() { ["Status"] = "canceled" }, ct);
+        return result.StatusCode == 401 || (result.StatusCode == 200 && result.Status == "canceled");
+    }
     private bool Configured()
     {
         var checks = new Dictionary<string, bool> {
@@ -70,7 +76,7 @@ public sealed class TwilioPhoneOtpService(
             using var response = await client.SendAsync(request, ct);
             if (response.StatusCode == HttpStatusCode.TooManyRequests) return new(429);
             // An expired, consumed or missing verification is reported as 404.
-            if (response.StatusCode == HttpStatusCode.NotFound && resource == "VerificationCheck") return new(401);
+            if (response.StatusCode == HttpStatusCode.NotFound && (resource == "VerificationCheck" || resource.StartsWith("Verifications/", StringComparison.Ordinal))) return new(401);
             if (!response.IsSuccessStatusCode)
             {
                 int? providerCode = null;
@@ -87,10 +93,9 @@ public sealed class TwilioPhoneOtpService(
         }
         catch (HttpRequestException) { logger?.LogWarning("Twilio OTP service could not be reached."); return new(503); }
         catch (JsonException) { return new(503); }
+        catch (InvalidOperationException) { return new(503); }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested) { logger?.LogWarning("Twilio OTP request timed out."); return new(503); }
     }
 
     private sealed record ProviderResult(int StatusCode, string? Status = null, string? Sid = null, string? To = null, string? Channel = null);
 }
-
-public sealed record PhoneOtpSendResult(int StatusCode, string? RequestId = null);

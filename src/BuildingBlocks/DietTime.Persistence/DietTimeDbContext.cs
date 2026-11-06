@@ -116,6 +116,13 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
             e.Property(x => x.Outcome).HasMaxLength(100);
             e.HasIndex(x => x.MessageSid).IsUnique();
         });
+        b.Entity<PhoneOtpChallenge>(e => {
+            e.ToTable("phone_otp_challenges", "public");
+            e.HasKey(x => x.PhoneNumber);
+            e.Property(x => x.PhoneNumber).HasMaxLength(16);
+            e.Property(x => x.Mode).HasMaxLength(4);
+            e.Property(x => x.ProviderRequestId).HasMaxLength(64);
+        });
         b.Entity<OrderNotification>(e =>
         {
             e.ToTable("order_notifications", "public");

@@ -52,7 +52,7 @@ builder.Services.AddIdentityCore<ApplicationUser>(o => { o.Password.RequiredLeng
     .AddRoles<IdentityRole<Guid>>().AddEntityFrameworkStores<DietTimeDbContext>().AddDefaultTokenProviders();
 
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
-builder.Services.Configure<PhoneOtpOptions>(builder.Configuration.GetSection(PhoneOtpOptions.SectionName));
+
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
 builder.Services.Configure<DeliveryScheduleOptions>(builder.Configuration.GetSection(DeliveryScheduleOptions.SectionName));
 builder.Services.Configure<MenuRotationOptions>(builder.Configuration.GetSection(MenuRotationOptions.SectionName));
@@ -83,8 +83,7 @@ builder.Services.PostConfigure<StorageOptions>(options =>
 });
 
 // Configure JWT Authentication
-var jwtOptions = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
-var key = Encoding.ASCII.GetBytes(jwtOptions.Key);
+
 
 builder.Services.AddAuthentication(options =>
 {
@@ -111,6 +110,9 @@ builder.Services.AddAuthentication(options =>
 })
 .AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
 {
+    // Resolve finalized configuration consistently with AuthService token issuance.
+    var jwtOptions = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();
+    var key = Encoding.ASCII.GetBytes(jwtOptions.Key);
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuerSigningKey = true,
@@ -152,13 +154,26 @@ builder.Services.AddScoped<ITemplateMenuReader>(services => (AdminMealService)se
 builder.Services.AddScoped<IOperationalCalendarService, DefaultOperationalCalendarService>(); 
 builder.Services.AddScoped<IDeliverySchedulingService, DeliverySchedulingService>(); 
 builder.Services.Configure<TwilioVerifyOptions>(builder.Configuration.GetSection(TwilioVerifyOptions.SectionName));
+builder.Services.PostConfigure<TwilioVerifyOptions>(o => {
+    o.Enabled = true; // IsTestAuthentication is the sole authentication-mode switch.
+    if (string.IsNullOrWhiteSpace(o.ServiceSid)) o.ServiceSid = builder.Configuration["TWILIO_VERIFY_SERVICE_SID"] ?? "";
+});
+builder.Services.PostConfigure<TwilioWhatsAppOptions>(o => {
+    if (string.IsNullOrWhiteSpace(o.AccountSid)) o.AccountSid = builder.Configuration["TWILIO_ACCOUNT_SID"] ?? "";
+    if (string.IsNullOrWhiteSpace(o.AuthToken)) o.AuthToken = builder.Configuration["TWILIO_AUTH_TOKEN"] ?? "";
+    if (string.IsNullOrWhiteSpace(o.FromNumber)) o.FromNumber = builder.Configuration["TWILIO_WHATSAPP_FROM"] ?? "";
+});
+builder.Services.AddSingleton(sp => OtpAuthenticationOptions.Load(
+    sp.GetRequiredService<IConfiguration>(), builder.Environment.EnvironmentName,
+    sp.GetRequiredService<IOptions<TwilioVerifyOptions>>().Value,
+    sp.GetRequiredService<IOptions<TwilioWhatsAppOptions>>().Value));
 builder.Services.AddHttpClient<TwilioPhoneOtpService>(client => client.Timeout = TimeSpan.FromSeconds(15));
-// Test verification is an explicit staging opt-in and never a live-send fallback.
-var phoneOtpMode = builder.Configuration.GetSection(PhoneOtpOptions.SectionName).Get<PhoneOtpOptions>() ?? new();
-if (phoneOtpMode.ShouldUseTestVerifier(builder.Environment.EnvironmentName, builder.Configuration.GetValue<bool>("TwilioVerify:Enabled")))
-    builder.Services.AddScoped<IPhoneOtpVerifier, TestPhoneOtpVerifier>();
-else
-    builder.Services.AddScoped<IPhoneOtpVerifier>(sp => sp.GetRequiredService<TwilioPhoneOtpService>());
+builder.Services.AddScoped<IPhoneOtpProvider>(sp => sp.GetRequiredService<OtpAuthenticationOptions>().IsTestAuthentication
+    ? new TestOtpAuthenticationProvider(sp.GetRequiredService<OtpAuthenticationOptions>())
+    : sp.GetRequiredService<TwilioPhoneOtpService>());
+builder.Services.AddScoped<PhoneOtpAuthenticationService>();
+builder.Services.AddScoped<IPhoneOtpAuthenticationService>(sp => sp.GetRequiredService<PhoneOtpAuthenticationService>());
+builder.Services.AddScoped<IPhoneOtpVerifier>(sp => sp.GetRequiredService<PhoneOtpAuthenticationService>());
 builder.Services.AddScoped<IAuthService, AuthService>(); 
 builder.Services.AddSingleton<ICustomerNutritionCalculator>(services =>
     new CustomerNutritionCalculator(
@@ -218,15 +233,13 @@ builder.Services.AddRateLimiter(o =>
 {
     o.RejectionStatusCode = 429;
     o.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx => RateLimitPartition.GetFixedWindowLimiter(ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new() { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
-    o.AddFixedWindowLimiter("phone-otp", limiter =>
-    {
-        limiter.PermitLimit = 10;
-        limiter.Window = TimeSpan.FromMinutes(1);
-        limiter.QueueLimit = 0;
-    });
+    o.AddPolicy("phone-otp", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 
 var app = builder.Build();
+_ = app.Services.GetRequiredService<OtpAuthenticationOptions>(); // Validate before accepting requests.
 var whatsappConfiguration = app.Services.GetRequiredService<IOptions<TwilioWhatsAppOptions>>().Value;
 var whatsappChecks = whatsappConfiguration.ConfigurationChecks();
 app.Logger.LogInformation(

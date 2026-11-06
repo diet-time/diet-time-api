@@ -53,7 +53,7 @@ GET  /api/v1/auth/me
 
 Login, registration, and refresh return an `ApiResponse<AuthSessionResponse>`. Refresh tokens are hashed in PostgreSQL, rotated on every refresh, and revoked on logout. Browser clients receive the refresh token in an HttpOnly cookie (`Secure` outside Development); native clients store the returned refresh token in platform secure storage. Access tokens remain short-lived and are sent as bearer tokens. The default refresh-session lifetime is 3,650 days so native sessions survive normal app restarts; deleting the app removes its securely stored token. Native clients must call `POST /api/v1/auth/refresh` before expiry or after an access-token 401 and persist the newly rotated refresh token returned by that call.
 
-Temporary phone login is available through `POST /api/v1/auth/phone-otp`. Send an E.164 number such as `+97455555555` with the configured test OTP; the first successful login creates the Identity user and customer profile. Development uses `123456`. In other environments, explicitly set `PhoneOtp__Enabled=true` and provide `PhoneOtp__TestCode` through secrets. Keep it disabled in production until `IPhoneOtpVerifier` is replaced with the Twilio implementation.
+Phone login uses the existing `/api/v1/auth/phone-otp/request` and `/api/v1/auth/phone-otp` endpoints. Configure the server-only `IsTestAuthentication` mode and authorized test-number allowlist, or provide live Twilio Verify credentials. See [Phone OTP authentication](#phone-otp-authentication) for deployment and migration requirements.
 
 Apply `20260730000000_AddRefreshSessions` to environments that do not already have the `refresh_tokens` table before deploying this session flow.
 
@@ -169,6 +169,229 @@ Example request body:
   "contentVariables": { "1": "12/1", "2": "3pm" }
 }
 ```
+
+## Phone OTP authentication
+
+`IsTestAuthentication` on the API is the sole mode switch. Existing customer
+creation, profiles, JWTs, refresh tokens and phone-authentication routes are
+reused. Flutter always calls the API to request and verify a challenge; no
+test secret or authentication mode is returned to the app. Legacy `PhoneOtp:*`
+mode/code settings and mobile test-OTP build flags no longer control login.
+
+### Railway configuration
+
+Use a separate access-restricted staging deployment for test accounts:
+
+```text
+ASPNETCORE_ENVIRONMENT=Staging
+IsTestAuthentication=true
+TestAuthenticationOtp=<six-digit test code>
+TestAuthenticationAllowedPhoneNumbers=+97450123456,+97450123457
+```
+
+Local Development is also supported. Supply the test code as a Railway secret
+or local environment variable, never in Flutter or checked-in appsettings.
+The allowlist must contain only explicitly authorized test accounts. Both send
+and verify reject numbers outside it without looking up customer existence.
+The response never includes the configured code. Test mode never calls Twilio.
+
+Production/live authentication:
+
+```text
+ASPNETCORE_ENVIRONMENT=Production
+IsTestAuthentication=false
+TwilioWhatsApp__AccountSid=<AC...>
+TwilioWhatsApp__AuthToken=<secret>
+TwilioVerify__ServiceSid=<VA...>
+```
+
+The existing nested Twilio keys take precedence. These flat Railway aliases
+are also supported when the corresponding existing key is empty:
+
+| Railway alias | Existing configuration key |
+| --- | --- |
+| `TWILIO_ACCOUNT_SID` | `TwilioWhatsApp__AccountSid` |
+| `TWILIO_AUTH_TOKEN` | `TwilioWhatsApp__AuthToken` |
+| `TWILIO_VERIFY_SERVICE_SID` | `TwilioVerify__ServiceSid` |
+| `TWILIO_WHATSAPP_FROM` | `TwilioWhatsApp__FromNumber` for Messaging notifications; Verify selects its sender through the Verify service |
+
+`TwilioVerify__Enabled` is no longer the authentication-mode switch. With live
+mode selected, valid Verify configuration is required. Missing or malformed
+`IsTestAuthentication` selects live mode only when live settings pass validation;
+otherwise startup fails. Test startup requires a six-digit code and a nonempty,
+valid E.164 allowlist. Production always refuses test authentication; no public
+production override is provided. All environment changes require restarting the API.
+Never make Twilio failures trigger a test-mode fallback.
+
+### Twilio provider and manual setup
+
+This project already uses **Twilio Verify** for login and **Programmable Messaging**
+for order notifications. Login continues to use Verify exclusively. Verify
+generates and checks the live code; the application never generates a second
+code or passes a locally generated code to a Messaging template.
+
+Create/configure a Verify service with six-digit codes and a WhatsApp sender.
+Associate your approved sender/Messaging Service in the Verify service's WhatsApp
+settings, then confirm authentication-template approval before testing delivery.
+Verify creates its managed Copy Code authentication templates through the
+[Bring Your Own Sender setup](https://www.twilio.com/docs/verify/whatsapp/byo).
+See [Verify authentication templates](https://www.twilio.com/docs/verify/verification-templates).
+
+The requested `diet_time_login_otp` template/body and a `TWILIO_CONTENT_OTP=HX...`
+value belong to Messaging Content configuration. An `HX...` Content SID is **not**
+passed to Verify and does not select Verify's authentication template. Verify's
+approved authentication format/Copy Code button must be configured through Verify;
+exact wording is subject to Meta's authentication-template rules. Existing
+order-notification Content SIDs remain separate and unchanged. No Messaging
+OTP fallback is implemented.
+
+Twilio's [default token lifetime](https://www.twilio.com/docs/verify/api/rate-limits-and-timeouts)
+is ten minutes. This API enforces a stricter five-minute deadline using metadata,
+including after a slow provider response. Resending an active Verify session
+does not extend its original deadline or reset failed attempts. Before starting
+a new session after expiry/consumption, the old Verify session is cancelled
+using its provider SID; a failed cancellation fails closed. Verify also consumes
+successful verifications. There is no local live-code/hash storage.
+
+### Database setup and abuse protection
+
+No suitable OTP storage existed in the checked-in model or schema snapshot.
+The API requires `public.phone_otp_challenges`, containing one metadata row per
+normalized phone: mode, opaque provider request ID, timestamps, send-window counts,
+verification-attempt count and consumption timestamp. No OTP value or hash is
+stored. Accounts, customer profiles and existing application records are unchanged.
+
+The OTP EF migration file has been removed. Before deploying the API, review
+and run the following manual SQL as the schema owner against the intended API
+database. It creates the table if absent and preserves any existing challenge
+metadata. No schema setup runs automatically at application startup.
+
+<!-- otp-schema:start -->
+```sql
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+CREATE TABLE IF NOT EXISTS public.phone_otp_challenges (
+ phone_number varchar(16) PRIMARY KEY,
+ mode varchar(4) NOT NULL,
+ provider_request_id varchar(64),
+ created_at timestamptz NOT NULL,
+ expires_at timestamptz NOT NULL,
+ next_send_at timestamptz NOT NULL,
+ send_window_started_at timestamptz NOT NULL,
+ send_count integer NOT NULL CHECK (send_count >= 0),
+ verification_attempts integer NOT NULL CHECK (verification_attempts BETWEEN 0 AND 5),
+ consumed_at timestamptz
+);
+COMMIT;
+```
+<!-- otp-schema:end -->
+
+PostgreSQL transaction-scoped advisory locks serialize sends and verifies for
+the same normalized phone across API replicas, including first-time inserts.
+Successful consumption is persisted before issuing the existing JWT session.
+Mode changes invalidate old-mode challenges. Aborted success responses cannot
+roll back committed consumption and enable simultaneous replay.
+
+Limits enforced by the server:
+
+| Rule | Enforcement |
+| --- | --- |
+| Code length | Six ASCII digits |
+| Deadline | Five minutes from issuance; active live resends preserve the deadline |
+| Verify attempts | Five per challenge; a locked active challenge cannot be reset by resending |
+| Resend | At least 60 seconds per phone, including failed send attempts |
+| Phone sends | At most five requests in a 15-minute window, stored in PostgreSQL |
+| IP requests | At most 20 send/verify requests per minute per remote IP per API process, alongside the existing global IP limiter |
+| Replay | Consumed challenges are rejected; concurrent requests consume once |
+
+The IP policy uses `HttpContext.Connection.RemoteIpAddress`, not untrusted
+request headers. Configure trusted proxy forwarding for your actual Railway
+network if individual client addresses must be restored; do not accept arbitrary
+client-supplied forwarding headers. Twilio Verify's own limits/Fraud Guard and
+WhatsApp geo permissions should also be configured for the deployment.
+
+### Existing API contracts
+
+Request a challenge (identical request in either mode):
+
+```http
+POST /api/v1/auth/phone-otp/request
+Content-Type: application/json
+
+{"phoneNumber":"+97450123456","channel":"whatsapp"}
+```
+
+`channel` is optional and defaults to `whatsapp`. E.164 inputs and formatted
+international inputs normalize to the same canonical number.
+
+```json
+{"data":{"requestId":"opaque-challenge-id","expiresInSeconds":300,"resendAfterSeconds":60}}
+```
+
+An active Verify resend returns its remaining lifetime rather than a fresh
+five-minute expiry. There is no OTP or test-mode field in the response.
+
+Verify the entered code using the existing login endpoint:
+
+```http
+POST /api/v1/auth/phone-otp
+Content-Type: application/json
+
+{"phoneNumber":"+97450123456","otp":"482913"}
+```
+
+Success returns the existing `data.accessToken`, `accessTokenExpiresAt`,
+`refreshToken`, `refreshTokenExpiresAt` and `user` session fields. First-time
+login creates the existing user/profile records; later logins reuse them.
+No separate registration/authentication system or new JWT format is introduced.
+
+Failures: `400` invalid input or unavailable test-number request; `401` invalid,
+expired, unsent or already-consumed challenge; `429` cooldown/attempt/rate limit;
+`503` provider/configuration failure. Cooldown/phone-limit responses include
+`Retry-After`. Generic failures do not disclose customer-account existence.
+Server diagnostics contain provider HTTP/error codes or missing field names,
+never code values, credentials or OTP request/response bodies.
+
+### Implementation files and verification
+
+Backend changes:
+
+- `OtpAuthenticationOptions.cs`: validated mode, allowlist, canonical phone parsing.
+- `TestOtpAuthenticationProvider.cs` and `TwilioPhoneOtpService.cs`: separate providers.
+- `PhoneOtpAuthenticationService.cs`: shared challenge policy and atomic consumption.
+- `PhoneOtpChallenge.cs`, `DietTimeDbContext.cs`, and the manual SQL above: metadata only.
+- `Abstractions.cs`, `PhoneOtpDeliveryController.cs`, `AuthenticationController.cs`, and
+  `Program.cs`: existing contracts, DI selection, per-IP policy, startup validation.
+- `Program.cs` resolves finalized JWT validation configuration consistently with
+  token issuance; existing signing, claims, authentication schemes and refresh flow remain.
+- The obsolete unrestricted `PhoneOtpVerifier.cs` and its appsettings defaults are removed.
+
+Flutter changes are in `app_environment.dart`, `otp_service.dart`,
+`otp_service_provider.dart`, `otp_auth_controller.dart`, `otp_verification_page.dart`,
+the English/Arabic OTP helper strings and the APK/TestFlight workflows. Mobile mode
+flags/code hints are removed. Both modes use the same API and server-provided
+cooldown; the initial field remains empty and supports manual entry/paste/autofill.
+
+Automated coverage includes allowlist rejection, incorrect test codes, no test
+Twilio delivery, live-code versus test-code checks, five-minute expiry, one-time
+consumption, concurrent send/verify, resend and phone limits, independent IP
+limits, startup configuration errors, production refusal, provider HTTP errors,
+idempotent manual schema setup and an existing-account/JWT/profile regression.
+HTTP provider tests use fake Twilio responses; real WhatsApp delivery and console
+approval require an operator test after configuration. No live database or
+Twilio/Railway account is changed by the test suite.
+
+Validation passed: all 414 backend unit tests, 16 PostgreSQL/API security tests,
+11 authentication contract tests, and all 545 Flutter tests.
+Flutter static analysis reports no issues in the authentication/configuration changes.
+Run the backend checks against an **isolated** PostgreSQL server:
+
+```sh
+dotnet test tests/DietTime.UnitTests --filter FullyQualifiedName~PhoneOtp
+# Set OTP_TEST_CONNECTION to an isolated admin connection before the following:
+dotnet test tests/DietTime.Meal.Api.IntegrationTests --filter 'FullyQualifiedName~OtpAuthenticationSecurityTests|FullyQualifiedName~PhoneOtpDeliveryModeTests'
+```
+
 
 ## WhatsApp notification schema deployment
 

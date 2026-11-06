@@ -459,10 +459,16 @@ public sealed class CatalogueApiTests : IAsyncLifetime
     public async Task Phone_otp_creates_user_once_and_returns_same_user_on_later_login()
     {
         if (!enabled) return;
-        var phone = $"+9745{Random.Shared.Next(1000000, 9999999)}";
+        var phone = "+97450123456"; // Explicitly allowlisted by this isolated test host.
         var request = new { phoneNumber = phone, otp = "123456", firstName = "Test", lastName = "User" };
 
+        Assert.Equal(HttpStatusCode.OK, (await client!.PostAsJsonAsync("/api/v1/auth/phone-otp/request", new { phoneNumber = phone })).StatusCode);
         var firstResponse = await client!.PostAsJsonAsync("/api/v1/auth/phone-otp", request);
+        using (var cooldownScope = factory!.Services.CreateScope()) {
+            var cooldownDb = cooldownScope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
+            await cooldownDb.Set<PhoneOtpChallenge>().ExecuteUpdateAsync(s => s.SetProperty(c => c.NextSendAt, DateTimeOffset.UtcNow.AddSeconds(-1)));
+        }
+        Assert.Equal(HttpStatusCode.OK, (await client!.PostAsJsonAsync("/api/v1/auth/phone-otp/request", new { phoneNumber = phone })).StatusCode);
         var secondResponse = await client!.PostAsJsonAsync("/api/v1/auth/phone-otp", request);
 
         Assert.Equal(HttpStatusCode.OK, firstResponse.StatusCode);
@@ -525,7 +531,7 @@ internal sealed class ApiFactory(
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?> { ["DTDBCONNECTION"] = connectionString, ["ConnectionStrings:DefaultConnection"] = connectionString, ["Jwt:Issuer"] = "DietTime.Tests", ["Jwt:Audience"] = "DietTime.Tests", ["Jwt:Key"] = "test-only-key-at-least-thirty-two-characters-long", ["PhoneOtp:Enabled"] = "true", ["PhoneOtp:TestCode"] = "123456", ["Storage:PublicBaseUrl"] = "https://cdn.test", ["Storage:BucketName"] = "test", ["Storage:ServiceUrl"] = "http://localhost:9000", ["Storage:AccessKey"] = "test", ["Storage:SecretKey"] = "test" }));
+        builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?> { ["DTDBCONNECTION"] = connectionString, ["ConnectionStrings:DefaultConnection"] = connectionString, ["Jwt:Issuer"] = "DietTime.Tests", ["Jwt:Audience"] = "DietTime.Tests", ["Jwt:Key"] = "test-only-key-at-least-thirty-two-characters-long", ["IsTestAuthentication"] = "true", ["TestAuthenticationOtp"] = "123456", ["TestAuthenticationAllowedPhoneNumbers"] = "+97455555555,+97450123456", ["Storage:PublicBaseUrl"] = "https://cdn.test", ["Storage:BucketName"] = "test", ["Storage:ServiceUrl"] = "http://localhost:9000", ["Storage:AccessKey"] = "test", ["Storage:SecretKey"] = "test" }));
         if (configureServices is not null)
             builder.ConfigureServices(configureServices);
     }

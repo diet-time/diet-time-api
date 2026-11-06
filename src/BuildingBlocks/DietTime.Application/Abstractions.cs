@@ -270,6 +270,16 @@ public interface IPhoneOtpVerifier
 {
     Task<PhoneOtpVerificationStatus> VerifyAsync(string phoneNumber, string otp, CancellationToken cancellationToken);
 }
+public interface IPhoneOtpProvider : IPhoneOtpVerifier
+{
+    Task<PhoneOtpSendResult> SendAsync(string phoneNumber, CancellationToken ct);
+    Task<bool> CancelAsync(string requestId, CancellationToken ct);
+}
+public interface IPhoneOtpAuthenticationService : IPhoneOtpVerifier
+{
+    Task<PhoneOtpSendResult> SendAsync(string phoneNumber, CancellationToken ct);
+}
+public sealed record PhoneOtpSendResult(int StatusCode, string? RequestId = null, int ExpiresInSeconds = 300, int ResendAfterSeconds = 60, int RetryAfterSeconds = 0);
 public enum PhoneOtpVerificationStatus { Valid, Invalid, Disabled, TooManyAttempts }
 public enum PhoneOtpAuthStatus { Success, InvalidOtp, Disabled, Conflict, TooManyAttempts }
 public sealed record PhoneOtpAuthResult(PhoneOtpAuthStatus Status, AuthSessionResponse? Session = null);
