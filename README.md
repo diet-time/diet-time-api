@@ -408,38 +408,27 @@ dotnet test tests/DietTime.Meal.Api.IntegrationTests --filter 'FullyQualifiedNam
 
 ## WhatsApp notification schema deployment
 
-Before deploying the current notification worker, apply the existing migration
-[`20261105010000_WhatsAppNotifications`](src/BuildingBlocks/DietTime.Persistence/Migrations/20261105010000_WhatsAppNotifications.cs)
-to the same PostgreSQL database used by the API, as the schema owner. Application
-startup does not apply this migration automatically.
+The WhatsApp notification schema update was applied directly to the database.
+Its EF migration file has been removed. Application startup does not apply these
+schema changes automatically; additional databases require the same schema
+update before running the notification worker.
 
 `The required column 'content_sid' was not present in the results of a 'FromSql'
 operation` indicates that the worker's `SELECT * FROM public.order_notifications`
 returned an older table shape than the mapped `OrderNotification` entity. The
-migration adds `content_sid` together with `event_key`, `payload_json`,
+schema update adds `content_sid` together with `event_key`, `payload_json`,
 `recipient_phone`, `template_name`, `provider_status`, `delivered_at`, and `read_at`;
 it also updates history nullability, creates the webhook receipt table and adds
 notification deduplication indexes. Adding only `content_sid` can leave the next
 missing-column error unresolved. Do not remove fields from the mapping to hide
 this deployment mismatch.
 
-If EF migration history is maintained for this database, run from `diet-time-api`
-with the API configuration pointing to the intended database:
+The direct SQL update retains existing notifications and does not replay events
+or mark them as sent. It does not register an EF migration-history entry.
+Unique indexes require non-null event keys and message SIDs to be unique;
+resolve duplicates explicitly rather than deleting history.
 
-```sh
-dotnet ef database update 20261105010000_WhatsAppNotifications --project src/BuildingBlocks/DietTime.Persistence --startup-project src/Apis/DietTime.Meal.Api
-```
-
-Check pending migrations first: `database update` also applies any earlier pending
-migrations. For databases maintained using manual SQL instead of EF history,
-review and execute the existing migration's complete `Up` SQL in a transaction,
-with its five-second lock timeout. Its column/table/index additions use
-`IF NOT EXISTS`. Existing notifications are retained; no events are replayed or
-marked as sent by the migration. Unique-index creation will fail if existing
-non-null event keys or message SIDs are duplicated; resolve those records explicitly
-rather than deleting history.
-
-Read-only verification after applying the migration:
+Read-only verification after applying the schema update:
 
 ```sql
 SELECT column_name, data_type, is_nullable
