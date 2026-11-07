@@ -11,6 +11,7 @@ public sealed partial class UpcomingMealService
 {
     public async Task<TomorrowMenuResponse?> GetTomorrowAsync(Guid orderId, Guid userId, string language, CancellationToken ct)
     {
+        await using var snapshot = db.Database.CurrentTransaction == null ? await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, ct) : null;
         var order = await OwnedOrderAsync(orderId, userId, ct);
         if (order is null)
         {
@@ -20,6 +21,10 @@ public sealed partial class UpcomingMealService
         var now = clock.GetUtcNow();
         var today = SubscriptionMenuRules.QatarToday(now);
         var tomorrow = today.AddDays(1);
+        var schedules = await PackageScheduleProjection.LoadAsync(db, [order], now, ct);
+        var package = schedules[orderId];
+        var scheduledForTomorrow = false;
+        string? dayStatus = null;
         var dates = SubscriptionMenuRules.ServiceDates(order.StartDate, order.EndDate,
             order.DeliveryDays.Select(d => d.DayOfWeek).ToHashSet()).ToArray();
         DateOnly? first = dates.Length > 0 ? dates[0] : null;
@@ -48,9 +53,12 @@ public sealed partial class UpcomingMealService
         {
             var day = await db.Set<SubscriptionServiceDay>().AsNoTracking().Include(d => d.Selections)
                 .SingleOrDefaultAsync(d => d.OrderId == orderId && d.ServiceDate == tomorrow, ct);
-            if (day is null)
+            dayStatus = day?.Status;
+            if (day is null && package.PauseApprovalStatus == "APPROVED" && package.PauseStartDate <= tomorrow && package.ResumeDate > tomorrow)
+                response = Empty("NO_DELIVERY", "Your approved pause suspends deliveries tomorrow.");
+            else if (day is null)
                 response = Empty("SERVICE_DAYS_MISSING", "Your order is saved, but its delivery schedule needs to be initialized by our team.");
-            else if (day.Status is "SKIPPED" or "CANCELLED")
+            else if (!SubscriptionScheduleRules.IsScheduled(order, day))
                 response = Empty("NO_DELIVERY", "Tomorrow’s delivery has been skipped or cancelled.");
             else if (day.MealPlanTemplateId == null || day.MenuWeekNumber == null && day.ServiceSequence == null ||
                 day.MealCount == null || day.SnackCount == null)
@@ -64,12 +72,16 @@ public sealed partial class UpcomingMealService
                     MenuWeekNumber = await MenuWeekAsync(day, ct)
                 };
         }
+        scheduledForTomorrow = dayStatus != null && package.TomorrowScheduled;
+        response = response with { IsScheduledForDelivery = scheduledForTomorrow, ServiceDayStatus = dayStatus, PackageSchedule = package };
         logger?.LogInformation("Tomorrow menu resolved. UserId={UserId} CustomerProfileId={CustomerProfileId} OrderId={OrderId} SubscriptionId={SubscriptionId} OrderStatus={OrderStatus} QatarToday={QatarToday} Tomorrow={Tomorrow} ServiceDayId={ServiceDayId} TemplateId={TemplateId} TemplateVersion={TemplateVersion} MenuWeek={MenuWeek} Weekday={Weekday} AvailableDishCount={AvailableDishCount} SelectionCount={SelectionCount} Status={Status} EmptyReason={EmptyReason}",
             userId, order.CustomerProfileId, order.Id, response.SubscriptionId, order.Status, today, tomorrow,
             response.SubscriptionServiceDayId, response.MenuTemplateId, response.MenuTemplateVersion, response.MenuWeekNumber,
             MenuWeekdayExtensions.FromDate(tomorrow), response.AvailableMeals.Count + response.AvailableSnacks.Count,
             response.SelectedMeals.Count, response.SelectionStatus, response.EmptyReason ?? response.ReviewReason);
-        return await WithPurchasedPlanAsync(response, order, template, ct);
+        var result = await WithPurchasedPlanAsync(response, order, template, ct);
+        if (snapshot != null) await snapshot.CommitAsync(ct);
+        return result;
     }
 
     private async Task<(int Meals, int Snacks)> EntitlementsAsync(Order order, CancellationToken ct)
@@ -168,7 +180,7 @@ public sealed partial class UpcomingMealService
         var day = await LockDayAsync(dayId, orderId, ct);
         if (day.SelectionLocked || day.SelectionStatus == "LOCKED" || day.CustomerConfirmedAt != null || day.AutoFinalizedAt != null ||
             clock.GetUtcNow() < SubscriptionMenuRules.TomorrowCutoff(day.ServiceDate)) return;
-        var order = await db.Orders.AsNoTracking().SingleAsync(o => o.Id == orderId, ct);
+        var order = await db.Orders.AsNoTracking().Include(o => o.DeliveryDays).SingleAsync(o => o.Id == orderId, ct);
         if (!OrderWorkflowPolicy.CanFulfill(order)) return;
         var chosen = new List<MealPlanSlotOption>();
         string? assignmentReview = null;
@@ -268,8 +280,7 @@ public sealed partial class UpcomingMealService
     }
 
     private static bool Active(Order order, SubscriptionServiceDay day) =>
-        OrderWorkflowPolicy.CanFulfill(order) && day.Status is "PLANNED" or "CONFIRMED" &&
-        order.StartDate <= day.ServiceDate && order.EndDate >= day.ServiceDate;
+        SubscriptionScheduleRules.IsScheduled(order, day);
 
     private async Task<TomorrowMenuResponse> TomorrowResponseAsync(SubscriptionServiceDay day, Order order, string language, CancellationToken ct)
     {

@@ -106,7 +106,7 @@ public sealed partial class UpcomingMealService(
             .Where(d => d.OrderId == orderId && d.Status != "CANCELLED" && d.Status != "SKIPPED" &&
                 (order.Status != "CANCELLED" || d.Status == "DELIVERED" || d.Status == "COLLECTED"))
             .OrderBy(d => d.ServiceDate).ThenBy(d => d.Id).ToListAsync(ct);
-        return days.Select(d =>
+        return days.Where(d => d.Status is "DELIVERED" or "COLLECTED" || SubscriptionScheduleRules.IsScheduled(order, d)).Select(d =>
         {
             var reason = LockReason(d, order);
             return new UpcomingMealDayResponse(d.SubscriptionId, d.Id, d.ServiceDate,

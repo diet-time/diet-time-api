@@ -63,5 +63,8 @@ public sealed record TomorrowMenuResponse(Guid SubscriptionId, Guid? Subscriptio
     public Guid? MenuTemplateId { get; init; }
     public int? MenuTemplateVersion { get; init; }
     public int? MenuWeekNumber { get; init; }
+    public bool? IsScheduledForDelivery { get; init; }
+    public string? ServiceDayStatus { get; init; }
+    public PackageScheduleSummaryResponse? PackageSchedule { get; init; }
     public string? EmptyReason { get; init; }
 }

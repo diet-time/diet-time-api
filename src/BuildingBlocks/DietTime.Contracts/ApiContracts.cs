@@ -438,7 +438,10 @@ public sealed record CustomerOrderSummaryResponse(
     DateTimeOffset PlacedAt,
     string FulfillmentMethod = FulfillmentMethods.HomeDelivery,
     TakeawayBranchResponse? TakeawayBranch = null,
-    int? MealCount = null, int? SnackCount = null, OrderReviewResponse? Review = null);
+    int? MealCount = null, int? SnackCount = null, OrderReviewResponse? Review = null)
+{
+    public PackageScheduleSummaryResponse? PackageSchedule { get; init; }
+}
 public sealed record CustomerOrdersResponse(
     IReadOnlyList<CustomerOrderSummaryResponse> Items,
     int PageNumber,

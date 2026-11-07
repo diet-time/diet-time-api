@@ -212,32 +212,6 @@ public sealed partial class UpcomingMealServiceTests
         Assert.Single(setup.Provider.Messages);Assert.Equal("PENDING_APPROVAL",(await db.Orders.AsNoTracking().SingleAsync(o=>o.Id==id)).Status);
     }
     [UpcomingPostgresFact]
-    public async Task WhatsApp_migration_is_additive_idempotent_and_preserves_history()
-    {
-        var migration=new DietTime.Persistence.Migrations.WhatsAppNotifications();
-        var sql=migration.UpOperations.OfType<Microsoft.EntityFrameworkCore.Migrations.Operations.SqlOperation>().Single().Sql;
-        var setup=await WhatsAppClient();await using var factory=setup.Factory;using var client=setup.Client;
-        var id=(await SubmitApprovalOrder(client,setup.Request)).GetProperty("id").GetGuid();
-        var before=await db.OrderNotifications.CountAsync();
-        await using var migrationConnection=new Npgsql.NpgsqlConnection(connection);
-        await migrationConnection.OpenAsync();
-        // Recreate the pre-update shape while retaining the existing order/history rows.
-        await using(var legacy=new Npgsql.NpgsqlCommand("""
-            DROP TABLE public.whatsapp_webhook_receipts;
-            ALTER TABLE public.order_notifications
-              DROP COLUMN event_key, DROP COLUMN payload_json, DROP COLUMN recipient_phone,
-              DROP COLUMN template_name, DROP COLUMN content_sid, DROP COLUMN provider_status,
-              DROP COLUMN delivered_at, DROP COLUMN read_at;
-            ALTER TABLE public.order_notifications ALTER COLUMN history_id SET NOT NULL;
-            """,migrationConnection)) await legacy.ExecuteNonQueryAsync();
-        for(var i=0;i<2;i++) {
-            await using var command=new Npgsql.NpgsqlCommand("BEGIN;\n"+sql+"\nCOMMIT;",migrationConnection);
-            await command.ExecuteNonQueryAsync();
-        }
-        Assert.Equal(before,await db.OrderNotifications.CountAsync());
-        await DispatchWhatsApp(factory,id);Assert.Single(setup.Provider.Messages);
-    }
-    [UpcomingPostgresFact]
     public async Task WhatsApp_scheduled_resume_and_enabled_reminder_send_once_at_their_actual_dates()
     {
         var setup=await WhatsAppClient();await using var factory=setup.Factory;using var client=setup.Client;

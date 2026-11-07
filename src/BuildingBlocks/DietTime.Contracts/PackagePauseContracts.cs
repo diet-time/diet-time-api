@@ -1,4 +1,7 @@
 namespace DietTime.Contracts;
+public sealed record PackageScheduleSummaryResponse(string DisplayStatus, string? PauseApprovalStatus,
+    DateOnly? PauseStartDate, DateOnly? ResumeDate, DateOnly RevisedEndDate, int RemainingServiceDays,
+    DateOnly? NextScheduledDelivery, bool TomorrowScheduled, DateTimeOffset ServerNow);
 public sealed record PausePreviewRequest(DateOnly PauseStartDate, DateOnly ResumeDate, bool MoveRemaining = false);
 public sealed record PausePackageRequest(Guid CommandId, long ExpectedRowVersion, string ScheduleVersion,
     DateOnly PauseStartDate, DateOnly ResumeDate, string? Reason, bool MoveRemaining = false);
@@ -16,6 +19,8 @@ public sealed record PackageManagementResponse(Guid OrderId, long RowVersion, Da
     IReadOnlyList<DateOnly> EligiblePauseDates, string? PauseUnavailableReason,
     PackagePauseResponse? CurrentPause, bool CanResumeEarly)
 {
+    public string? DisplayStatus { get; init; }
+    public string? PauseApprovalStatus { get; init; }
     public DateOnly? FirstDeliveryAfterPause { get; init; }
     public PackageChangeResponse? LatestRequest { get; init; }
 }

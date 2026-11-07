@@ -314,6 +314,7 @@ public sealed class OrderService(
         int pageSize,
         CancellationToken cancellationToken)
     {
+        await using var snapshot = db.Database.CurrentTransaction == null ? await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken) : null;
         if (!await db.CustomerProfiles.AsNoTracking().AnyAsync(
                 x => x.Id == customerProfileId && x.UserId == userId && x.IsActive, cancellationToken))
             return null;
@@ -325,17 +326,19 @@ public sealed class OrderService(
             query = query.Where(x => x.Status == normalized);
         }
         var count = await query.CountAsync(cancellationToken);
-        var page = await query.Include(x => x.Meals).OrderByDescending(x => x.PlacedAt).ThenByDescending(x => x.Id)
+        var page = await query.Include(x => x.Meals).Include(x => x.DeliveryDays).OrderByDescending(x => x.PlacedAt).ThenByDescending(x => x.Id)
             .Skip((pageNumber - 1) * pageSize).Take(pageSize)
             .ToListAsync(cancellationToken);
         var typeIds = page.SelectMany(x => x.Meals).Select(x => x.MealTypeId).Distinct().ToArray();
         var codes = await db.MealTypes.AsNoTracking().Where(x => typeIds.Contains(x.Id))
             .ToDictionaryAsync(x => x.Id, x => x.Code, cancellationToken);
+        var schedules = await PackageScheduleProjection.LoadAsync(db, page, clock.GetUtcNow(), cancellationToken);
         var items = page.Select(x => new CustomerOrderSummaryResponse(
                 x.Id, x.OrderNumber, x.PlanName, x.PlanDurationName, x.StartDate, x.EndDate,
                 x.Status, x.PaymentStatus, x.TotalAmount, x.CurrencyCode.Trim(), x.PlacedAt, x.FulfillmentMethod,
                 x.TakeawayBranchId.HasValue ? new TakeawayBranchResponse(x.TakeawayBranchId.Value, x.TakeawayBranchName!, x.TakeawayBranchAddress) : null,
-                EntitlementCount(x, codes, false), EntitlementCount(x, codes, true), MapReview(x))).ToArray();
+                EntitlementCount(x, codes, false), EntitlementCount(x, codes, true), MapReview(x)) { PackageSchedule = schedules[x.Id] }).ToArray();
+        if (snapshot != null) await snapshot.CommitAsync(cancellationToken);
         return new(items, pageNumber, pageSize, count);
     }
 

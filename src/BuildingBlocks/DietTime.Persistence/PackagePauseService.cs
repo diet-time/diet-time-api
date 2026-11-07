@@ -30,6 +30,7 @@ public sealed partial class UpcomingMealService : IPackageManagementService
 
     public async Task<PackageManagementResponse> GetPackageAsync(Guid orderId, Guid userId, CancellationToken ct)
     {
+        await using var snapshot = db.Database.CurrentTransaction == null ? await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, ct) : null;
         var order = await OwnedOrderAsync(orderId, userId, ct) ?? throw Missing();
         var days = await PackageDaysAsync(orderId, ct);
         var now = clock.GetUtcNow(); var today = SubscriptionMenuRules.QatarToday(now);
@@ -49,15 +50,19 @@ public sealed partial class UpcomingMealService : IPackageManagementService
                 canResume = true;
             }
         }
-        return new(orderId, order.RowVersion, now, pause == null ? order.Status : PauseStatus(pause, today), remaining.Length,
-            remaining.Where(d => d.ServiceDate >= today).Select(d => (DateOnly?)d.ServiceDate).Min(), order.EndDate,
+        var summary = SubscriptionScheduleRules.Summary(order, days, pause, latestRequest, now);
+        var result = new PackageManagementResponse(orderId, order.RowVersion, now, pause == null ? order.Status : PauseStatus(pause, today), remaining.Length,
+            summary.NextScheduledDelivery, order.EndDate,
             eligible, eligible.Length > 0 ? null : pending ? "A package change is awaiting staff confirmation." : pause != null ? "This package already has a scheduled pause." :
                 !OrderWorkflowPolicy.CanFulfill(order) ? "This package is not eligible for pausing." : "There are no unlocked future service days available to pause.",
             pause == null ? null : PauseResponse(pause, today), canResume) {
+                DisplayStatus = summary.DisplayStatus, PauseApprovalStatus = summary.PauseApprovalStatus,
                 LatestRequest = latestRequest == null ? null : ChangeResponse(latestRequest),
-                FirstDeliveryAfterPause = pause == null ? null : days.Where(HasEntitlement)
+                FirstDeliveryAfterPause = pause == null ? null : days.Where(d => SubscriptionScheduleRules.IsScheduled(order, d))
                     .Where(d => d.ServiceDate >= pause.ResumeDate).Select(d => (DateOnly?)d.ServiceDate).Min()
             };
+        if (snapshot != null) await snapshot.CommitAsync(ct);
+        return result;
     }
 
     private static (SubscriptionServiceDay[] Moving, IReadOnlyDictionary<Guid, DateOnly> Schedule, PausePreviewResponse Preview) BuildPause(
