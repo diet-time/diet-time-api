@@ -223,6 +223,19 @@ valid E.164 allowlist. Production always refuses test authentication; no public
 production override is provided. All environment changes require restarting the API.
 Never make Twilio failures trigger a test-mode fallback.
 
+If Railway restarts with a live-authentication configuration exception, set the
+three live variables above on the **API service in the deployed environment**
+and redeploy. `TwilioVerify__ServiceSid` must be a Verify Service SID (`VA` plus
+32 hexadecimal characters), not a Messaging Service SID (`MG`) or Content SID
+(`HX`). `TwilioWhatsApp__AccountSid` must be `AC` plus 32 hexadecimal characters,
+and `TwilioWhatsApp__AuthToken` must be nonempty. Enter actual values without
+angle brackets or surrounding quotes. If using flat aliases, remove any stale,
+nonempty nested variables that would override them. Startup errors identify
+invalid setting names without printing credentials. Disabling
+`TwilioWhatsApp__Enabled` or `TwilioVerify__Enabled` does not bypass live login
+validation; for authorized test accounts use the separate staging configuration
+above.
+
 ### Twilio provider and manual setup
 
 This project already uses **Twilio Verify** for login and **Programmable Messaging**

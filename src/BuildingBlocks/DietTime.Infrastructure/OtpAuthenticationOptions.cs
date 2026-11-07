@@ -35,10 +35,21 @@ public sealed class OtpAuthenticationOptions
             if (allowed.Count == 0)
                 throw new InvalidOperationException("Test authentication requires a non-empty TestAuthenticationAllowedPhoneNumbers allowlist.");
         }
-        else if (!Regex.IsMatch(verify.ServiceSid ?? "", @"\AVA[0-9a-fA-F]{32}\z") ||
-                 !Regex.IsMatch(credentials.AccountSid ?? "", @"\AAC[0-9a-fA-F]{32}\z") ||
-                 string.IsNullOrWhiteSpace(credentials.AuthToken))
-            throw new InvalidOperationException("Live authentication requires TwilioVerify:ServiceSid, TwilioWhatsApp:AccountSid and TwilioWhatsApp:AuthToken (or their documented Railway aliases).");
+        else
+        {
+            // Report setting names and expected formats only; never include credential values.
+            var invalid = new List<string>();
+            if (!Regex.IsMatch(verify.ServiceSid ?? "", @"\AVA[0-9a-fA-F]{32}\z"))
+                invalid.Add("TwilioVerify__ServiceSid (alias TWILIO_VERIFY_SERVICE_SID; VA followed by 32 hexadecimal characters)");
+            if (!Regex.IsMatch(credentials.AccountSid ?? "", @"\AAC[0-9a-fA-F]{32}\z"))
+                invalid.Add("TwilioWhatsApp__AccountSid (alias TWILIO_ACCOUNT_SID; AC followed by 32 hexadecimal characters)");
+            if (string.IsNullOrWhiteSpace(credentials.AuthToken))
+                invalid.Add("TwilioWhatsApp__AuthToken (alias TWILIO_AUTH_TOKEN; non-empty)");
+            if (invalid.Count > 0)
+                throw new InvalidOperationException("Live authentication configuration is missing or invalid: " +
+                    string.Join("; ", invalid) + ". Set these variables on the API service and redeploy. " +
+                    "Non-empty nested Twilio settings take precedence over aliases.");
+        }
         return new() {
             IsTestAuthentication = test,
             // Live mode never retains the configured test OTP or allowlist.

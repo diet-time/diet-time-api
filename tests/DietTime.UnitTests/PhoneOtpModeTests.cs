@@ -25,6 +25,31 @@ public sealed class PhoneOtpModeTests
     public void Invalid_live_configuration_fails_startup(string? mode) =>
         Assert.Throws<InvalidOperationException>(() => OtpAuthenticationOptions.Load(Config(mode), "Staging", new(), new()));
 
+    [Theory]
+    [InlineData("service")]
+    [InlineData("account")]
+    [InlineData("token")]
+    public void Live_configuration_error_identifies_only_invalid_settings_without_credential_values(string invalidSetting)
+    {
+        var verify = Live();
+        var credentials = Credentials();
+        const string invalidSid = "invalid-secret-value";
+        if (invalidSetting == "service") verify.ServiceSid = invalidSid;
+        if (invalidSetting == "account") credentials.AccountSid = invalidSid;
+        if (invalidSetting == "token") credentials.AuthToken = " ";
+
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            OtpAuthenticationOptions.Load(Config("false"), "Production", verify, credentials));
+
+        Assert.Equal(invalidSetting == "service", error.Message.Contains("TwilioVerify__ServiceSid"));
+        Assert.Equal(invalidSetting == "account", error.Message.Contains("TwilioWhatsApp__AccountSid"));
+        Assert.Equal(invalidSetting == "token", error.Message.Contains("TwilioWhatsApp__AuthToken"));
+        Assert.DoesNotContain(invalidSid, error.Message);
+        Assert.DoesNotContain(Live().ServiceSid, error.Message);
+        Assert.DoesNotContain(Credentials().AccountSid, error.Message);
+        Assert.DoesNotContain(Credentials().AuthToken, error.Message);
+    }
+
     [Fact]
     public void Production_refuses_fixed_code_authentication() =>
         Assert.Throws<InvalidOperationException>(() => OtpAuthenticationOptions.Load(Config("true"), "Production", new(), new()));
