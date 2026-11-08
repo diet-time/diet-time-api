@@ -22,6 +22,73 @@ public sealed class CatalogueApiTests : IAsyncLifetime
     public async Task InitializeAsync() { if (!enabled) return; postgres = new PostgreSqlBuilder().WithImage("postgres:16-alpine").WithDatabase("diettime_test").WithUsername("postgres").WithPassword("postgres").Build(); await postgres.StartAsync(); factory = new(postgres.GetConnectionString()); client = factory.CreateClient(); await SeedAsync(); client.DefaultRequestHeaders.Add("X-Development-User-Id", customerUserId.ToString()); }
     public async Task DisposeAsync() { client?.Dispose(); if (factory is not null) await factory.DisposeAsync(); if (postgres is not null) await postgres.DisposeAsync(); }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Publishing_menu_carries_prices_forward_atomically_with_or_without_a_draft(bool saveDraftFirst)
+    {
+        if (!enabled) return;
+        using var scope = factory!.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
+        var service = scope.ServiceProvider.GetRequiredService<IAdminMealService>();
+        var source = await PrepareVersionPricingAsync(db);
+        var request = new CreatePlanRequest(source.Code, source.PlanType, source.DurationDays,
+            source.IsCustomizable, source.ValidFrom, source.ValidUntil,
+            source.Translations.Select(t => new AdminTranslationRequest(t.LanguageCode, t.Name, t.ShortDescription, t.FullDescription)).ToArray(), Publish: true);
+        var targetId = source.Id;
+        if (saveDraftFirst)
+        {
+            var draft = await service.UpdatePlanAsync(targetId, request with { Publish = false }, null, default);
+            targetId = draft!.Id;
+            Assert.False(await db.MealPlanPrices.AnyAsync(price => price.MealPlanTemplateId == targetId));
+            Assert.Contains(await PurchasablePlanPrices.Query(db, DateTimeOffset.UtcNow).Select(price => price.Id).ToArrayAsync(), id => id == classicWeekPriceId);
+        }
+        var published = await service.UpdatePlanAsync(targetId, request, null, default);
+        db.ChangeTracker.Clear();
+        var copy = await db.MealPlanPrices.Include(price => price.Translations)
+            .SingleAsync(price => price.MealPlanTemplateId == published!.Id);
+        Assert.NotEqual(classicWeekPriceId, copy.Id);
+        Assert.Equal(300m, copy.Amount);
+        Assert.Equal(275m, copy.DiscountedPrice);
+        Assert.Equal(2, copy.Translations.Count);
+        Assert.Equal(planId, (await db.MealPlanPrices.FindAsync(classicWeekPriceId))!.MealPlanTemplateId);
+        Assert.Contains(await PurchasablePlanPrices.Query(db, DateTimeOffset.UtcNow).Select(price => price.Id).ToArrayAsync(), id => id == copy.Id);
+        Assert.DoesNotContain(await PurchasablePlanPrices.Query(db, DateTimeOffset.UtcNow).Select(price => price.Id).ToArrayAsync(), id => id == classicWeekPriceId);
+    }
+
+    [Fact]
+    public async Task Incompatible_price_rolls_back_publication_and_keeps_the_previous_menu_purchasable()
+    {
+        if (!enabled) return;
+        using var scope = factory!.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
+        var source = await PrepareVersionPricingAsync(db);
+        var request = new CreatePlanRequest(source.Code, source.PlanType, source.DurationDays + 1,
+            source.IsCustomizable, source.ValidFrom, source.ValidUntil,
+            source.Translations.Select(t => new AdminTranslationRequest(t.LanguageCode, t.Name, t.ShortDescription, t.FullDescription)).ToArray(), Publish: true);
+        var error = await Assert.ThrowsAsync<TemplateDayException>(() => scope.ServiceProvider.GetRequiredService<IAdminMealService>()
+            .UpdatePlanAsync(source.Id, request, null, default));
+        Assert.Equal("PRICING_REVIEW_REQUIRED", error.Code);
+        db.ChangeTracker.Clear();
+        Assert.True((await db.MealPlanTemplates.FindAsync(planId))!.IsLatest);
+        Assert.Single(await db.MealPlanTemplates.Where(plan => plan.VersionGroupId == source.VersionGroupId).ToArrayAsync());
+        Assert.Contains(await PurchasablePlanPrices.Query(db, DateTimeOffset.UtcNow).Select(price => price.Id).ToArrayAsync(), id => id == classicWeekPriceId);
+    }
+
+    private async Task<MealPlanTemplate> PrepareVersionPricingAsync(DietTimeDbContext db)
+    {
+        var source = await db.MealPlanTemplates.Include(plan => plan.Translations).Include(plan => plan.Prices).SingleAsync(plan => plan.Id == planId);
+        var package = new MealPackageOption { Id = Guid.NewGuid(), Name = "One meal", MealCount = 1, SnackCount = 0, IsActive = true };
+        db.MealPackageOptions.Add(package);
+        foreach (var price in source.Prices) price.IsActive = price.Id == classicWeekPriceId;
+        var live = source.Prices.Single(price => price.Id == classicWeekPriceId);
+        live.PackageCode = "WEEK";
+        live.PackageOptionId = package.Id;
+        live.DiscountedPrice = 275m;
+        await db.SaveChangesAsync();
+        return source;
+    }
+
     [Fact] public async Task Meal_list_returns_only_configured_slot_options() { if (!enabled) return; var response = await client!.GetAsync($"/api/v1/meal-plans/{planId}/meals?templateDayId={dayId}"); Assert.True(response.IsSuccessStatusCode); Assert.Contains("DT-BRK-0001", await response.Content.ReadAsStringAsync()); }
     [Fact] public async Task Meal_list_filters_by_meal_type() { if (!enabled) return; Assert.True((await client!.GetAsync($"/api/v1/meal-plans/{planId}/meals?templateDayId={dayId}&mealType=BREAKFAST")).IsSuccessStatusCode); }
     [Fact] public async Task Meal_list_filters_by_plan_and_day() { if (!enabled) return; var body = await client!.GetStringAsync($"/api/v1/meal-plans/{planId}/meals?templateDayId={dayId}"); Assert.Contains(mealId.ToString(), body, StringComparison.OrdinalIgnoreCase); }

@@ -1030,6 +1030,7 @@ public sealed class AdminMealService(
         var requested = await db.MealPlanTemplates.AsNoTracking().Where(x => x.Id == planId).Select(x => new { x.VersionGroupId }).SingleOrDefaultAsync(ct);
         if (requested is null) return null;
         var p = await db.MealPlanTemplates.Include(x => x.Translations)
+            .Include(x => x.Prices)
             .Include(x => x.Days).ThenInclude(x => x.Slots).ThenInclude(x => x.Options)
             .Include(x => x.Days).ThenInclude(x => x.Slots).ThenInclude(x => x.Translations)
             .SingleAsync(x => x.VersionGroupId == requested.VersionGroupId && x.IsLatest, ct);
@@ -1047,6 +1048,18 @@ public sealed class AdminMealService(
             ? MergeWeekRequest(p.Days, request.Days, request.WeekNumber.Value)
             : request.Days ?? p.Days.Select(ToUpsertPlanDay).ToArray();
         if (request.Publish) { ValidatePlanForPublication(request, effectiveDays, cycleWeeks); await RequirePackageCapacityAsync(effectiveDays, ct); }
+        // Saving a draft never touches live prices. On publish, use the most recent
+        // published version, including prices edited while this draft was being prepared.
+        var pricingSource = request.Publish
+            ? await db.MealPlanTemplates
+                .Include(x => x.Prices).ThenInclude(x => x.Translations)
+                .Include(x => x.Prices).ThenInclude(x => x.PackageOption)
+                .Where(x => x.VersionGroupId == p.VersionGroupId && x.IsPublished)
+                .OrderByDescending(x => x.VersionNumber).FirstOrDefaultAsync(ct)
+            : null;
+        var pricingDurations = pricingSource is not null
+            ? await db.MealPlanPricePackages.AsNoTracking().ToArrayAsync(ct)
+            : [];
         var now = clock.GetUtcNow();
         if (p.IsPublished)
         {
@@ -1067,6 +1080,9 @@ public sealed class AdminMealService(
             }
             else if (request.Days is not null) AddPlanStructure(draft, request.Days, now, userId);
             else ClonePlanStructure(draft, p.Days, now, userId);
+            if (pricingSource is not null)
+                foreach (var price in PlanPricingPublication.Prepare(pricingSource, draft, pricingDurations, now, userId))
+                    draft.Prices.Add(price);
             db.Add(draft); await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return new(draft.Id, true);
         }
         p.Code = request.Code; p.PlanType = request.PlanType; p.DurationDays = request.DurationDays; p.CycleWeeks = cycleWeeks; p.IsCustomizable = request.IsCustomizable; p.IsPublished = request.Publish; p.ValidFrom = request.ValidFrom; p.ValidUntil = request.ValidUntil; p.UpdatedAt = now; p.UpdatedBy = userId; p.RowVersion++;
@@ -1075,6 +1091,9 @@ public sealed class AdminMealService(
         {
             ReconcilePlanStructure(p, request.Days, request.WeekNumber, now, userId);
         }
+        if (pricingSource is not null)
+            foreach (var price in PlanPricingPublication.Prepare(pricingSource, p, pricingDurations, now, userId))
+                p.Prices.Add(price);
         await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return new(p.Id, false);
     }
     public async Task<AdminPlanImageResponse?> AddPlanImageAsync(Guid planId, SaveMediaRequest request, Guid? userId, CancellationToken ct)
