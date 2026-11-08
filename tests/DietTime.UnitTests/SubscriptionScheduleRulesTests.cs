@@ -61,4 +61,25 @@ public sealed class SubscriptionScheduleRulesTests
         order.Status = "ACTIVE"; var resumed = Pause(); resumed.Status = "RESUMED";
         Assert.Equal("ACTIVE", SubscriptionScheduleRules.Summary(order, [], resumed, null, new(2026, 11, 8, 10, 0, 0, TimeSpan.Zero)).DisplayStatus);
     }
+
+    [Theory]
+    [InlineData("CANCELLED")]
+    [InlineData("REJECTED")]
+    [InlineData("COMPLETED")]
+    public void Terminal_orders_never_expose_remaining_or_upcoming_services(string status)
+    {
+        var order = Order(); order.Status = status;
+        var day = new SubscriptionServiceDay {
+            ServiceDate = new(2026, 11, 9), Status = "CONFIRMED",
+            SelectionLocked = true, CustomerConfirmedAt = DateTimeOffset.UtcNow
+        };
+        var result = SubscriptionScheduleRules.Summary(order, [day], Pause(), null,
+            new(2026, 11, 8, 10, 0, 0, TimeSpan.Zero));
+        Assert.Equal(status, result.DisplayStatus);
+        Assert.Equal(0, result.RemainingServiceDays);
+        Assert.Null(result.NextScheduledDelivery);
+        Assert.False(result.TomorrowScheduled);
+        Assert.Equal("CONFIRMED", day.Status);
+        Assert.True(day.SelectionLocked);
+    }
 }

@@ -134,14 +134,14 @@ public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, 
             if (action == "cancel" && (previous == "CONFIRMED" && order.StartDate <= today || await db.Set<SubscriptionServiceDay>().AnyAsync(d => d.OrderId == id &&
                 (d.SelectionLocked || d.Status == "DELIVERED" || d.Status == "COLLECTED" || d.Status == "PREPARING" || d.Status == "OUT_FOR_DELIVERY"), ct)))
                 throw Error(409, "cancellation_review_required", "Cancellation is unavailable after the service period or preparation starts. Contact Diet Time.");
-            if (action == "cancel") {
-                if (!customerUserId.HasValue) eventCode = "ORDER_CANCELLED";
+            if (action is "cancel" or "reject") {
+                if (action == "cancel" && !customerUserId.HasValue) eventCode = "ORDER_CANCELLED";
                 await db.Set<SubscriptionServiceDay>().Where(d => d.OrderId == id && d.ServiceDate >= today &&
                     d.Status != "DELIVERED" && d.Status != "COLLECTED").ExecuteUpdateAsync(s => s.SetProperty(d => d.Status, "CANCELLED")
                         .SetProperty(d => d.SelectionLocked, true).SetProperty(d => d.Revision, d => d.Revision + 1), ct);
             }
             order.Status = next;
-            if (next is "REJECTED" or "CANCELLED" && order.PaymentStatus is "PAID" or "PARTIALLY_REFUNDED") order.PaymentStatus = PaymentStatuses.RefundPending;
+            if (next is "REJECTED" or "CANCELLED" && order.PaymentStatus == PaymentStatuses.Paid) order.PaymentStatus = PaymentStatuses.RefundPending;
         }
         order.RowVersion++; order.UpdatedAt = now; order.UpdatedBy = actor;
         var history = new OrderStatusHistory { Id = Guid.NewGuid(), OrderId = id, PreviousStatus = previous, Status = order.Status,

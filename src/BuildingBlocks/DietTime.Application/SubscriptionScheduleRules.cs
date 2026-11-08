@@ -27,7 +27,8 @@ public static class SubscriptionScheduleRules
             approved ? pause!.PauseStartDate : pendingPause ? request!.PauseStartDate : null,
             approved ? pause!.ResumeDate : pendingPause ? request!.ResumeDate : null,
             order.EndDate,
-            days.Count(d => d.Status is not ("SKIPPED" or "CANCELLED" or "DELIVERED" or "COLLECTED")),
+            order.Status is "CANCELLED" or "REJECTED" or "COMPLETED" ? 0 :
+                days.Count(d => d.Status is not ("SKIPPED" or "CANCELLED" or "DELIVERED" or "COLLECTED")),
             scheduled.Where(d => d.ServiceDate >= today).Select(d => (DateOnly?)d.ServiceDate).Min(),
             scheduled.Any(d => d.ServiceDate == today.AddDays(1)), now);
     }
