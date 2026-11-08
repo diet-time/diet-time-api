@@ -16,6 +16,7 @@ public static class SubscriptionScheduleRules
         SubscriptionPause? pause, PackageChangeRequest? request, DateTimeOffset now)
     {
         var today = SubscriptionMenuRules.QatarToday(now);
+        var dashboard = DashboardPlanEligibility.Evaluate(order, days, pause, request, now);
         var approved = pause?.Status == "CONFIRMED" && pause.ResumeDate > today;
         var pendingPause = request?.Type == "PAUSE" && request.Status == "PENDING_APPROVAL";
         var display = order.Status;
@@ -27,9 +28,12 @@ public static class SubscriptionScheduleRules
             approved ? pause!.PauseStartDate : pendingPause ? request!.PauseStartDate : null,
             approved ? pause!.ResumeDate : pendingPause ? request!.ResumeDate : null,
             order.EndDate,
-            order.Status is "CANCELLED" or "REJECTED" or "COMPLETED" ? 0 :
-                days.Count(d => d.Status is not ("SKIPPED" or "CANCELLED" or "DELIVERED" or "COLLECTED")),
+            dashboard.RemainingServiceDays,
             scheduled.Where(d => d.ServiceDate >= today).Select(d => (DateOnly?)d.ServiceDate).Min(),
-            scheduled.Any(d => d.ServiceDate == today.AddDays(1)), now);
+            scheduled.Any(d => d.ServiceDate == today.AddDays(1)), now)
+        {
+            DashboardEligible = dashboard.Eligible, DashboardStatus = dashboard.Status,
+            DashboardExclusionReason = dashboard.ExclusionReason, DashboardScheduleSource = dashboard.ScheduleSource
+        };
     }
 }

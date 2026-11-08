@@ -1,7 +1,13 @@
 namespace DietTime.Contracts;
 public sealed record PackageScheduleSummaryResponse(string DisplayStatus, string? PauseApprovalStatus,
     DateOnly? PauseStartDate, DateOnly? ResumeDate, DateOnly RevisedEndDate, int RemainingServiceDays,
-    DateOnly? NextScheduledDelivery, bool TomorrowScheduled, DateTimeOffset ServerNow);
+    DateOnly? NextScheduledDelivery, bool TomorrowScheduled, DateTimeOffset ServerNow)
+{
+    public bool? DashboardEligible { get; init; }
+    public string? DashboardStatus { get; init; }
+    public string? DashboardExclusionReason { get; init; }
+    public string? DashboardScheduleSource { get; init; }
+}
 public sealed record PausePreviewRequest(DateOnly PauseStartDate, DateOnly ResumeDate, bool MoveRemaining = false);
 public sealed record PausePackageRequest(Guid CommandId, long ExpectedRowVersion, string ScheduleVersion,
     DateOnly PauseStartDate, DateOnly ResumeDate, string? Reason, bool MoveRemaining = false);

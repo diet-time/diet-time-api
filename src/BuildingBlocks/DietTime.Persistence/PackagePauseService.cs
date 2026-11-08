@@ -51,7 +51,7 @@ public sealed partial class UpcomingMealService : IPackageManagementService
             }
         }
         var summary = SubscriptionScheduleRules.Summary(order, days, pause, latestRequest, now);
-        var result = new PackageManagementResponse(orderId, order.RowVersion, now, pause == null ? order.Status : PauseStatus(pause, today), remaining.Length,
+        var result = new PackageManagementResponse(orderId, order.RowVersion, now, pause == null ? order.Status : PauseStatus(pause, today), summary.RemainingServiceDays,
             summary.NextScheduledDelivery, order.EndDate,
             eligible, eligible.Length > 0 ? null : pending ? "A package change is awaiting staff confirmation." : pause != null ? "This package already has a scheduled pause." :
                 !OrderWorkflowPolicy.CanFulfill(order) ? "This package is not eligible for pausing." : "There are no unlocked future service days available to pause.",

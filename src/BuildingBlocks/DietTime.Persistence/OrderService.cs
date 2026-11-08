@@ -14,6 +14,7 @@ public sealed class OrderOptions
     public const string SectionName = "Orders";
     public int MinimumLeadTimeDays { get; set; } = 1;
     public bool RequiresPrepayment { get; set; } // Default preserves the existing offline payment policy.
+    public bool EnableDashboardDiagnostics { get; set; } // Temporary opt-in; no tokens or customer contact data.
 }
 
 public sealed class OrderService(
@@ -361,6 +362,20 @@ public sealed class OrderService(
                 x.Status, x.PaymentStatus, x.TotalAmount, x.CurrencyCode.Trim(), x.PlacedAt, x.FulfillmentMethod,
                 x.TakeawayBranchId.HasValue ? new TakeawayBranchResponse(x.TakeawayBranchId.Value, x.TakeawayBranchName!, x.TakeawayBranchAddress) : null,
                 EntitlementCount(x, codes, false), EntitlementCount(x, codes, true), MapReview(x)) { PackageSchedule = schedules[x.Id] }).ToArray();
+        if (dashboard && options.Value.EnableDashboardDiagnostics)
+        {
+            logger.LogInformation("DashboardEligibility Retrieved UserId={UserId} CustomerProfileId={CustomerProfileId} OrderCount={OrderCount}",
+                userId, customerProfileId, page.Count);
+            foreach (var candidate in page)
+            {
+                var decision = schedules[candidate.Id];
+                logger.LogInformation("DashboardEligibility OrderId={OrderId} OrderStatus={OrderStatus} PaymentStatus={PaymentStatus} Approved={Approved} SubscriptionStatus={SubscriptionStatus} StartDate={StartDate} EndDate={EndDate} RemainingServiceDays={RemainingServiceDays} Eligible={Eligible} ExclusionReason={ExclusionReason} CanFulfill={CanFulfill} ScheduleSource={ScheduleSource} QatarToday={QatarToday}",
+                    candidate.Id, candidate.Status, candidate.PaymentStatus, candidate.ApprovedAt != null,
+                    decision.DashboardStatus, candidate.StartDate, candidate.EndDate, decision.RemainingServiceDays,
+                    decision.DashboardEligible, decision.DashboardExclusionReason ?? "NONE",
+                    OrderWorkflowPolicy.CanFulfill(candidate), decision.DashboardScheduleSource, SubscriptionMenuRules.QatarToday(clock.GetUtcNow()));
+            }
+        }
         if (snapshot != null) await snapshot.CommitAsync(cancellationToken);
         return new(items, pageNumber, pageSize, count);
     }
