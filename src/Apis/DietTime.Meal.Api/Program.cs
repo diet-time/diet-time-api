@@ -25,6 +25,7 @@ using Npgsql;
 using Serilog;
 using JwtOptions = DietTime.Persistence.JwtOptions;
 
+var startupWatch = System.Diagnostics.Stopwatch.StartNew();
 var builder = WebApplication.CreateBuilder(args);
 var maxUploadSizeBytes = builder.Configuration.GetValue<long?>("Storage:MaxUploadSizeBytes") ?? 10 * 1024 * 1024;
 builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLimit = maxUploadSizeBytes + 1024 * 1024);
@@ -36,6 +37,9 @@ if (!string.IsNullOrWhiteSpace(port))
 }
 builder.Host.UseSerilog((context, config) => config.ReadFrom.Configuration(context.Configuration));
 
+builder.Services.AddSingleton<PerformanceCommandInterceptor>();
+builder.Services.AddSingleton<PerformanceConnectionInterceptor>();
+builder.Services.AddScoped<PerformanceActionFilter>();
 builder.Services.AddSingleton<GuestHomeCacheVersion>();
 builder.Services.AddSingleton<GuestHomeCacheInvalidationInterceptor>();
 builder.Services.AddDbContext<DietTimeDbContext>((services, options) =>
@@ -46,7 +50,8 @@ builder.Services.AddDbContext<DietTimeDbContext>((services, options) =>
     options
         .UseNpgsql(connection)
         .UseSnakeCaseNamingConvention()
-        .AddInterceptors(services.GetRequiredService<GuestHomeCacheInvalidationInterceptor>());
+        .AddInterceptors(services.GetRequiredService<GuestHomeCacheInvalidationInterceptor>(),
+            services.GetRequiredService<PerformanceCommandInterceptor>(), services.GetRequiredService<PerformanceConnectionInterceptor>());
 });
 builder.Services.AddIdentityCore<ApplicationUser>(o => { o.Password.RequiredLength = 10; o.Password.RequireDigit = true; o.Password.RequireUppercase = true; o.Lockout.MaxFailedAccessAttempts = 5; o.SignIn.RequireConfirmedEmail = false; })
     .AddRoles<IdentityRole<Guid>>().AddEntityFrameworkStores<DietTimeDbContext>().AddDefaultTokenProviders();
@@ -224,7 +229,7 @@ builder.Services.AddFluentValidationAutoValidation();
 builder.Services.AddScoped<AuditRequestCapture>();
 builder.Services.AddScoped<AuditEventWriter>();
 builder.Services.AddScoped<AuditResultFilter>();
-builder.Services.AddControllers(o => o.Filters.AddService<AuditResultFilter>()).AddJsonOptions(o => { o.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull; o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(new UpperCaseJsonNamingPolicy())); });
+builder.Services.AddControllers(o => { o.Filters.AddService<AuditResultFilter>(); o.Filters.AddService<PerformanceActionFilter>(); }).AddJsonOptions(o => { o.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull; o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(new UpperCaseJsonNamingPolicy())); });
 builder.Services.AddApiVersioning(o => { o.DefaultApiVersion = new(1); o.AssumeDefaultVersionWhenUnspecified = true; o.ReportApiVersions = true; o.ApiVersionReader = new UrlSegmentApiVersionReader(); }).AddMvc().AddApiExplorer(o => { o.GroupNameFormat = "'v'VVV"; o.SubstituteApiVersionInUrl = true; });
 builder.Services.AddEndpointsApiExplorer(); builder.Services.AddSwaggerGen(o => { o.SwaggerDoc("v1", new() { Title = "Diet Time Meal API", Version = "v1", Description = "Localized meal catalogue, plan selection, and administration API." }); o.AddSecurityDefinition("Bearer", new() { Type = SecuritySchemeType.Http, Scheme = "bearer", BearerFormat = "JWT", Description = "JWT access token" }); o.OperationFilter<AuthorizeOperationFilter>(); var xml = Path.Combine(AppContext.BaseDirectory, "DietTime.Meal.Api.xml"); if (File.Exists(xml)) o.IncludeXmlComments(xml); });
 builder.Services.AddProblemDetails(); builder.Services.AddHealthChecks().AddDbContextCheck<DietTimeDbContext>("postgresql");
@@ -246,9 +251,11 @@ app.Logger.LogInformation(
     "Twilio WhatsApp runtime configuration. Enabled={Enabled} ConfigurationComplete={ConfigurationComplete} InvalidOrMissingSettings={InvalidOrMissingSettings}",
     whatsappConfiguration.Enabled, whatsappChecks.Values.All(valid => valid),
     string.Join(",", whatsappChecks.Where(check => !check.Value).Select(check => check.Key)));
-app.UseMiddleware<CorrelationIdMiddleware>(); app.UseSerilogRequestLogging(); app.UseMiddleware<RequestAuditMiddleware>(); app.UseMiddleware<ExceptionMiddleware>(); app.UseMiddleware<SecurityHeadersMiddleware>(); app.UseRateLimiter();
+app.UseMiddleware<CorrelationIdMiddleware>(); app.UseMiddleware<PerformanceRequestMiddleware>(); app.UseSerilogRequestLogging(); app.UseMiddleware<RequestAuditMiddleware>(); app.UseMiddleware<ExceptionMiddleware>(); app.UseMiddleware<SecurityHeadersMiddleware>(); app.UseRateLimiter();
 if (!app.Environment.IsProduction()) { app.UseSwagger(); app.UseSwaggerUI(o => o.SwaggerEndpoint("/swagger/v1/swagger.json", "Diet Time Meal API v1")); }
 app.UseCors("Flutter"); if (!app.Environment.IsDevelopment()) app.UseHttpsRedirection(); app.UseAuthentication(); app.UseAuthorization(); app.MapControllers(); app.MapHealthChecks("/health");
+app.Lifetime.ApplicationStarted.Register(() => app.Logger.LogInformation(
+    "API_STARTUP DurationMs={DurationMs}", startupWatch.Elapsed.TotalMilliseconds));
 app.Run();
 
 public partial class Program { }

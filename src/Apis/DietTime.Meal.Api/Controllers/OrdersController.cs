@@ -99,6 +99,18 @@ public sealed class OrdersController(IOrderService orders, StaffOrderService wor
             : Ok(order);
     }
 
+    /// <summary>Initial cards only: all current plans and three recent orders; no meal calendars.</summary>
+    [HttpGet("/api/v{version:apiVersion}/customer-profiles/{customerProfileId:guid}/orders/dashboard")]
+    public async Task<IActionResult> Dashboard(Guid customerProfileId, CancellationToken cancellationToken)
+    {
+        if (!TryGetUserId(out var userId)) return Unauthorized();
+        Response.Headers.CacheControl = "no-store";
+        var response = await orders.GetDashboardAsync(customerProfileId, userId, cancellationToken);
+        return response is null
+            ? ProblemResponse(404, "customer_profile_not_found", "Customer profile was not found or is not accessible.")
+            : Ok(response);
+    }
+
     /// <summary>Returns the authenticated customer's orders, newest first.</summary>
     [HttpGet("/api/v{version:apiVersion}/customer-profiles/{customerProfileId:guid}/orders")]
     [ProducesResponseType(typeof(CustomerOrdersResponse), StatusCodes.Status200OK)]

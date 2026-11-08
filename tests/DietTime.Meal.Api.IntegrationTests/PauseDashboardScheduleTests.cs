@@ -23,7 +23,7 @@ public sealed partial class UpcomingMealServiceTests
         var orders = new DietTime.Persistence.OrderService(db, clock,
             Microsoft.Extensions.Options.Options.Create(new DietTime.Persistence.OrderOptions()), new BookingQueue(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<DietTime.Persistence.OrderService>.Instance);
-        var response = (await orders.GetCustomerOrdersAsync(order.CustomerProfileId, userId, null, 1, 20, default))!;
+        var response = (await orders.GetDashboardAsync(order.CustomerProfileId, userId, default))!;
         var paused = response.Items.Single(item => item.Id == order.Id).PackageSchedule!;
         var active = response.Items.Single(item => item.Id == other.Id).PackageSchedule!;
         Assert.Equal("PAUSE_SCHEDULED", paused.DisplayStatus); Assert.False(paused.TomorrowScheduled);

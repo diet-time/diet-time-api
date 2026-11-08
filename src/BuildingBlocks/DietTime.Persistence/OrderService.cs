@@ -312,7 +312,16 @@ public sealed class OrderService(
         string? status,
         int pageNumber,
         int pageSize,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken) =>
+        await LoadCustomerOrdersAsync(customerProfileId, userId, status, pageNumber, pageSize, false, cancellationToken);
+
+    public Task<CustomerOrdersResponse?> GetDashboardAsync(
+        Guid customerProfileId, Guid userId, CancellationToken cancellationToken) =>
+        LoadCustomerOrdersAsync(customerProfileId, userId, null, 1, 3, true, cancellationToken);
+
+    private async Task<CustomerOrdersResponse?> LoadCustomerOrdersAsync(
+        Guid customerProfileId, Guid userId, string? status, int pageNumber, int pageSize,
+        bool dashboard, CancellationToken cancellationToken)
     {
         await using var snapshot = db.Database.CurrentTransaction == null ? await db.Database.BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellationToken) : null;
         if (!await db.CustomerProfiles.AsNoTracking().AnyAsync(
@@ -325,10 +334,24 @@ public sealed class OrderService(
             var normalized = status.Trim().ToUpperInvariant();
             query = query.Where(x => x.Status == normalized);
         }
-        var count = await query.CountAsync(cancellationToken);
-        var page = await query.Include(x => x.Meals).Include(x => x.DeliveryDays).OrderByDescending(x => x.PlacedAt).ThenByDescending(x => x.Id)
-            .Skip((pageNumber - 1) * pageSize).Take(pageSize)
+        if (dashboard)
+        {
+            // All current/reviewable plans, even when older than the recent history.
+            // Schedule/fulfillment eligibility is still calculated by the existing projection.
+            var recentIds = query.OrderByDescending(x => x.PlacedAt).ThenByDescending(x => x.Id)
+                .Take(3).Select(x => x.Id);
+            query = query.Where(x => recentIds.Contains(x.Id) ||
+                x.Status == "PENDING_APPROVAL" || x.Status == "ON_HOLD" ||
+                x.Status == "CONFIRMED" || x.Status == "ACTIVE" || x.Status == "PAUSED" ||
+                x.Status == "PENDING" || x.Status == "PENDING_ACTIVATION");
+        }
+        var count = dashboard ? 0 : await query.CountAsync(cancellationToken);
+        var ordered = query.Include(x => x.Meals).Include(x => x.DeliveryDays)
+            .OrderByDescending(x => x.PlacedAt).ThenByDescending(x => x.Id);
+        var page = await (dashboard ? ordered : ordered.Skip((pageNumber - 1) * pageSize).Take(pageSize))
+            .TagWith("CustomerOrders.Summaries")
             .ToListAsync(cancellationToken);
+        if (dashboard) { count = page.Count; pageSize = Math.Max(1, count); }
         var typeIds = page.SelectMany(x => x.Meals).Select(x => x.MealTypeId).Distinct().ToArray();
         var codes = await db.MealTypes.AsNoTracking().Where(x => typeIds.Contains(x.Id))
             .ToDictionaryAsync(x => x.Id, x => x.Code, cancellationToken);

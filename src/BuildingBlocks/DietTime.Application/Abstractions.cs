@@ -143,6 +143,8 @@ public interface IOrderService
         PlaceOrderRequest request, string idempotencyKey, Guid userId,
         CancellationToken cancellationToken);
     Task<PlaceOrderResponse?> GetAsync(Guid orderId, Guid userId, CancellationToken cancellationToken);
+    Task<CustomerOrdersResponse?> GetDashboardAsync(
+        Guid customerProfileId, Guid userId, CancellationToken cancellationToken);
     Task<CustomerOrdersResponse?> GetCustomerOrdersAsync(
         Guid customerProfileId, Guid userId, string? status,
         int pageNumber, int pageSize, CancellationToken cancellationToken);
