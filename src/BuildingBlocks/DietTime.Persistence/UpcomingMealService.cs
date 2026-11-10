@@ -217,7 +217,8 @@ public sealed partial class UpcomingMealService(
                     n.SodiumMg, n.CholesterolMg) : null
             };
         }
-        var reason = LockReason(day, order);
+        var reason = await PendingPauseBlocksSelectionAsync(order.Id, day.ServiceDate, ct)
+            ? PendingPauseSelectionMessage : LockReason(day, order);
         if (!SubscriptionMenuRules.IsSelectionOpen(day.ServiceDate, clock.GetUtcNow()) || (!includeEligible && reason is not null)) alternatives = [];
         return new(day.SubscriptionId, day.Id, day.ServiceDate, await MenuWeekAsync(day, ct),
             day.ServiceDate.DayOfWeek == DayOfWeek.Sunday ? 7 : (int)day.ServiceDate.DayOfWeek,

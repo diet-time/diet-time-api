@@ -107,6 +107,8 @@ public sealed partial class UpcomingMealService
             throw new UpcomingMealException(409, "already_confirmed", "Your meals are already finalized. Refresh to see your saved dishes.");
         if (!Active(order, day))
             throw new UpcomingMealException(409, "subscription_inactive", "This subscription is no longer eligible for meal selection.");
+        if (await PendingPauseBlocksSelectionAsync(orderId, day.ServiceDate, ct))
+            throw new UpcomingMealException(409, "pause_request_pending", PendingPauseSelectionMessage);
         var meals = request.MealMenuItemIds;
         var snacks = request.SnackMenuItemIds;
         if (meals is null || snacks is null || meals.Count != day.MealCount || snacks.Count != day.SnackCount ||
@@ -286,7 +288,8 @@ public sealed partial class UpcomingMealService
     {
         var now = clock.GetUtcNow();
         var locked = day.SelectionLocked || day.SelectionStatus == "LOCKED" || day.CustomerConfirmedAt != null || day.AutoFinalizedAt != null;
-        var canConfirm = !locked && Active(order, day) && day.MealCount is >= 1 and <= 5 && day.SnackCount is >= 0 &&
+        var pendingPause = await PendingPauseBlocksSelectionAsync(order.Id, day.ServiceDate, ct);
+        var canConfirm = !pendingPause && !locked && Active(order, day) && day.MealCount is >= 1 and <= 5 && day.SnackCount is >= 0 &&
             SubscriptionMenuRules.IsSelectionOpen(day.ServiceDate, now);
         // Incomplete provisional defaults must not stop a customer completing a valid set.
         var menu = await MapAsync(day, order, language, ct, includeEligible: canConfirm);
@@ -300,7 +303,7 @@ public sealed partial class UpcomingMealService
             }).ToArray();
         var availableMeals = GroupDishes("meal");
         var availableSnacks = GroupDishes("snack");
-        var reason = day.ReviewReason;
+        var reason = pendingPause ? PendingPauseSelectionMessage : day.ReviewReason;
         string? emptyStatus = null;
         if (canConfirm && (availableMeals.Length < day.MealCount || availableSnacks.Length < day.SnackCount))
         {
@@ -322,6 +325,7 @@ public sealed partial class UpcomingMealService
             status, locked, canConfirm, SubscriptionMenuRules.TomorrowCutoff(day.ServiceDate), now, reason,
             menu.SelectedMeals.Select(s => s.Meal.MealItemId).ToArray(), menu.SelectedMeals.Select(s => s.Meal).ToArray(),
             availableMeals, availableSnacks) {
+                SelectionBlockedByPendingPause = pendingPause,
                 EmptyReason = emptyStatus != null ? reason : null,
                 SelectedMealCount = menu.SelectedMeals.Where(s => s.Meal.Category == "meal").Select(s => s.Meal.MealItemId).Distinct().Count(),
                 SelectedSnackCount = menu.SelectedMeals.Where(s => s.Meal.Category == "snack").Select(s => s.Meal.MealItemId).Distinct().Count(),
