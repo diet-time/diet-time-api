@@ -80,7 +80,7 @@ public sealed partial class UpcomingMealServiceTests
         var fixedDay=(days[0].Id,days[0].ServiceDate,days[0].Status,days[0].FulfilledAt);
         var otherId=Guid.NewGuid(); var other=new SubscriptionServiceDay { Id=otherId,SubscriptionId=Guid.NewGuid(),ServiceDate=days[2].ServiceDate,CreatedAt=clock.Now,UpdatedAt=clock.Now };
         db.Add(other);await db.SaveChangesAsync();
-        var service=Service();var start=days[2].ServiceDate;var resume=start.AddDays(8);
+        var service=Service();var start=days[2].ServiceDate;var resume=PackagePauseRules.NextResumeServiceDate(start.AddDays(8), order.DeliveryDays.Select(d => d.DayOfWeek).ToHashSet());
         var preview=await service.PreviewPauseAsync(order.Id,userId,new(start,resume),default);
         var command=Guid.NewGuid();var request=new PausePackageRequest(command,preview.RowVersion,preview.ScheduleVersion,start,resume,"Travel");
         var result=await service.PauseAsync(order.Id,userId,request,default);
@@ -247,5 +247,58 @@ public sealed partial class UpcomingMealServiceTests
         Assert.Equal("schedule_changed",error.Code);
         Assert.Equal(before,(await db.Set<SubscriptionServiceDay>().AsNoTracking().Where(d=>d.OrderId==order.Id).OrderBy(d=>d.ServiceDate).ToArrayAsync()).Select(d=>(d.Id,d.ServiceDate,d.Revision)));
         Assert.Empty(await db.Set<SubscriptionPause>().ToArrayAsync());
+    }
+
+    [UpcomingPostgresFact]
+    public async Task Friday_restart_is_rejected_by_preview_request_and_resume_services()
+    {
+        await PrepareAsync();
+        var service = Service();
+        var current = await service.GetPackageAsync(order.Id, userId, default);
+        var start = current.EligiblePauseDates.First();
+        var friday = PackagePauseRules.MinimumResumeDate(clock.Now);
+        while (friday.DayOfWeek != DayOfWeek.Friday) friday = friday.AddDays(1);
+        var previewError = await Assert.ThrowsAsync<UpcomingMealException>(() => service.PreviewPauseAsync(order.Id, userId, new(start, friday), default));
+        Assert.Equal("invalid_resume_date", previewError.Code);
+        var requestError = await Assert.ThrowsAsync<UpcomingMealException>(() => service.RequestPauseAsync(order.Id, userId,
+            new(Guid.NewGuid(), current.RowVersion, "unused", start, friday, null), default));
+        Assert.Equal("invalid_resume_date", requestError.Code);
+        var restart = start.AddDays(14);
+        var preview = await service.PreviewPauseAsync(order.Id, userId, new(start, restart), default);
+        var pauseId = Guid.NewGuid();
+        var paused = await service.PauseAsync(order.Id, userId, new(pauseId, preview.RowVersion, preview.ScheduleVersion, start, restart, null), default);
+        var resumeError = await Assert.ThrowsAsync<UpcomingMealException>(() => service.ResumeAsync(order.Id, userId,
+            new(Guid.NewGuid(), pauseId, paused.RowVersion, friday), default));
+        Assert.Equal("invalid_resume_date", resumeError.Code);
+        var resumeRequestError = await Assert.ThrowsAsync<UpcomingMealException>(() => service.RequestResumeAsync(order.Id, userId,
+            new(Guid.NewGuid(), pauseId, paused.RowVersion, friday), default));
+        Assert.Equal("invalid_resume_date", resumeRequestError.Code);
+    }
+
+    [UpcomingPostgresFact]
+    public async Task Approved_pause_keeps_original_start_and_publishes_last_service_date_not_restart()
+    {
+        await PrepareAsync();
+        var originalStart = order.StartDate;
+        var service = Service();
+        var current = await service.GetPackageAsync(order.Id, userId, default);
+        var start = current.EligiblePauseDates.First();
+        var restart = start.AddDays(14);
+        var preview = await service.PreviewPauseAsync(order.Id, userId, new(start, restart), default);
+        var requestId = Guid.NewGuid();
+        await service.RequestPauseAsync(order.Id, userId, new(requestId, preview.RowVersion, preview.ScheduleVersion, start, restart, null), default);
+        await service.ReviewChangeRequestAsync(requestId, Guid.NewGuid(), new(true), default);
+        await db.Entry(order).ReloadAsync();
+        var days = await db.Set<SubscriptionServiceDay>().AsNoTracking().Where(d => d.OrderId == order.Id).ToArrayAsync();
+        var pause = await db.Set<SubscriptionPause>().AsNoTracking().SingleAsync(p => p.OrderId == order.Id);
+        var management = await service.GetPackageAsync(order.Id, userId, default);
+        var dashboard = SubscriptionScheduleRules.Summary(order, days, pause, null, clock.Now);
+        Assert.Equal(originalStart, order.StartDate);
+        Assert.Equal(days.Where(d => d.Status is not ("SKIPPED" or "CANCELLED")).Max(d => d.ServiceDate), order.EndDate);
+        Assert.True(order.EndDate > restart);
+        Assert.Equal(order.EndDate, preview.ProjectedEndDate);
+        Assert.Equal(order.EndDate, management.ExpectedEndDate);
+        Assert.Equal(order.EndDate, dashboard.RevisedEndDate);
+        Assert.Equal(current.RemainingServiceDays, management.RemainingServiceDays);
     }
 }

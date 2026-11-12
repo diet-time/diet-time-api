@@ -1,7 +1,9 @@
 namespace DietTime.Application;
 public static class StaffNotificationRules
 {
-    public static readonly string[] AdminEvents = ["ORDER_RECEIVED", "ORDER_APPROVED", "ORDER_REJECTED", "ORDER_CANCELLED", "DELIVERY_OVERDUE", "DELIVERED", "COLLECTED"];
+    public static readonly string[] AdminEvents = ["ORDER_RECEIVED", "ORDER_APPROVED", "ORDER_REJECTED", "ORDER_CANCELLED", "DELIVERY_OVERDUE", "DELIVERED", "COLLECTED",
+        "PACKAGE_PAUSE_REQUESTED", "PACKAGE_RESUME_REQUESTED", "PACKAGE_PAUSE_APPROVED", "PACKAGE_RESUME_APPROVED",
+        "PACKAGE_PAUSE_REJECTED", "PACKAGE_RESUME_REJECTED"];
     public static string? OrderEvent(string? previous, string status) => previous == status ? null : status switch {
         "PENDING_APPROVAL" or "PENDING" when previous is null => "ORDER_RECEIVED",
         "CONFIRMED" when previous is "PENDING_APPROVAL" or "PENDING" => "ORDER_APPROVED",
@@ -13,6 +15,12 @@ public static class StaffNotificationRules
     {
         var name = string.IsNullOrWhiteSpace(customerName) ? "the customer" : customerName.Trim();
         return type switch {
+            "PACKAGE_PAUSE_REQUESTED" => ("Pause requested", $"{name} requested a pause for order {number}. Awaiting confirmation."),
+            "PACKAGE_RESUME_REQUESTED" => ("Resume requested", $"{name} requested to resume order {number}. Awaiting confirmation."),
+            "PACKAGE_PAUSE_APPROVED" => ("Pause approved", $"The pause request for {name}, order {number}, was approved."),
+            "PACKAGE_RESUME_APPROVED" => ("Resume approved", $"The resume request for {name}, order {number}, was approved."),
+            "PACKAGE_PAUSE_REJECTED" => ("Pause rejected", $"The pause request for {name}, order {number}, was rejected."),
+            "PACKAGE_RESUME_REJECTED" => ("Resume rejected", $"The resume request for {name}, order {number}, was rejected."),
             "ORDER_RECEIVED" => ("New order received", $"{(name == "the customer" ? "A customer" : name)} placed order {number}. Awaiting confirmation."),
             "ORDER_APPROVED" => ("Order confirmed", $"Order {number} for {name} has been confirmed."),
             "ORDER_REJECTED" => ("Order rejected", $"Order {number} for {name} has been rejected."),

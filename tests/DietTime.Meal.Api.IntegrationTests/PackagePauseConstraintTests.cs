@@ -23,7 +23,7 @@ public sealed partial class UpcomingMealServiceTests
         clock.Now = new(2026, 10, 27, 9, 0, 0, TimeSpan.Zero);
         var service = Service();
         var start = new DateOnly(2026, 10, 28);
-        var requested = new DateOnly(2026, 11, 6); // Friday: actual restart is Saturday.
+        var requested = new DateOnly(2026, 11, 7); // A selectable Saturday service-day restart.
         var preview = await service.PreviewPauseAsync(order.Id, userId, new(start, requested, true), default);
         var result = await service.PauseAsync(order.Id, userId,
             new(Guid.NewGuid(), preview.RowVersion, preview.ScheduleVersion, start, requested, null, true), default);

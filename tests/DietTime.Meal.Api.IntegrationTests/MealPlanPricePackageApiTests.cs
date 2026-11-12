@@ -167,10 +167,11 @@ public sealed class MealPlanPricePackageApiTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Referenced_package_allows_label_update_but_blocks_duration_change()
+    public async Task Referenced_package_updates_labels_and_linked_pricing_duration()
     {
         if (!enabled) return;
-        await CreatePackagePriceAsync(WeekId, null, 300m, DateTimeOffset.UtcNow.AddDays(-1));
+        var created = await CreatePackagePriceAsync(WeekId, null, 300m, DateTimeOffset.UtcNow.AddDays(-1));
+        var priceId = await ReadCreatedIdAsync(created);
 
         var labels = await client!.PutAsJsonAsync($"/api/v1/admin/meal-plan-price-packages/{WeekId}", new
         {
@@ -192,8 +193,13 @@ public sealed class MealPlanPricePackageApiTests : IAsyncLifetime
             displayOrder = 7,
             isActive = true
         });
-        Assert.Equal(HttpStatusCode.Conflict, duration.StatusCode);
-        Assert.Contains("package_duration_in_use", await duration.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.NoContent, duration.StatusCode);
+        using var scope = factory!.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DietTimeDbContext>();
+        Assert.Equal(7, (await db.MealPlanPricePackages.SingleAsync(x => x.Code == WeekId)).DurationDays);
+        var price = await db.MealPlanPrices.SingleAsync(x => x.Id == priceId);
+        Assert.Equal(7, price.DurationDays);
+        Assert.Equal(300m, price.Amount);
     }
 
     [Fact]

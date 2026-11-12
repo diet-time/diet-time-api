@@ -48,7 +48,9 @@ public sealed partial class UpcomingMealService
         var moving = days.Where(d => pausedIds.Contains(d.Id) && PackagePauseRules.CanMove(d, now)).ToArray();
         if (moving.Length == 0) throw PauseError("no_eligible_service_days", "No unlocked future deliveries are available to restart.");
         var first = request.ResumeDate ?? new[] { PackagePauseRules.MinimumResumeDate(now), pause.PauseStartDate }.Max();
-        PackagePauseRules.ValidateResumeDate(first, now);
+        var weekdays = order.DeliveryDays.Select(d => d.DayOfWeek).ToHashSet();
+        if (request.ResumeDate == null) first = PackagePauseRules.NextResumeServiceDate(first, weekdays);
+        PackagePauseRules.ValidateResumeDate(first, now, weekdays);
         var schedule = PackagePauseRules.Schedule(moving, days, first, order.DeliveryDays.Select(d => d.DayOfWeek).ToHashSet());
         if (request.ResumeDate == null && schedule.Values.Min() >= pause.ResumeDate)
             throw PauseError("resume_not_available", "No earlier eligible restart is available.");

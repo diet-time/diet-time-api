@@ -21,6 +21,42 @@ public sealed class PackagePauseRulesTests
         Assert.Equal(new DateOnly(2027, 2, 28), PackagePauseRules.MaximumResumeDate(DateTimeOffset.Parse("2026-08-30T21:00:00Z")));
         Assert.Equal(new DateOnly(2026, 11, 4), PackagePauseRules.MinimumResumeDate(DateTimeOffset.Parse("2026-11-02T18:00:00Z")));
     }
+    [Theory]
+    [InlineData("2026-11-06")]
+    [InlineData("2026-11-13")]
+    [InlineData("2027-04-30")]
+    public void Friday_restart_is_rejected_even_inside_the_valid_date_window(string value)
+    {
+        var error = Assert.Throws<UpcomingMealException>(() => PackagePauseRules.ValidateResumeDate(DateOnly.Parse(value), Now));
+        Assert.Equal(400, error.StatusCode);
+        Assert.Equal("invalid_resume_date", error.Code);
+    }
+
+    [Fact]
+    public void Restart_respects_configured_weekdays_and_implicit_restart_advances_to_service_date()
+    {
+        var weekdays = new HashSet<int> { 2, 4 };
+        Assert.Throws<UpcomingMealException>(() => PackagePauseRules.ValidateResumeDate(new(2026, 11, 4), Now, weekdays));
+        PackagePauseRules.ValidateResumeDate(new(2026, 11, 5), Now, weekdays);
+        Assert.Equal(new DateOnly(2026, 11, 10), PackagePauseRules.NextResumeServiceDate(new(2026, 11, 6), weekdays));
+    }
+
+    [Fact]
+    public void November_pause_finishes_after_all_24_service_days_not_on_the_restart_date()
+    {
+        var start = new DateOnly(2026, 11, 14);
+        var weekdays = new HashSet<int> { 1, 2, 3, 4, 6, 7 };
+        var days = SubscriptionMenuRules.ServiceDates(start, new(2026, 12, 10), weekdays)
+            .Select(date => new SubscriptionServiceDay { Id = Guid.NewGuid(), ServiceDate = date }).ToArray();
+        var restart = new DateOnly(2026, 12, 1);
+        var schedule = PackagePauseRules.Schedule(days, days, restart, weekdays);
+        Assert.Equal(24, days.Length);
+        Assert.Equal(new DateOnly(2026, 12, 28), schedule.Values.Max());
+        Assert.DoesNotContain(schedule.Values, date => date.DayOfWeek == DayOfWeek.Friday || date < restart);
+        Assert.Equal(start, days.Min(d => d.ServiceDate));
+        Assert.Equal(new DateOnly(2026, 12, 10), days.Max(d => d.ServiceDate));
+    }
+
     private static readonly DateTimeOffset Now = new(2026, 11, 2, 10, 0, 0, TimeSpan.Zero);
     private static SubscriptionServiceDay Day(int offset) => new() { Id = Guid.NewGuid(), ServiceDate = new DateOnly(2026, 11, 2).AddDays(offset) };
 

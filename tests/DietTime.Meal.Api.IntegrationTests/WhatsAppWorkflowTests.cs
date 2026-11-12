@@ -160,7 +160,7 @@ public sealed partial class UpcomingMealServiceTests
         Assert.Single(setup.Provider.Messages);
         clock.Now=new DateTimeOffset(start.AddDays(1).ToDateTime(TimeOnly.MinValue),TimeSpan.FromHours(3)).ToUniversalTime();
         var current=await Service().GetPackageAsync(order.Id,userId,default);
-        await Service().ResumeAsync(order.Id,userId,new(Guid.NewGuid(),command.CommandId,current.RowVersion,start.AddDays(3)),default);
+        await Service().ResumeAsync(order.Id,userId,new(Guid.NewGuid(),command.CommandId,current.RowVersion,DietTime.Application.PackagePauseRules.NextResumeServiceDate(start.AddDays(3), order.DeliveryDays.Select(d => d.DayOfWeek).ToHashSet())),default);
         await DispatchWhatsApp(factory,order.Id);Assert.Single(setup.Provider.Messages);
         var resume=await db.OrderNotifications.AsNoTracking().SingleAsync(n=>n.EventCode=="PACKAGE_RESUMED");
         clock.Now=resume.AvailableAt;await DispatchWhatsApp(factory,order.Id);await DispatchWhatsApp(factory,order.Id);

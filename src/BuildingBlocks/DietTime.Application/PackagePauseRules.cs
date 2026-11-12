@@ -35,10 +35,20 @@ public static class PackagePauseRules
 
     public static DateOnly MaximumResumeDate(DateTimeOffset now) => SubscriptionMenuRules.QatarToday(now).AddMonths(6);
 
-    public static void ValidateResumeDate(DateOnly date, DateTimeOffset now)
+    public static void ValidateResumeDate(DateOnly date, DateTimeOffset now, IReadOnlySet<int>? weekdays = null)
     {
-        if (date < MinimumResumeDate(now) || date > MaximumResumeDate(now))
+        if (date < MinimumResumeDate(now) || date > MaximumResumeDate(now) || date.DayOfWeek == DayOfWeek.Friday ||
+            weekdays != null && !weekdays.Contains(date.DayOfWeek == DayOfWeek.Sunday ? 7 : (int)date.DayOfWeek))
             throw new UpcomingMealException(400, "invalid_resume_date", "Choose an available future restart date within six months.");
+    }
+
+    public static DateOnly NextResumeServiceDate(DateOnly date, IReadOnlySet<int> weekdays)
+    {
+        if (weekdays.Count == 0 || weekdays.Any(d => d is < 1 or > 7 or 5))
+            throw new UpcomingMealException(409, "schedule_review_required", "The delivery weekdays need review by Diet Time.");
+        while (date.DayOfWeek == DayOfWeek.Friday || !weekdays.Contains(date.DayOfWeek == DayOfWeek.Sunday ? 7 : (int)date.DayOfWeek))
+            date = date.AddDays(1);
+        return date;
     }
 
     public static IReadOnlyDictionary<Guid, DateOnly> Schedule(IReadOnlyList<SubscriptionServiceDay> moving,

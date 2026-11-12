@@ -75,7 +75,7 @@ public sealed partial class UpcomingMealService : IPackageManagementService
             throw PauseError("pause_date_unavailable", "Choose an unlocked future service date. Today's delivery and committed deliveries cannot be paused.");
         if (request.MoveRemaining ? request.ResumeDate < request.PauseStartDate : request.ResumeDate <= request.PauseStartDate)
             throw new UpcomingMealException(400, "invalid_resume_date", "Choose a resume date after the pause start.");
-        PackagePauseRules.ValidateResumeDate(request.ResumeDate, now);
+        PackagePauseRules.ValidateResumeDate(request.ResumeDate, now, order.DeliveryDays.Select(d => d.DayOfWeek).ToHashSet());
         if (days.Select(d => d.SubscriptionId).Distinct().Count() != 1)
             throw PauseError("schedule_review_required", "This order contains multiple subscriptions and needs a schedule review.");
         var effectiveStart = request.MoveRemaining ? eligible[0].ServiceDate : request.PauseStartDate;
@@ -177,7 +177,9 @@ public sealed partial class UpcomingMealService : IPackageManagementService
         var moving = days.Where(d => ids.Contains(d.Id) && PackagePauseRules.CanMove(d, now)).ToArray();
         if (moving.Length == 0) throw PauseError("no_eligible_service_days", "There are no unlocked future service days to resume early.");
         var first = request.ResumeDate ?? new[] { PackagePauseRules.MinimumResumeDate(now), pause.PauseStartDate }.Max();
-        PackagePauseRules.ValidateResumeDate(first, now);
+        var weekdays = order.DeliveryDays.Select(d => d.DayOfWeek).ToHashSet();
+        if (request.ResumeDate == null) first = PackagePauseRules.NextResumeServiceDate(first, weekdays);
+        PackagePauseRules.ValidateResumeDate(first, now, weekdays);
         var schedule = PackagePauseRules.Schedule(moving, days, first, order.DeliveryDays.Select(d => d.DayOfWeek).ToHashSet());
         if (request.ResumeDate == null && schedule.Values.Min() >= pause.ResumeDate) throw PauseError("resume_not_available", "No earlier eligible delivery date is available.");
         var changes = moving.Select(d => new ScheduleChange(d.Id, d.ServiceDate, schedule[d.Id], d.SelectionCutoffAt, request.ResumeDate)).ToArray();

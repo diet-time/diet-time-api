@@ -45,6 +45,39 @@ public sealed class StaffNotificationCaptureTests
         Capture(db);Assert.Empty(db.ChangeTracker.Entries<StaffNotificationEvent>());
     }
     [Theory]
+    [InlineData("PAUSE")]
+    [InlineData("RESUME")]
+    public void Package_requests_are_captured_once_and_unrelated_updates_are_ignored(string type) {
+        using var db = Context();
+        var request = new PackageChangeRequest { Id = Guid.NewGuid(), OrderId = Guid.NewGuid(),
+            Type = type, CreatedAt = DateTimeOffset.UtcNow };
+        db.Add(request);
+        Capture(db); Capture(db);
+        var notification = Assert.Single(db.ChangeTracker.Entries<StaffNotificationEvent>()).Entity;
+        Assert.Equal($"PACKAGE_{type}_REQUESTED", notification.EventType);
+        Assert.Equal(request.OrderId, notification.OrderId);
+        Assert.Equal(request.CreatedAt, notification.CreatedAt);
+        db.ChangeTracker.Clear();
+        db.Attach(request); request.Reason = "Updated reason";
+        Capture(db);
+        Assert.Empty(db.ChangeTracker.Entries<StaffNotificationEvent>());
+    }
+    [Theory]
+    [InlineData("PAUSE", "APPROVED")]
+    [InlineData("PAUSE", "REJECTED")]
+    [InlineData("RESUME", "APPROVED")]
+    [InlineData("RESUME", "REJECTED")]
+    public void Package_decisions_are_captured_once(string type, string status) {
+        using var db = Context();
+        var request = new PackageChangeRequest { Id = Guid.NewGuid(), OrderId = Guid.NewGuid(), Type = type };
+        db.Attach(request);
+        request.Status = status; request.ReviewedAt = DateTimeOffset.UtcNow;
+        Capture(db); Capture(db);
+        var notification = Assert.Single(db.ChangeTracker.Entries<StaffNotificationEvent>()).Entity;
+        Assert.Equal($"PACKAGE_{type}_{status}", notification.EventType);
+        Assert.Equal(request.ReviewedAt, notification.CreatedAt);
+    }
+    [Theory]
     [InlineData("Admin",true,true)]
     [InlineData("Meal Manager",false,false)]
     [InlineData("Customer",false,false)]

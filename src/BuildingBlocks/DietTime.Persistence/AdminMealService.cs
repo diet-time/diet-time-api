@@ -1556,16 +1556,40 @@ public sealed class AdminMealService(
         Guid? userId,
         CancellationToken ct)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var normalizedId = NormalizePackageCode(packageId);
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT code FROM public.meal_plan_price_packages WHERE code = {normalizedId} FOR UPDATE", ct);
         var package = await db.MealPlanPricePackages.SingleOrDefaultAsync(x => x.Code == normalizedId, ct);
         if (package is null)
             return MealPlanPricePackageWriteResult.NotFound;
         var code = NormalizePackageCode(request.Code);
         if (code != normalizedId)
             return MealPlanPricePackageWriteResult.IdentifierChange;
-        if (package.DurationDays != request.DurationDays
-            && await db.MealPlanPrices.AnyAsync(x => x.DurationDays == package.DurationDays, ct))
-            return MealPlanPricePackageWriteResult.DurationInUse;
+        if (package.DurationDays != request.DurationDays)
+        {
+            // Older prices identify their duration by day count; current prices use PackageCode.
+            var legacyCode = await db.MealPlanPricePackages.Where(x => x.DurationDays == package.DurationDays)
+                .OrderBy(x => x.DisplayOrder).ThenBy(x => x.Code).Select(x => x.Code).FirstOrDefaultAsync(ct);
+            var prices = await db.MealPlanPrices.Where(x => x.PackageCode == normalizedId ||
+                (x.PackageCode == null && legacyCode == normalizedId && x.DurationDays == package.DurationDays)).ToListAsync(ct);
+            var movingIds = prices.Select(x => x.Id).ToArray();
+            var others = await db.MealPlanPrices.AsNoTracking()
+                .Where(x => x.DurationDays == request.DurationDays && !movingIds.Contains(x.Id)).ToListAsync(ct);
+            if (prices.Any(price => others.Any(other =>
+                other.MealPlanTemplateId == price.MealPlanTemplateId && other.MealsPerDay == price.MealsPerDay &&
+                other.SnacksPerDay == price.SnacksPerDay && other.CurrencyCode == price.CurrencyCode &&
+                (price.EffectiveUntil == null || other.EffectiveFrom <= price.EffectiveUntil) &&
+                (other.EffectiveUntil == null || other.EffectiveUntil >= price.EffectiveFrom))))
+                throw new MealConfigurationException(409, "package_duration_conflict",
+                    "The new service days overlap existing pricing for this meal plan. Resolve the conflicting prices first.");
+            foreach (var price in prices)
+            {
+                price.DurationDays = request.DurationDays;
+                price.UpdatedAt = clock.GetUtcNow();
+                price.UpdatedBy = userId;
+            }
+        }
 
         package.Code = code;
         package.NameEn = request.NameEn.Trim();
@@ -1574,7 +1598,9 @@ public sealed class AdminMealService(
         package.DisplayOrder = request.DisplayOrder;
         package.IsActive = request.IsActive;
         package.IsDeliveryEnabled = request.IsDeliveryEnabled;
+        // Orders and their service schedules are snapshots and must not be rewritten.
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
         return MealPlanPricePackageWriteResult.Success;
     }
 

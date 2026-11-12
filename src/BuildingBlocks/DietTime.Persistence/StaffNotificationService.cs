@@ -48,6 +48,17 @@ public sealed class StaffNotificationService(DietTimeDbContext db,TimeProvider c
 
     public async Task ProjectAsync(CancellationToken ct) {
         await CreateOverdueEventsAsync(ct);
+        // Recover outstanding requests created before request capture was introduced.
+        await db.Database.ExecuteSqlRawAsync("""
+            INSERT INTO public.staff_notification_events(id,deduplication_key,event_type,order_id,created_at)
+            SELECT gen_random_uuid(), 'package-request:' || r.id::text || ':REQUESTED',
+                'PACKAGE_' || r.type || '_REQUESTED', r.order_id, r.created_at
+            FROM public.package_change_requests r
+            WHERE r.status = 'PENDING_APPROVAL' AND r.type IN ('PAUSE','RESUME')
+                AND NOT EXISTS (SELECT 1 FROM public.staff_notification_events e
+                    WHERE e.deduplication_key = 'package-request:' || r.id::text || ':REQUESTED')
+            ON CONFLICT(deduplication_key) DO NOTHING
+            """, ct);
         for(var batch=0;batch<10;batch++) {
             await using var tx=await db.Database.BeginTransactionAsync(ct);
             var events=await db.StaffNotificationEvents.FromSqlRaw("SELECT * FROM public.staff_notification_events WHERE processed_at IS NULL ORDER BY created_at,id LIMIT 100 FOR UPDATE SKIP LOCKED").ToArrayAsync(ct);

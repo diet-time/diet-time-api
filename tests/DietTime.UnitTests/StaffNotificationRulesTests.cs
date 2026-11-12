@@ -16,7 +16,7 @@ public sealed class StaffNotificationRulesTests
     public void Only_real_order_events_are_selected(string? previous,string status,string? expected) => Assert.Equal(expected,StaffNotificationRules.OrderEvent(previous,status));
     [Fact]
     public void Role_event_matrix_is_explicit() {
-        Assert.Equal(7,StaffNotificationRules.AdminEvents.Length);
+        Assert.Equal(13,StaffNotificationRules.AdminEvents.Length);
     }
     [Fact]
     public void Every_supported_event_has_order_specific_copy() {
