@@ -7,6 +7,15 @@ namespace DietTime.Persistence;
 
 internal static class PackageScheduleProjection
 {
+    public static PlaceOrderResponse Apply(PlaceOrderResponse response, PackageScheduleSummaryResponse schedule) => response with {
+        Delivery = response.Delivery with {
+            StartDate = schedule.ServiceStartDate ?? response.Delivery.StartDate,
+            EndDate = schedule.RevisedEndDate,
+            ServiceDates = schedule.ServiceDates ?? response.Delivery.ServiceDates
+        },
+        PackageSchedule = schedule
+    };
+
     public static async Task<IReadOnlyDictionary<Guid, PackageScheduleSummaryResponse>> LoadAsync(
         DietTimeDbContext db, IReadOnlyCollection<Order> orders, DateTimeOffset now, CancellationToken ct)
     {

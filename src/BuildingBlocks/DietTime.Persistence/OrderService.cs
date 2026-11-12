@@ -358,7 +358,8 @@ public sealed class OrderService(
             .ToDictionaryAsync(x => x.Id, x => x.Code, cancellationToken);
         var schedules = await PackageScheduleProjection.LoadAsync(db, page, clock.GetUtcNow(), cancellationToken);
         var items = page.Select(x => new CustomerOrderSummaryResponse(
-                x.Id, x.OrderNumber, x.PlanName, x.PlanDurationName, x.StartDate, x.EndDate,
+                x.Id, x.OrderNumber, x.PlanName, x.PlanDurationName,
+                schedules[x.Id].ServiceStartDate ?? x.StartDate, schedules[x.Id].RevisedEndDate,
                 x.Status, x.PaymentStatus, x.TotalAmount, x.CurrencyCode.Trim(), x.PlacedAt, x.FulfillmentMethod,
                 x.TakeawayBranchId.HasValue ? new TakeawayBranchResponse(x.TakeawayBranchId.Value, x.TakeawayBranchName!, x.TakeawayBranchAddress) : null,
                 EntitlementCount(x, codes, false), EntitlementCount(x, codes, true), MapReview(x)) { PackageSchedule = schedules[x.Id] }).ToArray();
@@ -392,10 +393,8 @@ public sealed class OrderService(
         var codes = await db.MealTypes.AsNoTracking().Where(x => typeIds.Contains(x.Id))
             .ToDictionaryAsync(x => x.Id, x => x.Code, cancellationToken);
         var response = Map(order, codes);
-        if (!await db.Set<SubscriptionPause>().AnyAsync(p => p.OrderId == order.Id, cancellationToken)) return response;
-        var dates = await db.Set<SubscriptionServiceDay>().AsNoTracking().Where(d => d.OrderId == order.Id && d.Status != "SKIPPED" && d.Status != "CANCELLED")
-            .OrderBy(d => d.ServiceDate).Select(d => d.ServiceDate).ToArrayAsync(cancellationToken);
-        return dates.Length == 0 ? response : response with { Delivery = response.Delivery with { ServiceDates = dates } };
+        var schedules = await PackageScheduleProjection.LoadAsync(db, [order], clock.GetUtcNow(), cancellationToken);
+        return PackageScheduleProjection.Apply(response, schedules[order.Id]);
     }
 
     internal static PlaceOrderResponse Map(Order order, IReadOnlyDictionary<Guid, string> codes) => new(

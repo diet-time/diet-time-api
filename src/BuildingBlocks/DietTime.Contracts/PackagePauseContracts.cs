@@ -3,6 +3,8 @@ public sealed record PackageScheduleSummaryResponse(string DisplayStatus, string
     DateOnly? PauseStartDate, DateOnly? ResumeDate, DateOnly RevisedEndDate, int RemainingServiceDays,
     DateOnly? NextScheduledDelivery, bool TomorrowScheduled, DateTimeOffset ServerNow)
 {
+    public DateOnly? ServiceStartDate { get; init; }
+    public IReadOnlyList<DateOnly>? ServiceDates { get; init; }
     public bool? DashboardEligible { get; init; }
     public string? DashboardStatus { get; init; }
     public string? DashboardExclusionReason { get; init; }

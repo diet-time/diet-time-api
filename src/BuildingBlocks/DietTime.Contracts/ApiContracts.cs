@@ -423,7 +423,10 @@ public sealed record PlaceOrderResponse(
     DateTimeOffset PlacedAt,
     string FulfillmentMethod = FulfillmentMethods.HomeDelivery,
     TakeawayBranchResponse? TakeawayBranch = null,
-    int? MealCount = null, int? SnackCount = null, OrderReviewResponse? Review = null);
+    int? MealCount = null, int? SnackCount = null, OrderReviewResponse? Review = null)
+{
+    public PackageScheduleSummaryResponse? PackageSchedule { get; init; }
+}
 public sealed record CustomerOrderSummaryResponse(
     Guid Id,
     string OrderNumber,

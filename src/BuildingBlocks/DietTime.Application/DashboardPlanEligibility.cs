@@ -33,7 +33,7 @@ public static class DashboardPlanEligibility
         if (remaining == 0) return Excluded("COMPLETED", "NO_REMAINING_SERVICE_DAYS");
 
         var approvedPause = pause?.Status == "CONFIRMED" && pause.ResumeDate > today;
-        var state = approvedPause && pause!.PauseStartDate <= today || order.Status == "PAUSED" ? "PAUSED" :
+        var state = approvedPause && SubscriptionScheduleRules.PauseInEffect(order, days, pause!, today) || order.Status == "PAUSED" ? "PAUSED" :
             approvedPause ? "PAUSE_SCHEDULED" :
             order.StartDate > today ? "UPCOMING" :
             request?.Type == "PAUSE" && request.Status == "PENDING_APPROVAL" ? "PAUSE_REQUESTED" : "ACTIVE";

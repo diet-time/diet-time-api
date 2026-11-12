@@ -68,7 +68,9 @@ public sealed class DashboardPlanEligibilityTests
     [InlineData(10, "PAUSE_SCHEDULED")]
     public void Approved_pause_does_not_hide_the_subscription(int start, string expected) {
         var pause = new SubscriptionPause { Status = "CONFIRMED", PauseStartDate = new(2026, 11, start), ResumeDate = new(2026, 11, 15) };
-        var result = DashboardPlanEligibility.Evaluate(Plan(), [new() { ServiceDate = new(2026, 11, 16), Status = "PLANNED" }], pause, null, Now);
-        Assert.True(result.Eligible); Assert.Equal(expected, result.Status); Assert.Equal(1, result.RemainingServiceDays);
+        var days = new List<SubscriptionServiceDay> { new() { ServiceDate = new(2026, 11, 16), Status = "PLANNED" } };
+        if (start > 9) days.Add(new() { ServiceDate = new(2026, 11, 9), Status = "CONFIRMED" });
+        var result = DashboardPlanEligibility.Evaluate(Plan(), days, pause, null, Now);
+        Assert.True(result.Eligible); Assert.Equal(expected, result.Status); Assert.Equal(days.Count, result.RemainingServiceDays);
     }
 }

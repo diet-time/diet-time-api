@@ -21,15 +21,27 @@ public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, 
         if (customerProfileId is { } profileId) query = query.Where(o => o.CustomerProfileId == profileId);
         if (!string.IsNullOrWhiteSpace(status))
         {
-            var approvalStatuses = OrderApprovalFilter.MatchingStatuses(status);
-            query = query.Where(x => approvalStatuses.Contains(x.Status));
+            if (status == "PAUSED") {
+                var today = SubscriptionMenuRules.QatarToday(clock.GetUtcNow());
+                query = query.Where(o => o.Status == "PAUSED" ||
+                    (o.Status == "CONFIRMED" || o.Status == "ACTIVE") && db.Set<SubscriptionPause>().Any(p =>
+                        p.OrderId == o.Id && p.Status == "CONFIRMED" && p.ResumeDate > today &&
+                        (p.PauseStartDate <= today || !db.Set<SubscriptionServiceDay>().Any(d =>
+                            d.OrderId == o.Id && d.ServiceDate >= today && d.ServiceDate < p.PauseStartDate &&
+                            d.FulfilledAt == null && (d.Status == "PLANNED" || d.Status == "CONFIRMED")))));
+            } else {
+                var approvalStatuses = OrderApprovalFilter.MatchingStatuses(status);
+                query = query.Where(x => approvalStatuses.Contains(x.Status));
+            }
         }
         if (serviceDate is { } day)
         {
             var weekday = day.DayOfWeek == DayOfWeek.Sunday ? 7 : (int)day.DayOfWeek;
-            // Purchased weekdays exist before approval; fulfillment records do not.
-            query = query.Where(x => x.StartDate <= day && x.EndDate >= day &&
-                x.DeliveryDays.Any(d => d.DayOfWeek == weekday));
+            // Managed service rows are authoritative; never fill an approved pause gap.
+            query = query.Where(x => db.Set<SubscriptionServiceDay>().Any(d => d.OrderId == x.Id &&
+                d.ServiceDate == day && (d.Status == "PLANNED" || d.Status == "CONFIRMED" || d.Status == "DELIVERED" || d.Status == "COLLECTED")) ||
+                !db.Set<SubscriptionServiceDay>().Any(d => d.OrderId == x.Id) &&
+                x.StartDate <= day && x.EndDate >= day && x.DeliveryDays.Any(d => d.DayOfWeek == weekday));
         }
         var total = await query.CountAsync(ct);
         var orders = await query.OrderByDescending(x => x.PlacedAt).ThenBy(x => x.Id)
@@ -52,7 +64,8 @@ public sealed class StaffOrderService(DietTimeDbContext db, TimeProvider clock, 
         var profileIds = orders.Select(o => o.CustomerProfileId).ToArray();
         var customers = await (from p in db.CustomerProfiles.AsNoTracking() join u in db.Users.AsNoTracking() on p.UserId equals u.Id
             where profileIds.Contains(p.Id) select new { p.Id, Name = p.PreferredName ?? u.UserName ?? "Customer", u.PhoneNumber }).ToDictionaryAsync(x => x.Id, ct);
-        return orders.Select(o => new StaffOrderResponse(OrderService.Map(o, codes), customers.GetValueOrDefault(o.CustomerProfileId)?.Name ?? "Customer",
+        var schedules = await PackageScheduleProjection.LoadAsync(db, orders, clock.GetUtcNow(), ct);
+        return orders.Select(o => new StaffOrderResponse(PackageScheduleProjection.Apply(OrderService.Map(o, codes), schedules[o.Id]), customers.GetValueOrDefault(o.CustomerProfileId)?.Name ?? "Customer",
             customers.GetValueOrDefault(o.CustomerProfileId)?.PhoneNumber, o.StatusHistory.OrderBy(x => x.ChangedAt)
                 .Select(x => new OrderHistoryResponse(x.Id, x.PreviousStatus, x.Status, x.ChangedBy, x.ChangedAt, x.Notes, x.PreviousPaymentStatus, x.PaymentStatus)).ToArray())).ToArray();
     }

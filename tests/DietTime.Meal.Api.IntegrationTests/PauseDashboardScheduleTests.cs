@@ -26,7 +26,7 @@ public sealed partial class UpcomingMealServiceTests
         var response = (await orders.GetDashboardAsync(order.CustomerProfileId, userId, default))!;
         var paused = response.Items.Single(item => item.Id == order.Id).PackageSchedule!;
         var active = response.Items.Single(item => item.Id == other.Id).PackageSchedule!;
-        Assert.Equal("PAUSE_SCHEDULED", paused.DisplayStatus); Assert.False(paused.TomorrowScheduled);
+        Assert.Equal("PAUSED", paused.DisplayStatus); Assert.False(paused.TomorrowScheduled);
         Assert.Equal("ACTIVE", active.DisplayStatus); Assert.True(active.TomorrowScheduled);
         Assert.Equal(command.PauseStartDate, paused.PauseStartDate); Assert.Equal(command.ResumeDate, paused.ResumeDate);
         Assert.Equal(12, paused.RemainingServiceDays); Assert.Equal(12, active.RemainingServiceDays);
@@ -46,7 +46,7 @@ public sealed partial class UpcomingMealServiceTests
         Assert.True((await service.GetTomorrowAsync(order.Id, userId, "en", default))!.IsScheduledForDelivery);
         await service.ReviewChangeRequestAsync(command.CommandId, Guid.NewGuid(), new(true), default);
         var package = await service.GetPackageAsync(order.Id, userId, default);
-        Assert.Equal("PAUSE_SCHEDULED", package.DisplayStatus);
+        Assert.Equal("PAUSED", package.DisplayStatus);
         Assert.Equal("APPROVED", package.PauseApprovalStatus);
         var tomorrow = (await service.GetTomorrowAsync(order.Id, userId, "en", default))!;
         Assert.Equal("NO_DELIVERY", tomorrow.SelectionStatus);
