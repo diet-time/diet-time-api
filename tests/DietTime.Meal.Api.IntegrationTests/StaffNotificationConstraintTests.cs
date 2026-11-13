@@ -39,13 +39,20 @@ public sealed partial class UpcomingMealServiceTests
         Assert.Empty(await db.Set<PackageChangeRequest>().AsNoTracking().ToArrayAsync());
         Assert.Equal(originalSchedule, await ApprovalSchedule(db));
 
-        // Keep the schema correction in this isolated fixture without a standalone script dependency.
+        // Reproduce the manually applied correction inside this disposable database only.
         const string sql = """
             BEGIN;
             SET LOCAL lock_timeout = '5s';
             SET LOCAL statement_timeout = '60s';
             ALTER TABLE public.staff_notification_events DROP CONSTRAINT IF EXISTS ck_staff_notification_event_type;
             ALTER TABLE public.staff_notification_events ADD CONSTRAINT ck_staff_notification_event_type
+                CHECK (event_type IN ('ORDER_RECEIVED','ORDER_APPROVED','ORDER_REJECTED','ORDER_CANCELLED',
+                    'DELIVERY_OVERDUE','DELIVERED','COLLECTED',
+                    'PACKAGE_PAUSE_REQUESTED','PACKAGE_RESUME_REQUESTED',
+                    'PACKAGE_PAUSE_APPROVED','PACKAGE_RESUME_APPROVED',
+                    'PACKAGE_PAUSE_REJECTED','PACKAGE_RESUME_REJECTED')) NOT VALID;
+            ALTER TABLE public.staff_notifications DROP CONSTRAINT IF EXISTS ck_staff_notification_type;
+            ALTER TABLE public.staff_notifications ADD CONSTRAINT ck_staff_notification_type
                 CHECK (event_type IN ('ORDER_RECEIVED','ORDER_APPROVED','ORDER_REJECTED','ORDER_CANCELLED',
                     'DELIVERY_OVERDUE','DELIVERED','COLLECTED',
                     'PACKAGE_PAUSE_REQUESTED','PACKAGE_RESUME_REQUESTED',
@@ -66,6 +73,24 @@ public sealed partial class UpcomingMealServiceTests
         Assert.Single(await fresh.StaffNotificationEvents.Where(e => e.EventType == "PACKAGE_PAUSE_REQUESTED").ToArrayAsync());
         Assert.Equal(originalSchedule, await ApprovalSchedule(fresh));
         await service.ReviewChangeRequestAsync(command.CommandId, userId, new(true), default);
+        // Reproduce the separate worker failure against the legacy inbox check.
+        await fresh.Database.ExecuteSqlRawAsync("""
+            ALTER TABLE public.staff_notifications DROP CONSTRAINT ck_staff_notification_type;
+            ALTER TABLE public.staff_notifications ADD CONSTRAINT ck_staff_notification_type
+                CHECK (event_type IN ('ORDER_RECEIVED','ORDER_APPROVED','ORDER_REJECTED','ORDER_CANCELLED',
+                    'DELIVERY_OVERDUE','DELIVERED','COLLECTED'));
+            """);
+        await using (var worker = Context())
+        {
+            var projectionError = await Assert.ThrowsAsync<PostgresException>(() =>
+                new StaffNotificationService(worker, clock).ProjectAsync(default));
+            Assert.Equal("23514", projectionError.SqlState);
+            Assert.Equal("ck_staff_notification_type", projectionError.ConstraintName);
+        }
+        Assert.Empty(await fresh.StaffNotifications.ToArrayAsync());
+        Assert.All(await fresh.StaffNotificationEvents.AsNoTracking().ToArrayAsync(), e => Assert.Null(e.ProcessedAt));
+        await fresh.Database.ExecuteSqlRawAsync(sql);
+        await fresh.Database.ExecuteSqlRawAsync(sql);
         var inbox = new StaffNotificationService(fresh, clock);
         await inbox.ProjectAsync(default);
         await inbox.ProjectAsync(default);
@@ -78,6 +103,9 @@ public sealed partial class UpcomingMealServiceTests
             fresh.Add(new StaffNotificationEvent { Id = Guid.NewGuid(), OrderId = order.Id,
                 DeduplicationKey = "constraint-test:" + type, EventType = type, CreatedAt = clock.Now });
         await fresh.SaveChangesAsync();
+        await inbox.ProjectAsync(default);
+        foreach (var type in StaffNotificationRules.AdminEvents)
+            Assert.True(await fresh.StaffNotifications.AnyAsync(n => n.EventType == type));
         fresh.Add(new StaffNotificationEvent { Id = Guid.NewGuid(), OrderId = order.Id,
             DeduplicationKey = "invalid-type", EventType = "INVALID", CreatedAt = clock.Now });
         var invalid = await Assert.ThrowsAsync<DbUpdateException>(() => fresh.SaveChangesAsync());

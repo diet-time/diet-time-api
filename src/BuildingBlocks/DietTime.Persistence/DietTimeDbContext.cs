@@ -89,7 +89,9 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
             e.HasOne<Order>().WithMany().HasForeignKey(x=>x.OrderId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<StaffNotification>(e => {
-            e.ToTable("staff_notifications","public");
+            e.ToTable("staff_notifications", "public", table => table.HasCheckConstraint(
+                "ck_staff_notification_type",
+                "event_type IN ('" + string.Join("','", DietTime.Application.StaffNotificationRules.AdminEvents) + "')"));
             e.Property(x=>x.DeduplicationKey).HasMaxLength(150);
             e.Property(x=>x.EventType).HasMaxLength(40);
             e.Property(x=>x.Title).HasMaxLength(200);

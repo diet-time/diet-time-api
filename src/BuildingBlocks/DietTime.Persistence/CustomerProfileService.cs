@@ -31,6 +31,15 @@ public sealed class CustomerProfileService(
         UpsertCustomerProfileRequest request,
         CancellationToken ct)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await AcquireProfileWriteLockAsync(userId, ct);
+        var now = clock.GetUtcNow();
+        var today = DateOnly.FromDateTime(now.UtcDateTime);
+        var profile = await LoadProfileForUpdateAsync(userId, includeDetails: true, ct);
+        // A create-only retry reuses the existing profile without validating discarded answers.
+        if (profile is not null && request.CreateOnly)
+            return new(ToResponse(profile, today), []);
+
         var requestedAllergenIds = request.Allergens
             .Select(x => x.AllergenId)
             .Distinct()
@@ -39,22 +48,17 @@ public sealed class CustomerProfileService(
             .Where(x => requestedAllergenIds.Contains(x.Id) && x.IsActive)
             .ToListAsync(ct);
         var activeAllergenIds = activeAllergens.Select(x => x.Id).ToHashSet();
+        // Retain this customer's recorded allergies when catalogue entries become inactive.
+        // Inactive entries remain unavailable as new selections, including on other profiles.
+        var existingAllergenIds = profile is null ? [] : await db.CustomerProfileAllergens.AsNoTracking()
+            .Where(x => x.CustomerProfileId == profile.Id && requestedAllergenIds.Contains(x.AllergenId))
+            .Select(x => x.AllergenId).ToArrayAsync(ct);
         var invalidAllergenIds = requestedAllergenIds
-            .Where(id => !activeAllergenIds.Contains(id))
+            .Where(id => !activeAllergenIds.Contains(id) && !existingAllergenIds.Contains(id))
             .Order()
             .ToArray();
         if (invalidAllergenIds.Length > 0)
             return new(null, invalidAllergenIds);
-
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        await AcquireProfileWriteLockAsync(userId, ct);
-        var now = clock.GetUtcNow();
-        var today = DateOnly.FromDateTime(now.UtcDateTime);
-        var profile = await LoadProfileForUpdateAsync(userId, includeDetails: true, ct);
-        // The existing per-user transaction lock also serializes first-profile creation.
-        // A retried creation must reuse the winner without resetting its answers or tour setting.
-        if (profile is not null && request.CreateOnly)
-            return new(ToResponse(profile, today), []);
 
         if (profile is null)
         {
