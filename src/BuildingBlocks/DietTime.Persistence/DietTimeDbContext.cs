@@ -78,7 +78,9 @@ public sealed class DietTimeDbContext(DbContextOptions<DietTimeDbContext> option
         AuditEventConfiguration.Configure(b);
         UpcomingMealConfigurations.Configure(b);
         b.Entity<StaffNotificationEvent>(e => {
-            e.ToTable("staff_notification_events","public");
+            e.ToTable("staff_notification_events", "public", table => table.HasCheckConstraint(
+                "ck_staff_notification_event_type",
+                "event_type IN ('" + string.Join("','", DietTime.Application.StaffNotificationRules.AdminEvents) + "')"));
             e.Property(x=>x.DeduplicationKey).HasMaxLength(150);
             e.Property(x=>x.EventType).HasMaxLength(40);
             e.HasIndex(x=>x.DeduplicationKey).IsUnique();

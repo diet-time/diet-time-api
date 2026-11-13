@@ -1004,7 +1004,9 @@ Service-day links reuse /operations/delivery-calendar?date={yyyy-MM-dd}&serviceD
 
 **Database and deployment**
 
-The API requires the existing staff_notification_events outbox and staff_notifications inbox tables, their deduplication and recipient/unread indexes, and the fulfillment audit fields described in the EF mappings. No migration or standalone SQL script is included for these features; schema setup is managed separately. No live database changes were applied during this work.
+The API requires the existing staff_notification_events outbox and staff_notifications inbox tables, their deduplication and recipient/unread indexes, and the fulfillment audit fields described in the EF mappings. Schema setup is managed separately. No live database changes were applied during this work.
+
+If pause submission fails with PostgreSQL `23514` on `staff_notification_events.ck_staff_notification_event_type`, the existing database constraint must be updated by the schema owner to allow all event types in `StaffNotificationRules.AdminEvents`. The legacy constraint omits the six package pause/resume request and decision event types emitted by the API, causing the whole request transaction to roll back. Deploying the API alone does not update an existing database constraint. The EF model includes the check so new databases and PostgreSQL integration tests enforce the same event types. The regression test retains the correction in its isolated database fixture; no standalone SQL script is included, and no live database changes have been applied.
 
 Newly occurring order/fulfillment events are captured after deployment; historical order events are not replayed at installation. Existing overdue service days are detected on the next worker pass. If no staff recipients are assigned when an event is dispatched, it is not later backfilled to newly assigned staff.
 
