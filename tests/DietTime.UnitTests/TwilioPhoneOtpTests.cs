@@ -16,6 +16,7 @@ public sealed class TwilioPhoneOtpTests
         Assert.Equal(200, result.StatusCode);
         Assert.EndsWith("/Verifications", handler.Path);
         Assert.Contains("Channel=whatsapp", handler.Body);
+        Assert.Contains("Locale=en", handler.Body);
         Assert.Contains("To=%2B97455555555", handler.Body);
         Assert.DoesNotContain("Code=", handler.Body);
         Assert.Equal("Basic", handler.Authentication);

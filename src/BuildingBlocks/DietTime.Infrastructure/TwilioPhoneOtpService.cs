@@ -26,7 +26,8 @@ public sealed class TwilioPhoneOtpService(
     public async Task<PhoneOtpSendResult> SendAsync(string phoneNumber, CancellationToken ct)
     {
         if (!Configured()) return new(503);
-        var result = await PostAsync("Verifications", new() { ["To"] = phoneNumber, ["Channel"] = "whatsapp" }, ct);
+        // Keep login messages in English instead of deriving the language from the country code.
+        var result = await PostAsync("Verifications", new() { ["To"] = phoneNumber, ["Channel"] = "whatsapp", ["Locale"] = "en" }, ct);
         if (result.StatusCode != 200) return new(result.StatusCode);
         if (result.Status != "pending" || result.To != phoneNumber || result.Channel != "whatsapp" ||
             !Regex.IsMatch(result.Sid ?? "", @"\AVE[0-9a-fA-F]{32}\z")) return new(503);
