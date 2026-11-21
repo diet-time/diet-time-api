@@ -230,6 +230,22 @@ builder.Services.AddScoped<AuditRequestCapture>();
 builder.Services.AddScoped<AuditEventWriter>();
 builder.Services.AddScoped<AuditResultFilter>();
 builder.Services.AddControllers(o => { o.Filters.AddService<AuditResultFilter>(); o.Filters.AddService<PerformanceActionFilter>(); }).AddJsonOptions(o => { o.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull; o.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(new UpperCaseJsonNamingPolicy())); });
+builder.Services.PostConfigure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(options =>
+{
+    var defaultResponse = options.InvalidModelStateResponseFactory;
+    options.InvalidModelStateResponseFactory = context =>
+    {
+        if (context.ActionDescriptor is Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor action &&
+            action.ControllerTypeInfo.AsType() == typeof(DietTime.Meal.Api.Controllers.PhoneOtpDeliveryController))
+        {
+            // Validation messages and model keys can contain submitted values; log counts only.
+            context.HttpContext.RequestServices.GetRequiredService<ILogger<DietTime.Meal.Api.Controllers.PhoneOtpDeliveryController>>()
+                .LogWarning("OTP request rejected before controller execution. Reason=InvalidRequestBody ValidationErrorCount={ValidationErrorCount}",
+                    context.ModelState.ErrorCount);
+        }
+        return defaultResponse(context);
+    };
+});
 builder.Services.AddApiVersioning(o => { o.DefaultApiVersion = new(1); o.AssumeDefaultVersionWhenUnspecified = true; o.ReportApiVersions = true; o.ApiVersionReader = new UrlSegmentApiVersionReader(); }).AddMvc().AddApiExplorer(o => { o.GroupNameFormat = "'v'VVV"; o.SubstituteApiVersionInUrl = true; });
 builder.Services.AddEndpointsApiExplorer(); builder.Services.AddSwaggerGen(o => { o.SwaggerDoc("v1", new() { Title = "Diet Time Meal API", Version = "v1", Description = "Localized meal catalogue, plan selection, and administration API." }); o.AddSecurityDefinition("Bearer", new() { Type = SecuritySchemeType.Http, Scheme = "bearer", BearerFormat = "JWT", Description = "JWT access token" }); o.OperationFilter<AuthorizeOperationFilter>(); var xml = Path.Combine(AppContext.BaseDirectory, "DietTime.Meal.Api.xml"); if (File.Exists(xml)) o.IncludeXmlComments(xml); });
 builder.Services.AddProblemDetails(); builder.Services.AddHealthChecks().AddDbContextCheck<DietTimeDbContext>("postgresql");

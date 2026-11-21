@@ -2,19 +2,28 @@ using DietTime.Application;
 using DietTime.Domain;
 using DietTime.Persistence;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using System.Text.RegularExpressions;
 
 namespace DietTime.Infrastructure;
 
 public sealed class PhoneOtpAuthenticationService(DietTimeDbContext db, IPhoneOtpProvider provider,
-    OtpAuthenticationOptions options, TimeProvider clock) : IPhoneOtpAuthenticationService
+    OtpAuthenticationOptions options, TimeProvider clock,
+    ILogger<PhoneOtpAuthenticationService>? logger = null) : IPhoneOtpAuthenticationService
 {
     private string Mode => options.IsTestAuthentication ? "TEST" : "LIVE";
     private bool Allowed(string phone) => !options.IsTestAuthentication || options.AllowedTestNumbers.Contains(phone);
 
     public async Task<PhoneOtpSendResult> SendAsync(string phoneNumber, CancellationToken ct)
     {
-        if (!PhoneOtpNumbers.TryNormalize(phoneNumber, out var phone) || !Allowed(phone)) return new(400);
+        if (!PhoneOtpNumbers.TryNormalize(phoneNumber, out var phone)) {
+            logger?.LogWarning("OTP request rejected before provider call. Reason=InvalidInternationalPhone");
+            return new(400);
+        }
+        if (!Allowed(phone)) {
+            logger?.LogWarning("OTP request rejected before provider call. Reason=TestNumberNotAllowlisted Mode={Mode}", Mode);
+            return new(400);
+        }
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         // Serializes both first-time inserts and existing challenges across API replicas.
         await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({phone}, 42761))", ct);
@@ -46,6 +55,7 @@ public sealed class PhoneOtpAuthenticationService(DietTimeDbContext db, IPhoneOt
                 return new(503);
             }
         }
+        logger?.LogInformation("OTP provider send starting. Mode={Mode}", Mode);
         var sent = await provider.SendAsync(phone, ct);
         if (sent.StatusCode != 200 || string.IsNullOrEmpty(sent.RequestId)) {
             // A send failure (including an ambiguous timeout) invalidates the local challenge.
