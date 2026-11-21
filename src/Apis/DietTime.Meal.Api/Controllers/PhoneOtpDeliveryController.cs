@@ -2,6 +2,7 @@ using Asp.Versioning;
 using DietTime.Application;
 using DietTime.Contracts;
 using DietTime.Infrastructure;
+using DietTime.Meal.Api.Middleware;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -22,13 +23,21 @@ public sealed class PhoneOtpDeliveryController(IPhoneOtpAuthenticationService ot
         var validPhone = PhoneOtpNumbers.TryNormalize(request.PhoneNumber, out var phone);
         var validChannel = request.Channel == "whatsapp";
         if (!validPhone || !validChannel) {
+            OtpRequestDiagnostics.SetReason(HttpContext, !validPhone && !validChannel ? "InvalidPhoneAndChannel" :
+                !validPhone ? "InvalidInternationalPhone" : "InvalidWhatsAppChannel");
             logger?.LogWarning("OTP request rejected before provider call. Reason=InvalidInput ValidInternationalPhone={ValidPhone} WhatsAppChannel={ValidChannel}",
                 validPhone, validChannel);
             return BadRequest(new ProblemDetails { Title = "Enter a valid international phone number and use WhatsApp." });
         }
+        OtpRequestDiagnostics.SetReason(HttpContext, "AuthenticationProcessing");
         logger?.LogInformation("OTP request accepted for processing.");
         var result = await otp.SendAsync(phone, ct);
         if (result.StatusCode != 200) {
+            OtpRequestDiagnostics.SetReason(HttpContext, result.StatusCode switch {
+                400 => "AuthenticationRejected",
+                429 => "CooldownOrAttemptLimit",
+                _ => "AuthenticationServiceUnavailable"
+            });
             logger?.LogWarning("OTP request failed. HttpStatus={HttpStatus} RetryAfterSeconds={RetryAfterSeconds}",
                 result.StatusCode, result.RetryAfterSeconds);
             if (result.RetryAfterSeconds > 0) Response.Headers["Retry-After"] = result.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -40,6 +49,7 @@ public sealed class PhoneOtpDeliveryController(IPhoneOtpAuthenticationService ot
                 }
             });
         }
+        OtpRequestDiagnostics.SetReason(HttpContext, "Sent");
         logger?.LogInformation("OTP request completed successfully.");
         return Ok(ApiResponse<PhoneOtpDeliveryResponse>.Ok(new(result.RequestId!, result.ExpiresInSeconds, result.ResendAfterSeconds)));
     }

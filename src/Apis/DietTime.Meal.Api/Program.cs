@@ -238,6 +238,7 @@ builder.Services.PostConfigure<Microsoft.AspNetCore.Mvc.ApiBehaviorOptions>(opti
         if (context.ActionDescriptor is Microsoft.AspNetCore.Mvc.Controllers.ControllerActionDescriptor action &&
             action.ControllerTypeInfo.AsType() == typeof(DietTime.Meal.Api.Controllers.PhoneOtpDeliveryController))
         {
+            OtpRequestDiagnostics.SetReason(context.HttpContext, "InvalidRequestBody");
             // Validation messages and model keys can contain submitted values; log counts only.
             context.HttpContext.RequestServices.GetRequiredService<ILogger<DietTime.Meal.Api.Controllers.PhoneOtpDeliveryController>>()
                 .LogWarning("OTP request rejected before controller execution. Reason=InvalidRequestBody ValidationErrorCount={ValidationErrorCount}",
@@ -260,14 +261,25 @@ builder.Services.AddRateLimiter(o =>
 });
 
 var app = builder.Build();
-_ = app.Services.GetRequiredService<OtpAuthenticationOptions>(); // Validate before accepting requests.
+var otpConfiguration = app.Services.GetRequiredService<OtpAuthenticationOptions>(); // Validate before accepting requests.
 var whatsappConfiguration = app.Services.GetRequiredService<IOptions<TwilioWhatsAppOptions>>().Value;
 var whatsappChecks = whatsappConfiguration.ConfigurationChecks();
 app.Logger.LogInformation(
     "Twilio WhatsApp runtime configuration. Enabled={Enabled} ConfigurationComplete={ConfigurationComplete} InvalidOrMissingSettings={InvalidOrMissingSettings}",
     whatsappConfiguration.Enabled, whatsappChecks.Values.All(valid => valid),
     string.Join(",", whatsappChecks.Where(check => !check.Value).Select(check => check.Key)));
-app.UseMiddleware<CorrelationIdMiddleware>(); app.UseMiddleware<PerformanceRequestMiddleware>(); app.UseSerilogRequestLogging(); app.UseMiddleware<RequestAuditMiddleware>(); app.UseMiddleware<ExceptionMiddleware>(); app.UseMiddleware<SecurityHeadersMiddleware>(); app.UseRateLimiter();
+app.UseMiddleware<CorrelationIdMiddleware>(); app.UseMiddleware<PerformanceRequestMiddleware>();
+app.UseSerilogRequestLogging(options =>
+{
+    options.MessageTemplate = "HTTP {RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000} ms {OtpDiagnostic:l}";
+    options.EnrichDiagnosticContext = (diagnosticContext, context) =>
+    {
+        var summary = OtpRequestDiagnostics.Summary(context);
+        if (summary.Length > 0) summary += otpConfiguration.IsTestAuthentication ? " Mode=TEST" : " Mode=LIVE";
+        diagnosticContext.Set("OtpDiagnostic", summary);
+    };
+});
+app.UseMiddleware<RequestAuditMiddleware>(); app.UseMiddleware<ExceptionMiddleware>(); app.UseMiddleware<SecurityHeadersMiddleware>(); app.UseRateLimiter();
 if (!app.Environment.IsProduction()) { app.UseSwagger(); app.UseSwaggerUI(o => o.SwaggerEndpoint("/swagger/v1/swagger.json", "Diet Time Meal API v1")); }
 app.UseCors("Flutter"); if (!app.Environment.IsDevelopment()) app.UseHttpsRedirection(); app.UseAuthentication(); app.UseAuthorization(); app.MapControllers(); app.MapHealthChecks("/health");
 app.Lifetime.ApplicationStarted.Register(() => app.Logger.LogInformation(

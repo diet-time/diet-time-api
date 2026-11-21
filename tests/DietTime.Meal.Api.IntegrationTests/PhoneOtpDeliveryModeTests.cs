@@ -1,5 +1,6 @@
 using DietTime.Application;
 using DietTime.Meal.Api.Controllers;
+using DietTime.Meal.Api.Middleware;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -7,6 +8,40 @@ namespace DietTime.Meal.Api.IntegrationTests;
 
 public sealed class PhoneOtpDeliveryModeTests
 {
+    [Theory]
+    [InlineData("97455555555", "whatsapp", "InvalidInternationalPhone")]
+    [InlineData("+97455555555", "SMS-private-submitted-value", "InvalidWhatsAppChannel")]
+    public async Task Rejection_diagnostic_is_available_to_request_logging_without_submitted_values(
+        string phone, string channel, string reason)
+    {
+        var service = new Stub(new(200, "opaque-request"));
+        var context = new DefaultHttpContext();
+        context.Request.Method = "POST";
+        context.Request.Path = "/api/v1/auth/phone-otp/request";
+        var controller = new PhoneOtpDeliveryController(service) {
+            ControllerContext = new() { HttpContext = context }
+        };
+
+        Assert.IsType<BadRequestObjectResult>(await controller.RequestCode(new(phone, channel), default));
+        var diagnostic = OtpRequestDiagnostics.Summary(context);
+        Assert.Contains("OtpDiagnostics=v2", diagnostic);
+        Assert.Contains("Reason=" + reason, diagnostic);
+        Assert.DoesNotContain(phone, diagnostic);
+        Assert.DoesNotContain(channel, diagnostic);
+        Assert.Null(service.Phone);
+    }
+
+    [Fact]
+    public void Request_logging_reports_rejection_even_when_controller_does_not_execute()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Method = "POST";
+        context.Request.Path = "/api/v1/auth/phone-otp/request";
+        context.Response.StatusCode = 400;
+
+        Assert.Contains("Reason=RejectedBeforeOtpAction", OtpRequestDiagnostics.Summary(context));
+    }
+
     [Fact]
     public async Task Request_contract_normalizes_number_and_returns_no_OTP()
     {
